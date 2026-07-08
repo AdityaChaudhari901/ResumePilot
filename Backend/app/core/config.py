@@ -27,6 +27,14 @@ class Settings(BaseSettings):
         default_factory=lambda: Path.home() / ".resumepilot", alias="RESUMEPILOT_DATA_DIR"
     )
     max_upload_bytes: int = Field(default=5 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
+    data_retention_days: int | None = Field(default=None, ge=1, alias="DATA_RETENTION_DAYS")
+    enable_job_browser_fallback: bool = Field(default=True, alias="ENABLE_JOB_BROWSER_FALLBACK")
+    job_browser_timeout_ms: int = Field(
+        default=8000,
+        ge=1000,
+        le=30000,
+        alias="JOB_BROWSER_TIMEOUT_MS",
+    )
     jobcopilot_api_token: str | None = Field(default=None, alias="JOBCOPILOT_API_TOKEN")
     openclaw_sender_allowlist_raw: str = Field(default="", alias="OPENCLAW_SENDER_ALLOWLIST")
     llm_provider: str = Field(default="vertex", alias="LLM_PROVIDER")
@@ -62,6 +70,13 @@ class Settings(BaseSettings):
     @classmethod
     def expand_data_dir(cls, value: Path) -> Path:
         return value.expanduser().resolve()
+
+    @field_validator("data_retention_days", mode="before")
+    @classmethod
+    def normalize_optional_int(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
 
     @field_validator("llm_provider", "vertex_region", "llm_model")
     @classmethod

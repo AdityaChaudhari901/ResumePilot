@@ -22,6 +22,10 @@
 - OpenClaw endpoint -> report
 - invalid token -> 401
 - report trace includes workflow mode, step statuses, and timing telemetry
+- audit events are written without raw resume/job text
+- delete resume/report removes private local data
+- retention purge honors `DATA_RETENTION_DAYS`
+- browser fallback is used only for short public pages, not blocked pages
 - blocked scrape -> paste fallback message
 
 ### Agent tests

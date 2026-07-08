@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, evidence-backed DOCX, LaTeX, and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -34,8 +34,10 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/schemas/agent.py`
   - `Backend/app/services/*.py`
   - `Backend/app/services/agent_workflow.py`
+  - `Backend/app/services/audit_service.py`
   - `Backend/app/services/crewai_workflow.py`
   - `Backend/app/services/provider_pricing.py`
+  - `Backend/app/services/privacy_service.py`
   - `Backend/app/services/docx_resume_renderer.py`
   - `Backend/app/services/latex_resume_renderer.py`
   - `Backend/app/services/pdf_resume_compiler.py`
@@ -44,6 +46,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/migrations/*.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
+  - `Backend/tests/test_audit_privacy_api.py`
   - `Backend/tests/test_backend_quality_gate.py`
   - `Backend/tests/test_docx_resume_renderer.py`
   - `Backend/tests/test_latex_resume_renderer.py`
@@ -112,7 +115,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Migrations | Alembic |
 | Resume parsing | pypdf, python-docx, TXT, Markdown |
 | Job parsing | requests, BeautifulSoup, readability-lxml |
-| Browser fallback | Playwright, only when needed |
+| Browser fallback | Python Playwright Chromium, only for short public pages after normal fetch |
 | Agent orchestration | CrewAI |
 | LLM provider layer | CrewAI config or LiteLLM-compatible wrapper |
 | Reports | JSON, Markdown, editable DOCX, LaTeX `.tex`, and compiled PDF resume export |
@@ -280,6 +283,19 @@ Completed evidence-backed DOCX resume export slice:
 - Added focused renderer/API tests and Playwright export assertions for DOCX package/content-type/attachment behavior.
 - Updated README files, MVP docs, security notes, testing docs, and this context file for the new editable export behavior.
 
+Completed MVP audit, privacy, and URL fallback slice:
+
+- Added sanitized audit event service/repository/schema support around the existing `audit_events` table.
+- Added `GET /audit/events` for local audit inspection with redaction of raw resume text, raw job text, email, phone, tokens, and secrets.
+- Logged sanitized audit events for resume upload/reuse, job analysis, Markdown/DOCX/LaTeX/PDF exports, report deletion, resume deletion, and retention purges.
+- Added `DELETE /reports/{report_id}` to remove one analysis/report and its orphan job when no other analysis references it.
+- Added `DELETE /resumes/{resume_id}` to remove a resume, associated reports, orphan jobs, and the stored uploaded resume file.
+- Added `DATA_RETENTION_DAYS` and `POST /retention/purge` to purge expired resumes, reports, orphan jobs, and uploaded files when retention is configured.
+- Added optional Python Playwright Chromium fallback for public JavaScript-rendered job pages that return too little readable text after a normal `requests` fetch.
+- Preserved the paste fallback for blocked, private, or rate-limited job URLs and documented that browser fallback must not bypass auth/paywalls.
+- Added focused tests for audit redaction, delete behavior, retention purge, settings parsing, and browser fallback routing.
+- Updated backend README, MVP docs, security/testing docs, dependency constraints, and this context file for the completed MVP controls.
+
 Completed backend Python 3.12 runtime and dependency lock slice:
 
 - Added root `.python-version` with Python `3.12.13`.
@@ -335,7 +351,7 @@ Completed dashboard Playwright browser smoke slice:
 
 Next implementation scope:
 
-- Add saved export history, richer export management, live-provider latency/cost aggregation in the backend quality gate, and screenshot baseline or accessibility checks for the dashboard.
+- Add saved export history, richer export management, live-provider latency/cost aggregation in the backend quality gate, screenshot baseline/accessibility checks for the dashboard, and optional UI controls for audit/deletion workflows.
 
 ## Known Gaps
 
@@ -346,6 +362,7 @@ Next implementation scope:
 - PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
 - Workflow trace cost estimates currently cover only the configured Vertex global standard `google/gemini-3.5-flash` path; additional provider/model/region rates must be added before other traces can emit cost.
 - DOCX export has structural package and browser download coverage; pixel-level DOCX render QA requires installing `pdf2image` plus LibreOffice/`soffice` on this machine.
+- Python Playwright fallback requires `python -m playwright install chromium` on environments that need JavaScript-rendered public job page fetches.
 - Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
 - Playwright browser smoke is implemented locally; CI browser execution, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
@@ -359,20 +376,23 @@ Latest verification run: 2026-07-08
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
 | TeX compiler | `tectonic --version` | Passed: `Tectonic 0.16.9` |
-| Tests | `Backend/.venv/bin/pytest Backend` | Passed: 35 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `Backend/.venv/bin/pytest Backend` | Passed: 43 passed, 1 Starlette/httpx deprecation warning |
+| Audit/privacy/browser fallback focused tests | `Backend/.venv/bin/pytest Backend/tests/test_audit_privacy_api.py Backend/tests/test_job_parser.py Backend/tests/test_settings.py Backend/tests/test_analysis_api.py` | Passed: 16 passed, 1 Starlette/httpx deprecation warning |
 | DOCX export focused tests | `Backend/.venv/bin/pytest Backend/tests/test_docx_resume_renderer.py Backend/tests/test_analysis_api.py` | Passed: 6 passed, 1 Starlette/httpx deprecation warning |
 | Report export focused tests | `cd Backend && .venv/bin/pytest tests/test_pdf_resume_compiler.py tests/test_analysis_api.py tests/test_settings.py` | Passed: 10 passed, 1 Starlette/httpx deprecation warning |
-| Backend trace timing coverage | `Backend/.venv/bin/pytest Backend` | Passed: workflow trace timing assertions covered in full backend run, 35 passed |
+| Backend trace timing coverage | `Backend/.venv/bin/pytest Backend` | Passed: workflow trace timing assertions covered in full backend run, 43 passed |
 | Backend runtime pricing focused tests | `cd Backend && .venv/bin/pytest tests/test_provider_pricing.py tests/test_agent_workflow.py tests/test_analysis_api.py` | Passed: 14 passed, 1 Starlette/httpx deprecation warning |
-| Lint | `Backend/.venv/bin/ruff format Backend/app Backend/tests Backend/scripts Backend/migrations --check` and `Backend/.venv/bin/ruff check Backend` | Passed: 70 files already formatted, all checks passed |
+| Python Playwright package | `Backend/.venv/bin/python -m playwright --version` | Passed: `Version 1.61.0` |
+| Backend editable install | `Backend/.venv/bin/python -m pip install -e "Backend[dev]" -c Backend/requirements/py312-dev-ai.constraints.txt && Backend/.venv/bin/python -m pip check` | Passed: installed Playwright `1.61.0`, `pyee 13.0.1`, `greenlet 3.5.3`; no broken requirements |
+| Lint | `Backend/.venv/bin/ruff format Backend/app Backend/tests Backend/scripts Backend/migrations --check` and `Backend/.venv/bin/ruff check Backend` | Passed: 78 files already formatted, all checks passed |
 | Compile | `Backend/.venv/bin/python -m compileall Backend/app Backend/tests Backend/scripts` | Passed |
 | CI workflow YAML parse | `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "yaml ok"'` | Passed: `yaml ok` |
 | CI-style backend dev install | `cd Backend && VENV_DIR=.local/venvs/ci-dev-check INSTALL_EXTRAS=dev scripts/bootstrap_py312.sh --recreate` | Passed: Python 3.12.13, constrained `.[dev]` install, `pip check` passed |
 | CI-style backend tests | `cd Backend && .local/venvs/ci-dev-check/bin/pytest` | Passed: 34 passed, 1 Starlette/httpx deprecation warning |
 | CI-style backend quality gate | `cd Backend && .local/venvs/ci-dev-check/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, avg 2.27 ms, p95 2.78 ms |
-| Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
+| Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/privacy-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `Backend/.venv/bin/python Backend/scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, avg 3.54 ms, p95 9.29 ms |
+| Backend quality gate | `Backend/.venv/bin/python Backend/scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, avg 2.74 ms, p95 3.58 ms |
 | DOCX package generation | `Backend/.venv/bin/python - <<'PY' ... render_tailored_resume_docx(...) ... PY` | Passed: generated `/tmp/resumepilot-docx-sample.docx`, 37266 bytes, ZIP package prefix |
 | DOCX visual render QA | `Backend/.venv/bin/python /Users/adityachaudhari/.codex/plugins/cache/openai-primary-runtime/documents/26.630.12135/skills/documents/render_docx.py /tmp/resumepilot-docx-sample.docx --output_dir /tmp/resumepilot-docx-render --emit_pdf` | Blocked: `pdf2image` missing from the backend venv and LibreOffice/`soffice` is not installed |
 | Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
@@ -520,6 +540,11 @@ Latest verification run: 2026-07-08
 - Added a dashboard DOCX download action beside Markdown, DOCX, LaTeX, and PDF exports.
 - Added renderer, API, and Playwright coverage for DOCX export package, headers, and link visibility.
 - Updated README files, MVP docs, security notes, testing docs, and this context file for editable DOCX export behavior.
+- Added sanitized audit event logging and `GET /audit/events` for local audit inspection.
+- Added `DELETE /reports/{report_id}`, `DELETE /resumes/{resume_id}`, and `POST /retention/purge` privacy controls.
+- Added `DATA_RETENTION_DAYS`, `ENABLE_JOB_BROWSER_FALLBACK`, and `JOB_BROWSER_TIMEOUT_MS` settings.
+- Added optional Python Playwright Chromium fallback for public JavaScript-rendered job URLs while preserving paste fallback for blocked/private/rate-limited pages.
+- Updated backend dependency constraints, README files, MVP docs, security/testing docs, and this context file for the audit/privacy/browser fallback slice.
 
 ## Maintenance Rule
 

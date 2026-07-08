@@ -12,6 +12,7 @@ from app.schemas.job import JobAnalysisRequest, JobAnalysisResponse, JobProfile
 from app.schemas.report import ApplicationReport
 from app.schemas.resume import ResumeProfile
 from app.services.agent_workflow import run_application_agent_workflow
+from app.services.audit_service import record_audit_event
 from app.services.docx_resume_renderer import render_tailored_resume_docx
 from app.services.file_storage import StoredUpload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
@@ -32,6 +33,15 @@ def create_resume_from_upload(db: Session, upload: StoredUpload) -> ResumeRecord
     resumes = ResumeRepository(db)
     existing = resumes.get_by_file_hash(upload.file_hash)
     if existing:
+        record_audit_event(
+            db,
+            event_type="resume.reused",
+            payload={
+                "resume_id": existing.id,
+                "file_extension": existing.file_extension,
+                "content_type": existing.content_type,
+            },
+        )
         return existing
 
     raw_text = extract_resume_text(upload.content, upload.extension)
@@ -50,7 +60,18 @@ def create_resume_from_upload(db: Session, upload: StoredUpload) -> ResumeRecord
 
     profile.resume_id = record.id
     record.profile_json = profile.model_dump(mode="json")
-    return resumes.save(record)
+    saved = resumes.save(record)
+    record_audit_event(
+        db,
+        event_type="resume.uploaded",
+        payload={
+            "resume_id": saved.id,
+            "file_extension": saved.file_extension,
+            "content_type": saved.content_type,
+            "warnings_count": len(profile.warnings),
+        },
+    )
+    return saved
 
 
 def analyze_job(
@@ -68,7 +89,7 @@ def analyze_job(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
 
     resume = ResumeProfile.model_validate(resume_record.profile_json)
-    raw_job_text = _job_text_from_request(request)
+    raw_job_text = _job_text_from_request(request, resolved_settings)
     content_hash = job_content_hash(raw_job_text)
     job_record = _create_job_record(jobs, raw_job_text, content_hash, request)
     job = JobProfile.model_validate(job_record.profile_json)
@@ -105,6 +126,20 @@ def analyze_job(
     analysis_record.workflow_mode = workflow_result.trace.mode.value
     analysis_record.workflow_trace_json = workflow_result.trace.model_dump(mode="json")
     analyses.save(analysis_record)
+    record_audit_event(
+        db,
+        event_type="job.analyzed",
+        payload={
+            "analysis_id": analysis_record.id,
+            "report_id": analysis_record.id,
+            "resume_id": resume_record.id,
+            "job_id": job_record.id,
+            "source": "url" if request.job_url else "paste",
+            "workflow_mode": analysis_record.workflow_mode,
+            "match_score": analysis_record.match_score,
+            "validation_warnings_count": len(report.validation_warnings),
+        },
+    )
 
     return JobAnalysisResponse(
         analysis_id=analysis_record.id,
@@ -193,11 +228,11 @@ def get_tailored_resume_pdf(db: Session, report_id: int, settings: Settings) -> 
         ) from exc
 
 
-def _job_text_from_request(request: JobAnalysisRequest) -> str:
+def _job_text_from_request(request: JobAnalysisRequest, settings: Settings) -> str:
     if request.job_text:
         return request.job_text
     if request.job_url:
-        return fetch_job_text(str(request.job_url))
+        return fetch_job_text(str(request.job_url), settings=settings)
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Either job_text or job_url is required"
     )

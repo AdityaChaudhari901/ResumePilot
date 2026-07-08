@@ -396,7 +396,7 @@ flowchart TD
     ResumeProfile --> DB[(SQLite/PostgreSQL)]
 
     ChatAPI --> JobIngest[Job Ingestion Service]
-    JobIngest --> Fetcher[URL Fetcher / Paste Fallback]
+    JobIngest --> Fetcher[URL Fetcher / Optional Browser Fallback / Paste Fallback]
     Fetcher --> JDParser[JD Parser]
     JDParser --> JobProfile[Structured JobProfile]
     JobProfile --> DB
@@ -435,7 +435,7 @@ flowchart TD
 2. OpenClaw routes command to local skill.
 3. Skill calls FastAPI `/chat/openclaw`.
 4. Backend authenticates token and sender.
-5. Job ingestion fetches URL or asks for pasted text if blocked.
+5. Job ingestion fetches URL, uses browser fallback only for public JavaScript-rendered pages, or asks for pasted text if blocked.
 6. JD parser creates `JobProfile`.
 7. Matching engine compares resume and JD.
 8. CrewAI Flow runs bounded agents.
@@ -466,6 +466,10 @@ Response:
   "status": "parsed",
   "warnings": []
 }
+```
+
+```http
+DELETE /resumes/{resume_id}
 ```
 
 ### Job analysis
@@ -524,6 +528,7 @@ GET /reports/{report_id}/trace
 GET /reports/{report_id}/resume/latex
 GET /reports/{report_id}/resume/docx
 GET /reports/{report_id}/resume/pdf
+DELETE /reports/{report_id}
 ```
 
 The trace endpoint returns the workflow mode, step statuses, step summaries,
@@ -534,6 +539,17 @@ when a configured provider/model/region pricing source matches the trace, and
 runtime metadata describing the pricing source. These fields are additive
 observability metadata; they must not change the evidence-first report content
 and older persisted traces without the optional fields remain valid.
+
+### Audit and retention
+
+```http
+GET /audit/events
+POST /retention/purge
+```
+
+Audit events store sanitized metadata for uploads, analyses, exports, deletes,
+and retention purges. Retention purge is controlled by `DATA_RETENTION_DAYS`
+and removes expired resumes, reports, orphan jobs, and uploaded files.
 
 ## Data model
 
@@ -1668,9 +1684,17 @@ MVP settings:
 
 - local storage only
 - delete resume endpoint
-- delete analysis endpoint
+- delete report/analysis endpoint
 - configurable retention period
+- sanitized audit events for upload, analysis, export, delete, and retention actions
 - no training on user data unless explicitly configured by provider policy and user consent
+
+Retention controls:
+
+- `DELETE /resumes/{resume_id}` removes the resume, associated reports, orphan jobs, and uploaded file.
+- `DELETE /reports/{report_id}` removes one report and its orphan job when no other analysis references it.
+- `POST /retention/purge` uses `DATA_RETENTION_DAYS`; blank or unset disables automatic purge decisions.
+- Audit payloads must not store raw resume text, raw job text, email, phone, tokens, or secrets.
 
 ### Secret management
 
@@ -1719,7 +1743,7 @@ Requires explicit confirmation:
 | OpenClaw unauthorized command | token auth, sender allowlist |
 | Malicious uploaded file | file type/size limits, no execution |
 | Unsafe PDF compilation | generated-only LaTeX, text escaping, no shell, no shell escape, timeout and size limits |
-| Scraping blocked site | paste fallback; do not bypass auth/paywalls |
+| Scraping blocked site | paste fallback; do not bypass auth/paywalls; browser fallback only after a public 200 response has too little readable text |
 | Rate-limit abuse | request limits, queue, quotas |
 | Multi-user data mixing | avoid multi-tenant MVP; add auth before V1 |
 
@@ -2094,6 +2118,10 @@ Exit criteria:
 - OpenClaw endpoint -> report
 - invalid token -> 401
 - report trace includes workflow mode, step statuses, and timing telemetry
+- audit events are written without raw resume/job text
+- delete resume/report removes private local data
+- retention purge honors `DATA_RETENTION_DAYS`
+- browser fallback is used only for short public pages, not blocked pages
 - blocked scrape -> paste fallback message
 
 ### Agent tests

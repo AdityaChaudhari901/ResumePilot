@@ -1,4 +1,6 @@
 import re
+from contextlib import suppress
+from typing import TYPE_CHECKING
 
 import requests
 from bs4 import BeautifulSoup
@@ -10,17 +12,25 @@ from app.services.hashing import sha256_text
 from app.services.skill_normalizer import find_skills
 from app.services.text import clean_text, split_non_empty_lines
 
+if TYPE_CHECKING:
+    from app.core.config import Settings
+
 REQUIRED_MARKERS = ("required", "requirements", "must have", "you have", "need to have")
 PREFERRED_MARKERS = ("preferred", "nice to have", "bonus", "plus", "good to have")
 RESPONSIBILITY_MARKERS = ("responsibilities", "what you will do", "you will", "role includes")
 BENEFIT_MARKERS = ("benefits", "perks", "compensation")
+MIN_FETCHED_TEXT_CHARS = 40
 
 
 class JobParseError(ValueError):
     pass
 
 
-def fetch_job_text(job_url: str) -> str:
+class BrowserFallbackUnavailable(RuntimeError):
+    pass
+
+
+def fetch_job_text(job_url: str, *, settings: "Settings | None" = None) -> str:
     try:
         response = requests.get(
             job_url,
@@ -46,12 +56,23 @@ def fetch_job_text(job_url: str) -> str:
     for element in soup(["script", "style", "noscript"]):
         element.decompose()
     text = clean_text(soup.get_text("\n"))
-    if len(text) < 40:
+    if len(text) < MIN_FETCHED_TEXT_CHARS:
+        if settings and settings.enable_job_browser_fallback:
+            try:
+                browser_text = _fetch_job_text_with_playwright(
+                    job_url,
+                    timeout_ms=settings.job_browser_timeout_ms,
+                )
+            except BrowserFallbackUnavailable:
+                browser_text = ""
+            if len(browser_text) >= MIN_FETCHED_TEXT_CHARS:
+                return browser_text
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "Fetched job page did not contain enough readable text. "
-                "Paste the job description instead."
+                "Paste the job description instead, or install the optional "
+                "Playwright Chromium browser for JavaScript-rendered public pages."
             ),
         )
     return text
@@ -100,6 +121,29 @@ def parse_job_profile(
 
 def job_content_hash(raw_text: str) -> str:
     return sha256_text(clean_text(raw_text))
+
+
+def _fetch_job_text_with_playwright(job_url: str, *, timeout_ms: int) -> str:
+    try:
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise BrowserFallbackUnavailable("Python Playwright package is not installed.") from exc
+
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                page.goto(job_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                with suppress(PlaywrightError):
+                    page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 5000))
+                body_text = page.locator("body").inner_text(timeout=timeout_ms)
+                return clean_text(body_text)
+            finally:
+                browser.close()
+    except PlaywrightError as exc:
+        raise BrowserFallbackUnavailable("Playwright could not render the job URL.") from exc
 
 
 def _extract_company(lines: list[str]) -> str | None:

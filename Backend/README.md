@@ -9,6 +9,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Strict Pydantic contracts.
 - Resume upload for PDF, DOCX, TXT, and Markdown.
 - Pasted job description analysis and public URL fetch support.
+- Optional Playwright Chromium fallback for JavaScript-rendered public job pages.
 - Deterministic skill matching and report generation.
 - CrewAI-ready agent workflow boundary with deterministic fallback.
 - Optional live CrewAI structured-output agents for fit explanation, cover letter drafting, and interview coaching.
@@ -19,6 +20,8 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Evidence-backed LaTeX resume export using the uploaded resume facts and supported tailored bullets.
 - Editable DOCX resume export generated from the same validated report, resume, and job data.
 - Guarded PDF resume export compiled from the same evidence-backed LaTeX source.
+- Sanitized audit event history for uploads, analyses, exports, deletes, and retention purges.
+- Delete and retention purge controls for local resume/report data.
 - API token protection for the OpenClaw endpoint.
 
 ## Local Setup
@@ -44,6 +47,27 @@ PDF size limit is 5 MB:
 ```env
 LATEX_COMPILE_TIMEOUT_SECONDS=20
 LATEX_PDF_MAX_BYTES=5242880
+```
+
+JavaScript-rendered public job pages can use the optional Python Playwright
+fallback after a normal `requests` fetch returns too little readable text. The
+fallback is not used for blocked/private/rate-limited pages. Install Chromium
+locally when you need this path:
+
+```bash
+python -m playwright install chromium
+```
+
+```env
+ENABLE_JOB_BROWSER_FALLBACK=true
+JOB_BROWSER_TIMEOUT_MS=8000
+```
+
+Retention is disabled by default. Set a positive day count and call the purge
+endpoint to remove expired resumes, reports, orphan jobs, and uploaded files:
+
+```env
+DATA_RETENTION_DAYS=30
 ```
 
 ## Optional Live CrewAI Mode
@@ -115,6 +139,7 @@ provider credentials and networked model calls.
 
 - `GET /health`
 - `POST /resumes/upload`
+- `DELETE /resumes/{resume_id}`
 - `POST /jobs/analyze`
 - `GET /reports/{report_id}`
 - `GET /reports/{report_id}/markdown`
@@ -122,6 +147,9 @@ provider credentials and networked model calls.
 - `GET /reports/{report_id}/resume/latex`
 - `GET /reports/{report_id}/resume/docx`
 - `GET /reports/{report_id}/resume/pdf`
+- `DELETE /reports/{report_id}`
+- `GET /audit/events`
+- `POST /retention/purge`
 - `POST /chat/openclaw`
 
 The `/chat/openclaw` endpoint requires:

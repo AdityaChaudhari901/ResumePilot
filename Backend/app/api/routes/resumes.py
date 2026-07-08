@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_settings
 from app.core.config import Settings
+from app.schemas.privacy import ResumeDeleteResponse
 from app.schemas.resume import ResumeProfile, ResumeUploadResponse
 from app.services.analysis_service import create_resume_from_upload
 from app.services.file_storage import store_resume_upload
+from app.services.privacy_service import delete_resume
 
 router = APIRouter(prefix="/resumes", tags=["resumes"])
 
@@ -25,3 +27,12 @@ async def upload_resume(
         status="parsed",
         warnings=profile.warnings,
     )
+
+
+@router.delete("/{resume_id}", response_model=ResumeDeleteResponse)
+def delete_resume_data(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ResumeDeleteResponse:
+    return delete_resume(db, resume_id, settings)

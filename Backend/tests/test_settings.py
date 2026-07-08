@@ -18,6 +18,9 @@ def test_vertex_llm_settings_are_loaded_from_env_names(tmp_path):
         CREWAI_TEMPERATURE=0.1,
         LATEX_COMPILE_TIMEOUT_SECONDS=30,
         LATEX_PDF_MAX_BYTES=10485760,
+        DATA_RETENTION_DAYS=30,
+        ENABLE_JOB_BROWSER_FALLBACK=False,
+        JOB_BROWSER_TIMEOUT_MS=12000,
     )
 
     assert settings.llm_provider == "vertex"
@@ -31,3 +34,17 @@ def test_vertex_llm_settings_are_loaded_from_env_names(tmp_path):
     assert settings.crewai_temperature == 0.1
     assert settings.latex_compile_timeout_seconds == 30
     assert settings.latex_pdf_max_bytes == 10485760
+    assert settings.data_retention_days == 30
+    assert settings.enable_job_browser_fallback is False
+    assert settings.job_browser_timeout_ms == 12000
+
+
+def test_empty_data_retention_days_disables_retention(tmp_path):
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_URL=f"sqlite:///{tmp_path / 'resumepilot-test.db'}",
+        RESUMEPILOT_DATA_DIR=tmp_path / "data",
+        DATA_RETENTION_DAYS="",
+    )
+
+    assert settings.data_retention_days is None
