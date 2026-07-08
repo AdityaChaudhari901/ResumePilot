@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ai = [
-    "crewai[gemini]>=1.15.1,<2.0.0; python_version < '3.14'",
+    "crewai[google-genai]>=1.15.1,<2.0.0; python_version < '3.14'",
 ]
 dev = [
     "httpx>=0.27.0",

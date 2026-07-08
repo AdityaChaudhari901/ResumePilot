@@ -38,6 +38,9 @@ source .venv/bin/activate
 python -m pip install -e ".[dev,ai]"
 ```
 
+The `ai` extra installs CrewAI with the native Google Gen AI provider used by the
+`google/` model prefix.
+
 Then set:
 
 ```env

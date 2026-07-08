@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, optional live CrewAI structured-output workflow adapter with deterministic fallback, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
+- Current state: four-folder workspace created; backend foundation, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -48,6 +48,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local Python observed: Python 3.14.3.
 - `uv` is not currently available in PATH.
 - Local virtual environment created at `Backend/.venv`.
+- Python 3.12 live CrewAI verification environment created under ignored path `Backend/.local/venvs/py312`.
 - Project dependencies are declared in `Backend/pyproject.toml`.
 - Local API server verified on `http://127.0.0.1:8002`.
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
@@ -193,12 +194,21 @@ Completed optional live CrewAI workflow adapter slice:
 - Kept deterministic parsing, matching, ATS bullets/keywords, and final validation as the source of truth.
 - Added safe fallback when CrewAI is missing, provider config is incomplete, or the runtime uses unsupported Python; fallback returns the deterministic report with a `crewai_unavailable` warning.
 - Added backend settings and `.env.example` values for `AGENT_WORKFLOW_MODE`, `CREWAI_LLM_MODEL`, `CREWAI_MAX_ITER`, `CREWAI_TIMEOUT_SECONDS`, and `CREWAI_TEMPERATURE`.
-- Added an optional `ai` dependency extra for `crewai[gemini]` on Python `<3.14`.
+- Added an optional `ai` dependency extra for `crewai[google-genai]` on Python `<3.14`.
 - Routed `/jobs/analyze` and `/chat/openclaw` through app settings so workflow mode is controlled by the active FastAPI configuration.
+
+Completed live CrewAI + Vertex smoke:
+
+- Corrected the backend `ai` optional dependency to `crewai[google-genai]` after CrewAI `1.15.2` reported the required native provider extra for `google/` models.
+- Created a Python 3.12 local verification environment at `Backend/.local/venvs/py312`.
+- Installed the backend with `.[dev,ai]`, including CrewAI `1.15.2` and Google Gen AI SDK `1.65.0`.
+- Verified CrewAI initializes `LLM(model="google/gemini-3.5-flash")` as `GeminiCompletion`.
+- Ran the ResumePilot workflow in `AGENT_WORKFLOW_MODE=crewai`; trace mode returned `crewai` and completed resume match, cover letter, and interview coach agent steps.
+- Ran the real FastAPI HTTP path on `127.0.0.1:8012`; upload, analyze, report JSON, and report Markdown all passed, and three Vertex `generateContent` calls returned HTTP 200.
 
 Next implementation scope:
 
-- Create a Python 3.12 or 3.13 backend environment, install `.[dev,ai]`, and run a live CrewAI + Vertex smoke through `/jobs/analyze`.
+- Persist and expose workflow trace metadata so API responses and the dashboard can show `crewai` versus deterministic fallback execution.
 - Add backend dependency lock when finalizing local Python version/tooling.
 - Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
 
@@ -206,9 +216,9 @@ Next implementation scope:
 
 - Backend dependency lock does not exist yet; frontend `package-lock.json` exists.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
-- Live CrewAI API behavior was implemented against the current official docs, but provider execution still needs a Python 3.12/3.13 smoke test.
 - OpenClaw APIs should be verified against current official docs before live integration.
-- Python 3.14 is installed locally, but CrewAI live mode needs a Python 3.12/3.13 environment for provider-backed execution.
+- Default `Backend/.venv` still uses Python 3.14; live CrewAI verification uses the ignored Python 3.12 environment at `Backend/.local/venvs/py312`.
+- Workflow trace metadata is not yet persisted or exposed through report APIs/dashboard.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
 
 ## Verification Evidence
@@ -246,6 +256,13 @@ Latest verification run: 2026-07-08
 | OpenClaw agent CLI smoke | `openclaw agent --message "/job paste:..." --json` | Passed: Gateway RPC accepted the request and returned a ResumePilot job fit report |
 | CrewAI workflow focused tests | `cd Backend && .venv/bin/pytest tests/test_agent_workflow.py tests/test_settings.py` | Passed: 4 passed, 1 Starlette/httpx deprecation warning |
 | Golden evals after CrewAI adapter | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
+| Python 3.12 AI install | `cd Backend && .local/venvs/py312/bin/python -m pip install -e ".[dev,ai]"` | Passed: CrewAI `1.15.2` and Google Gen AI SDK `1.65.0` installed |
+| Python 3.12 backend tests | `cd Backend && .local/venvs/py312/bin/pytest` | Passed: 17 passed, 1 Starlette/httpx deprecation warning |
+| Python 3.12 lint | `cd Backend && .local/venvs/py312/bin/ruff check .` | Passed |
+| Python 3.12 compile | `cd Backend && .local/venvs/py312/bin/python -m compileall app tests scripts` | Passed |
+| CrewAI Google provider init | `LLM(model="google/gemini-3.5-flash")` under Python 3.12 with Vertex env | Passed: initialized as `GeminiCompletion` |
+| Live CrewAI workflow smoke | `AGENT_WORKFLOW_MODE=crewai ... run_application_agent_workflow(...)` | Passed: trace mode `crewai`, live agent steps completed, no `crewai_unavailable` warning |
+| Live CrewAI API smoke | FastAPI on `127.0.0.1:8012` with upload/analyze/report/markdown HTTP flow | Passed: health 200, upload 201, analyze 200, report 200, markdown 200, no fallback warning, three Vertex `generateContent` calls returned HTTP 200 |
 
 ## Change Log
 
@@ -306,6 +323,9 @@ Latest verification run: 2026-07-08
 - Added an optional live CrewAI structured-output adapter behind `AGENT_WORKFLOW_MODE=crewai`.
 - Added safe deterministic fallback with a `crewai_unavailable` warning for missing CrewAI, unsupported Python, or incomplete provider config.
 - Added backend settings, docs, optional dependency extra, and tests for CrewAI mode success/fallback behavior.
+- Corrected the CrewAI optional dependency to `crewai[google-genai]` for the native Google Gen AI provider.
+- Created the ignored Python 3.12 verification environment at `Backend/.local/venvs/py312` and installed `.[dev,ai]`.
+- Verified live CrewAI + Vertex execution with trace mode `crewai`, no fallback warning, and successful FastAPI upload/analyze/report HTTP flow.
 
 ## Maintenance Rule
 
