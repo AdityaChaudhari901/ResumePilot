@@ -15,8 +15,10 @@ The active implementation is in `Backend/`.
 
 ```bash
 cd Backend
-python3 -m venv .venv
+scripts/bootstrap_py312.sh --recreate
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
 pytest
 ```
+
+The backend runtime is standardized on Python 3.12 because live CrewAI execution
+does not currently support Python 3.14.

@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -39,17 +39,21 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/scripts/run_golden_evals.py`
+  - `Backend/scripts/bootstrap_py312.sh`
+  - `Backend/requirements/py312-dev-ai.constraints.txt`
   - `Backend/evals/resumes/*.md`
   - `Backend/evals/jobs/*.txt`
   - `Ai services/openclaw/workspace/skills/job/SKILL.md`
   - `Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py`
   - `Ai services/openclaw/tests/test_resumepilot_job.py`
 - Verified: both JSON schema files are valid JSON.
-- Local Python observed: Python 3.14.3.
-- `uv` is not currently available in PATH.
-- Local virtual environment created at `Backend/.venv`.
+- System Python observed: Python 3.14.3.
+- Backend runtime standard: Python 3.12.13 via `.python-version` and `Backend/scripts/bootstrap_py312.sh`.
+- `uv` is not currently available in the outer shell PATH; the backend Python 3.12 environment installs pinned `uv==0.11.28` as a CrewAI CLI dependency.
+- Local virtual environment at `Backend/.venv` recreated with Python 3.12.13 and pinned backend dev+AI constraints.
 - Python 3.12 live CrewAI verification environment created under ignored path `Backend/.local/venvs/py312`.
 - Project dependencies are declared in `Backend/pyproject.toml`.
+- Backend dependency constraints are pinned in `Backend/requirements/py312-dev-ai.constraints.txt` and used as pip constraints with editable installs.
 - Local API server verified on `http://127.0.0.1:8002`.
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
 - OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
@@ -215,17 +219,24 @@ Completed workflow trace persistence and dashboard visibility slice:
 - Added API tests for deterministic trace persistence, CrewAI fallback persistence, and mocked CrewAI success persistence.
 - Updated backend/docs API references to include the trace endpoint.
 
+Completed backend Python 3.12 runtime and dependency lock slice:
+
+- Added root `.python-version` with Python `3.12.13`.
+- Tightened backend package metadata to Python `>=3.12,<3.14` so unsupported Python 3.14 installs are rejected before CrewAI setup.
+- Added `Backend/requirements/py312-dev-ai.constraints.txt` generated from the verified Python 3.12 dev+AI environment.
+- Added `Backend/scripts/bootstrap_py312.sh` to create or recreate a Python 3.12 backend virtualenv with the pinned constraints.
+- Recreated the default ignored `Backend/.venv` as Python 3.12.13 using the bootstrap script.
+- Updated root and backend README setup commands to use the Python 3.12 bootstrap path.
+
 Next implementation scope:
 
-- Add backend dependency lock when finalizing local Python version/tooling.
 - Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
 
 ## Known Gaps
 
-- Backend dependency lock does not exist yet; frontend `package-lock.json` exists.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw APIs should be verified against current official docs before live integration.
-- Default `Backend/.venv` still uses Python 3.14; live CrewAI verification uses the ignored Python 3.12 environment at `Backend/.local/venvs/py312`.
+- Backend lock is a pinned pip constraints file, not a hash-locked artifact; add hash locking or container builds before remote production deployment.
 - Workflow trace currently stores mode, step summaries, and validation warning codes; per-step latency/cost telemetry is not persisted yet.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
 - Playwright browser smoke is blocked until Playwright tooling is installed; current dashboard verification uses lint/typecheck/build plus same-origin HTTP proxy smoke.
@@ -236,11 +247,14 @@ Latest verification run: 2026-07-08
 
 | Check | Command | Result |
 |---|---|---|
+| Python runtime | `cd Backend && .venv/bin/python --version && .venv/bin/python -m pip check` | Passed: Python 3.12.13, no broken requirements |
+| Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
+| Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
 | Tests | `cd Backend && .venv/bin/pytest` | Passed: 19 passed, 1 Starlette/httpx deprecation warning |
 | Backend trace focused tests | `cd Backend && .venv/bin/pytest tests/test_analysis_api.py tests/test_agent_workflow.py` | Passed: 6 passed, 1 Starlette/httpx deprecation warning |
-| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations && .venv/bin/ruff check .` | Passed |
+| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 60 files already formatted, all checks passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
-| Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/trace-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
+| Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
 | Live API smoke | Upload sample resume, analyze sample JD, fetch JSON and Markdown reports | Passed: health 200, upload 201, analyze 200, report 200, markdown 200 |
@@ -341,6 +355,9 @@ Latest verification run: 2026-07-08
 - Added a dashboard workflow trace panel for deterministic fallback versus live CrewAI execution status.
 - Added backend API tests for deterministic trace persistence, CrewAI unavailable fallback persistence, and mocked CrewAI success persistence.
 - Verified backend tests, lint, compile, migration, golden evals, frontend lint/typecheck/build, and the same-origin dashboard trace proxy smoke.
+- Added `.python-version` and constrained backend package support to Python `>=3.12,<3.14`.
+- Added Python 3.12 dev+AI dependency constraints and the `bootstrap_py312.sh` setup script.
+- Recreated `Backend/.venv` with Python 3.12.13 and verified tests, lint, compile, migration, golden evals, and `pip check`.
 
 ## Maintenance Rule
 

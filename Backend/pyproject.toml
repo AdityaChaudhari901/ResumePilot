@@ -7,7 +7,7 @@ name = "resumepilot"
 version = "0.1.0"
 description = "Evidence-backed job application copilot built with FastAPI and CrewAI-ready contracts."
 readme = "README.md"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "alembic>=1.14.0",
     "beautifulsoup4>=4.12.3",

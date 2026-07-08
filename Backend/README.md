@@ -20,23 +20,27 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 ## Local Setup
 
 ```bash
-python3 -m venv .venv
+scripts/bootstrap_py312.sh --recreate
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
 cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
 Open Swagger UI at `http://127.0.0.1:8000/docs`.
 
+The backend runtime is pinned to Python `>=3.12,<3.14`. The bootstrap script uses
+`requirements/py312-dev-ai.constraints.txt` so the local dev and live CrewAI
+dependency graph stays reproducible.
+
 ## Optional Live CrewAI Mode
 
-CrewAI currently requires Python `>=3.10,<3.14`, so use Python 3.12 or 3.13 for live agent execution:
+The default bootstrap installs the `dev` and `ai` extras. To run the install
+manually, use Python 3.12 with the pinned constraints:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev,ai]"
+python -m pip install -e ".[dev,ai]" -c requirements/py312-dev-ai.constraints.txt
 ```
 
 The `ai` extra installs CrewAI with the native Google Gen AI provider used by the
