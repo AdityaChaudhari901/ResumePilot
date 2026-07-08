@@ -9,6 +9,9 @@ def validate_report_against_resume(
 ) -> list[ValidationWarning]:
     facts_by_id = {fact.id: fact for fact in resume.facts}
     resume_skill_names = {skill.name for skill in resume.skills}
+    evidence_backed_matched_skill_names = {
+        matched.skill for matched in report.matched_skills if matched.resume_evidence_ids
+    }
     warnings: list[ValidationWarning] = []
 
     for matched in report.matched_skills:
@@ -61,6 +64,40 @@ def validate_report_against_resume(
                 ValidationWarning(
                     code="supported_keyword_missing_evidence",
                     message=f"Supported keyword {keyword.keyword} has no evidence IDs.",
+                )
+            )
+
+    unsupported_cover_letter_skills = [
+        skill
+        for skill in find_skills(report.cover_letter)
+        if skill not in resume_skill_names and skill not in evidence_backed_matched_skill_names
+    ]
+    if unsupported_cover_letter_skills:
+        warnings.append(
+            ValidationWarning(
+                code="cover_letter_has_unsupported_skill",
+                message=(
+                    "Cover letter contains unsupported skills: "
+                    f"{', '.join(unsupported_cover_letter_skills)}."
+                ),
+            )
+        )
+
+    for group in report.interview_questions:
+        missing_ids = [
+            evidence_id
+            for evidence_id in group.suggested_answer_evidence_ids
+            if evidence_id not in facts_by_id
+        ]
+        if missing_ids:
+            warnings.append(
+                ValidationWarning(
+                    code="interview_answer_missing_evidence",
+                    message=(
+                        f"Interview question group {group.category} references unknown "
+                        "answer evidence IDs."
+                    ),
+                    evidence_ids=missing_ids,
                 )
             )
 

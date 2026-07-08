@@ -8,12 +8,12 @@ from app.repositories.resumes import ResumeRepository
 from app.schemas.job import JobAnalysisRequest, JobAnalysisResponse, JobProfile
 from app.schemas.report import ApplicationReport
 from app.schemas.resume import ResumeProfile
+from app.services.agent_workflow import run_application_agent_workflow
 from app.services.file_storage import StoredUpload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
 from app.services.matcher import match_resume_to_job
-from app.services.report_generator import generate_report, report_to_markdown
+from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import extract_resume_text, parse_resume_profile
-from app.services.validator import validate_report_against_resume
 
 
 def create_resume_from_upload(db: Session, upload: StoredUpload) -> ResumeRecord:
@@ -69,10 +69,13 @@ def analyze_job(db: Session, request: JobAnalysisRequest) -> JobAnalysisResponse
     )
     analyses.add(analysis_record)
 
-    report = generate_report(analysis_id=analysis_record.id, resume=resume, job=job, match=match)
-    validation_warnings = validate_report_against_resume(report, resume)
-    if validation_warnings:
-        report.validation_warnings.extend(validation_warnings)
+    workflow_result = run_application_agent_workflow(
+        analysis_id=analysis_record.id,
+        resume=resume,
+        job=job,
+        match=match,
+    )
+    report = workflow_result.report
     markdown = report_to_markdown(report)
 
     analysis_record.status = "completed"

@@ -26,24 +26,11 @@ class Settings(BaseSettings):
     )
     max_upload_bytes: int = Field(default=5 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
     jobcopilot_api_token: str | None = Field(default=None, alias="JOBCOPILOT_API_TOKEN")
-    openclaw_sender_allowlist: list[str] = Field(
-        default_factory=list, alias="OPENCLAW_SENDER_ALLOWLIST"
-    )
+    openclaw_sender_allowlist_raw: str = Field(default="", alias="OPENCLAW_SENDER_ALLOWLIST")
 
     allowed_resume_extensions: frozenset[str] = frozenset(
         {".pdf", ".docx", ".txt", ".md", ".markdown"}
     )
-
-    @field_validator("openclaw_sender_allowlist", mode="before")
-    @classmethod
-    def parse_sender_allowlist(cls, value: object) -> list[str]:
-        if value is None or value == "":
-            return []
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        raise TypeError("OPENCLAW_SENDER_ALLOWLIST must be a comma-separated string or list")
 
     @field_validator("data_dir")
     @classmethod
@@ -57,6 +44,12 @@ class Settings(BaseSettings):
     @property
     def upload_dir(self) -> Path:
         return self.data_dir / "uploads"
+
+    @property
+    def openclaw_sender_allowlist(self) -> list[str]:
+        return [
+            item.strip() for item in self.openclaw_sender_allowlist_raw.split(",") if item.strip()
+        ]
 
 
 @lru_cache

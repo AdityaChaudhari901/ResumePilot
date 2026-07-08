@@ -1,6 +1,6 @@
 # ResumePilot
 
-ResumePilot is an evidence-backed job application copilot built from the CrewAI Job Application Copilot MVP docs. The first implementation slice is deterministic: resume parsing, job parsing, skill matching, validation, and report generation run before any CrewAI writing layer is added.
+ResumePilot is an evidence-backed job application copilot built from the CrewAI Job Application Copilot MVP docs. The backend keeps deterministic resume parsing, job parsing, skill matching, and validation as the source of truth. The current agent workflow is a structured deterministic fallback that mirrors the planned CrewAI sequence until live CrewAI/provider configuration is added.
 
 ## Current MVP Slice
 
@@ -10,6 +10,9 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Resume upload for PDF, DOCX, TXT, and Markdown.
 - Pasted job description analysis and public URL fetch support.
 - Deterministic skill matching and report generation.
+- CrewAI-ready agent workflow boundary with deterministic fallback.
+- Evidence-backed ATS, cover letter, and interview-prep sections.
+- Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - API token protection for the OpenClaw endpoint.
 
 ## Local Setup
@@ -56,7 +59,8 @@ The deterministic matcher and validator are the source of truth. Generated outpu
 ## Project Boundaries
 
 - `app/api` contains HTTP routes and dependencies only.
-- `app/services` contains deterministic parsing, matching, report generation, and validation.
+- `app/services` contains deterministic parsing, matching, agent workflow fallback, report generation, and validation.
+- `app/schemas/agent.py` defines structured agent workflow output contracts.
 - `app/repositories` owns persistence operations.
 - `app/data/skill_dictionary.json` owns the deterministic skill dictionary.
 - `migrations` owns database schema migrations.

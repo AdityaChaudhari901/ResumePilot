@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation hardened inside `Backend/`.
+- Current state: four-folder workspace created; backend foundation and CrewAI-ready deterministic agent workflow boundary hardened inside `Backend/`.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -30,10 +30,13 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/db/*.py`
   - `Backend/app/repositories/*.py`
   - `Backend/app/schemas/*.py`
+  - `Backend/app/schemas/agent.py`
   - `Backend/app/services/*.py`
+  - `Backend/app/services/agent_workflow.py`
   - `Backend/app/data/skill_dictionary.json`
   - `Backend/migrations/*.py`
   - `Backend/tests/*.py`
+  - `Backend/tests/test_agent_workflow.py`
   - `Backend/scripts/run_golden_evals.py`
   - `Backend/evals/resumes/*.md`
   - `Backend/evals/jobs/*.txt`
@@ -120,9 +123,19 @@ Completed backend hardening after folder restructure:
 - Added `Backend/scripts/run_golden_evals.py`.
 - Added tests for URL fetch fallback, validator behavior, report schema validation, and golden eval execution.
 
+Completed CrewAI-ready deterministic agent workflow boundary:
+
+- Added strict Pydantic contracts for agent workflow steps and outputs.
+- Added `Backend/app/services/agent_workflow.py` to mirror the planned JD parser, resume match, ATS optimizer, cover letter, interview coach, and validation gate sequence.
+- Kept the current workflow in deterministic fallback mode so the app does not require live LLM keys.
+- Routed `/jobs/analyze` and `/chat/openclaw` report generation through the workflow boundary.
+- Strengthened validation for cover letter unsupported skills and interview answer evidence IDs.
+- Fixed `OPENCLAW_SENDER_ALLOWLIST` parsing so local `.env` can use a simple comma-separated string.
+- Added tests for agent workflow trace, report sections, and new validation cases.
+
 Next implementation scope:
 
-- Add CrewAI structured-output agents after deterministic reports remain stable.
+- Verify current CrewAI package/API docs, then replace or extend the deterministic fallback with live CrewAI structured-output agents.
 - Add OpenClaw local skill/config files after the API contract is stable.
 - Add dependency lock when finalizing local Python version/tooling.
 - Add frontend dashboard when backend report APIs are stable.
@@ -132,9 +145,9 @@ Next implementation scope:
 - No dependency lock exists yet.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - No OpenClaw local skill/config exists yet.
-- CrewAI/OpenClaw APIs should be verified against current docs before implementation.
+- CrewAI/OpenClaw APIs should be verified against current docs before live integration.
 - Python 3.14 is installed locally, but Python 3.12 is the safer target for dependency compatibility.
-- CrewAI agent workflow is not implemented yet.
+- Live CrewAI/provider-backed execution is not implemented yet; current workflow uses deterministic fallback contracts.
 - Background queue, caching, metrics, and web UI are not implemented yet.
 
 ## Verification Evidence
@@ -143,13 +156,14 @@ Latest verification run: 2026-07-08
 
 | Check | Command | Result |
 |---|---|---|
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 11 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 14 passed, 1 Starlette/httpx deprecation warning |
 | Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations && .venv/bin/ruff check .` | Passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
-| Live smoke | Upload sample resume, analyze sample JD, fetch Markdown report | Passed: upload 201, analyze 200, markdown 200 |
+| Live API smoke | Upload sample resume, analyze sample JD, fetch JSON and Markdown reports | Passed: health 200, upload 201, analyze 200, report 200, markdown 200 |
+| Live OpenClaw smoke | `POST /chat/openclaw` with `paste:` job text and allowlisted sender | Passed: 200, status `completed`, Markdown report returned |
 
 ## Change Log
 
@@ -181,6 +195,12 @@ Latest verification run: 2026-07-08
 - Started the local FastAPI server on `127.0.0.1:8002` because ports 8000 and 8001 were occupied by `ssh` listeners.
 - Initialized git, renamed the branch to `main`, and configured GitHub remote `origin`.
 - Added the source-of-truth rule requiring future work to refer to the MVP documentation pack before implementation.
+- Added CrewAI-ready deterministic agent workflow contracts and service boundary.
+- Routed backend analysis through the workflow boundary for resume-match explanation, ATS suggestions, cover letter drafting, interview prep, and validation.
+- Strengthened validation for cover letter unsupported skills and interview answer evidence IDs.
+- Fixed local `OPENCLAW_SENDER_ALLOWLIST` environment parsing for comma-separated sender IDs.
+- Added workflow and validator tests, increasing backend coverage from 11 to 14 tests.
+- Updated backend and AI services documentation to describe the current deterministic fallback and future live CrewAI integration.
 
 ## Maintenance Rule
 
