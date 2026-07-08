@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: Backend
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_PYTHON_VERSION_WARNING: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            Backend/pyproject.toml
+            Backend/requirements/py312-dev-ai.constraints.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" -c requirements/py312-dev-ai.constraints.txt
+          python -m pip check
+          python --version
+
+      - name: Check backend formatting
+        run: ruff format app tests scripts migrations --check
+
+      - name: Lint backend
+        run: ruff check .
+
+      - name: Run backend tests
+        run: pytest
+
+      - name: Compile backend modules
+        run: python -m compileall app tests scripts
+
+      - name: Run golden evals
+        run: python scripts/run_golden_evals.py
+
+      - name: Run deterministic backend quality gate
+        run: python scripts/run_backend_quality_gate.py
+
+      - name: Upload backend quality gate artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-quality-gate
+          path: Backend/evals/outputs/backend_quality_gate.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  frontend:
+    name: Frontend lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Typecheck frontend
+        run: npm run typecheck

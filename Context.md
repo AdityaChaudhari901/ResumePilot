@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -17,6 +17,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/`
   - `Ai services/`
   - `Docs/`
+  - `.github/workflows/`
 - Existing source material:
   - `Docs/CrewAI_Job_Application_Copilot_MVP_Docs.md`
   - `Docs/crewai-job-copilot-mvp-docs/README.md`
@@ -53,6 +54,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/evals/jobs/*.txt`
   - `Frontend/e2e/*.ts`
   - `Frontend/playwright.config.ts`
+  - `.github/workflows/ci.yml`
   - `Ai services/openclaw/workspace/skills/job/SKILL.md`
   - `Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py`
   - `Ai services/openclaw/tests/test_resumepilot_job.py`
@@ -118,6 +120,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | OpenClaw model provider path | Google Vertex via `google-vertex` and gcloud ADC |
 | Frontend icons | lucide-react |
 | Testing | pytest, httpx, respx, Playwright |
+| CI | GitHub Actions with Python 3.12 backend gate and Node.js 24 frontend static checks |
 | Packaging | Docker Compose later, not required on day one |
 
 ## Build Order
@@ -255,6 +258,15 @@ Completed provider pricing cost estimate slice:
 - Kept deterministic traces, legacy traces, CrewAI fallback traces, and unconfigured provider/model/region traces cost-null instead of guessing.
 - Updated backend/API tests, README files, and MVP docs for pricing-backed workflow trace metadata.
 
+Completed GitHub Actions CI quality gate slice:
+
+- Added `.github/workflows/ci.yml` for push, pull request, and manual workflow runs against `main`.
+- Added a backend CI job on Python 3.12 that installs constrained `.[dev]` dependencies, runs ruff format/check, pytest, compileall, golden evals, and the deterministic backend quality gate.
+- Added backend quality-gate JSON artifact upload with short retention for CI evidence.
+- Added a frontend CI job on Node.js 24 that runs `npm ci`, ESLint, and TypeScript typecheck.
+- Kept live CrewAI/Vertex smokes and Playwright browser screenshots out of default CI until provider secrets and browser artifact policy are configured.
+- Updated root, backend, frontend, MVP testing docs, and this context file with the CI scope and command contract.
+
 Completed backend Python 3.12 runtime and dependency lock slice:
 
 - Added root `.python-version` with Python `3.12.13`.
@@ -310,7 +322,7 @@ Completed dashboard Playwright browser smoke slice:
 
 Next implementation scope:
 
-- Add report export polish, saved export history or DOCX export, live-provider latency/cost aggregation in the backend quality gate, and CI artifact upload or screenshot baseline comparisons.
+- Add report export polish, saved export history or DOCX export, live-provider latency/cost aggregation in the backend quality gate, and screenshot baseline or accessibility checks for the dashboard.
 
 ## Known Gaps
 
@@ -322,7 +334,7 @@ Next implementation scope:
 - DOCX export is not implemented yet.
 - Workflow trace cost estimates currently cover only the configured Vertex global standard `google/gemini-3.5-flash` path; additional provider/model/region rates must be added before other traces can emit cost.
 - Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
-- Playwright browser smoke is implemented; CI artifact upload, screenshot baseline diffing, and accessibility audits are not implemented yet.
+- Playwright browser smoke is implemented locally; CI browser execution, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
 ## Verification Evidence
 
@@ -340,9 +352,13 @@ Latest verification run: 2026-07-08
 | Backend runtime pricing focused tests | `cd Backend && .venv/bin/pytest tests/test_provider_pricing.py tests/test_agent_workflow.py tests/test_analysis_api.py` | Passed: 14 passed, 1 Starlette/httpx deprecation warning |
 | Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 68 files already formatted, all checks passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
+| CI workflow YAML parse | `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "yaml ok"'` | Passed: `yaml ok` |
+| CI-style backend dev install | `cd Backend && VENV_DIR=.local/venvs/ci-dev-check INSTALL_EXTRAS=dev scripts/bootstrap_py312.sh --recreate` | Passed: Python 3.12.13, constrained `.[dev]` install, `pip check` passed |
+| CI-style backend tests | `cd Backend && .local/venvs/ci-dev-check/bin/pytest` | Passed: 34 passed, 1 Starlette/httpx deprecation warning |
+| CI-style backend quality gate | `cd Backend && .local/venvs/ci-dev-check/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, avg 2.27 ms, p95 2.78 ms |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.94 ms, p95 4.13 ms |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.08 ms, p95 2.48 ms |
 | Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
 | Generated ResumePilot PDF smoke | `cd Backend && .venv/bin/python - <<'PY' ... render_tailored_resume_latex(...) ... compile_latex_to_pdf(...) ... PY` | Passed: generated 19397-byte PDF with `%PDF-` prefix |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
@@ -354,6 +370,7 @@ Latest verification run: 2026-07-08
 | OpenClaw helper tests | `python3 -m unittest discover "Ai services/openclaw/tests"` | Passed: 4 tests |
 | OpenClaw helper smoke | Upload sample resume, run `resumepilot_job.py paste:<sample job>` against API on port 8002 | Passed: helper exit 0, Markdown report returned |
 | Frontend audit | `cd Frontend && npm audit --omit=dev` | Passed: 0 vulnerabilities after PostCSS override |
+| Frontend CI install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm ci` | Passed: 362 packages installed/audited, 0 vulnerabilities |
 | Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
 | Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: Next.js production build generated the dashboard and API routes including `/api/reports/[reportId]/trace`, `/api/reports/[reportId]/resume/latex`, and `/api/reports/[reportId]/resume/pdf` |
@@ -477,6 +494,11 @@ Latest verification run: 2026-07-08
 - Wired pricing-backed `cost_estimate_usd` and pricing metadata into live CrewAI workflow traces when captured token usage is available.
 - Added focused pricing, workflow, and API tests, increasing backend coverage from 29 to 34 tests.
 - Updated backend/frontend README files, MVP docs, and this context file for pricing-backed runtime observability.
+- Added GitHub Actions CI for backend deterministic gates and frontend static checks on pushes, pull requests, and manual runs.
+- Configured backend CI with Python 3.12, constrained `.[dev]` install, ruff format/check, pytest, compileall, golden evals, backend quality gate, and artifact upload.
+- Configured frontend CI with Node.js 24, npm cache, `npm ci`, ESLint, and TypeScript typecheck.
+- Updated root/backend/frontend README files, MVP testing docs, and this context file with the CI scope and live/browser manual-gate boundary.
+- Verified the CI command set locally, including a fresh backend `.[dev]` venv and frontend `npm ci`.
 
 ## Maintenance Rule
 

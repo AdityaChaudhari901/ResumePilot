@@ -145,6 +145,38 @@ sample resume, analyzes the sample job, verifies workflow trace timing,
 Markdown/LaTeX/PDF exports, and captures desktop/mobile screenshots in ignored
 local artifacts.
 
+## Continuous integration
+
+GitHub Actions runs `.github/workflows/ci.yml` on pushes and pull requests to
+`main`.
+
+Backend CI uses Python 3.12 with the pinned backend constraints file and runs:
+
+```bash
+python -m pip install -e ".[dev]" -c requirements/py312-dev-ai.constraints.txt
+ruff format app tests scripts migrations --check
+ruff check .
+pytest
+python -m compileall app tests scripts
+python scripts/run_golden_evals.py
+python scripts/run_backend_quality_gate.py
+```
+
+The backend job uploads `Backend/evals/outputs/backend_quality_gate.json` as a
+short-retention workflow artifact when present.
+
+Frontend CI uses Node.js 24 and runs:
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+```
+
+Live CrewAI/Vertex smokes and Playwright browser screenshots are not part of the
+default CI gate yet because they require provider credentials, local server
+process orchestration, browser artifacts, and longer runtimes.
+
 ## Demo dataset plan
 
 Minimum useful demo dataset:
@@ -186,5 +218,6 @@ Do not invent these metrics. Measure them first.
 - verify report export endpoints
 - run Playwright dashboard smoke
 - run backend quality gate
+- upload backend quality gate artifact
 - validate generated report JSON
 - fail build if unsupported claim detector fails

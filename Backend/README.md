@@ -76,6 +76,7 @@ If CrewAI or the provider runtime is unavailable, the API returns the determinis
 
 ```bash
 pytest
+ruff format app tests scripts migrations --check
 ruff check .
 python -m compileall app tests
 python scripts/run_golden_evals.py
@@ -88,6 +89,26 @@ alembic upgrade head
 golden resume/JD pairs with 100% schema pass rate, 0 evidence gaps, 0
 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits,
 2.06 ms average latency, and 2.47 ms p95 latency in deterministic fallback mode.
+
+## CI
+
+The GitHub Actions backend job runs on Python 3.12 using the pinned constraints
+file with the `dev` extra only. It intentionally stays deterministic and
+secret-free:
+
+```bash
+python -m pip install -e ".[dev]" -c requirements/py312-dev-ai.constraints.txt
+ruff format app tests scripts migrations --check
+ruff check .
+pytest
+python -m compileall app tests scripts
+python scripts/run_golden_evals.py
+python scripts/run_backend_quality_gate.py
+```
+
+The job uploads `evals/outputs/backend_quality_gate.json` as a short-retention
+artifact. Live CrewAI/Vertex checks remain local/manual because they require
+provider credentials and networked model calls.
 
 ## API Surface
 

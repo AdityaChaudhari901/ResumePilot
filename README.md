@@ -29,5 +29,19 @@ npm run test:e2e:install
 npm run test:e2e
 ```
 
+## CI
+
+GitHub Actions runs `.github/workflows/ci.yml` on pushes and pull requests to
+`main`.
+
+- Backend job: Python 3.12, pip constrained install, ruff format/check, pytest,
+  compileall, golden evals, deterministic backend quality gate, and backend
+  quality-gate artifact upload.
+- Frontend job: Node.js 24, `npm ci`, ESLint, and TypeScript typecheck.
+
+Live Vertex/CrewAI smokes and Playwright browser screenshots remain explicit
+local/manual gates until provider secrets and browser artifacts are configured
+for CI.
+
 The backend runtime is standardized on Python 3.12 because live CrewAI execution
 does not currently support Python 3.14.

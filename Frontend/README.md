@@ -61,6 +61,21 @@ Markdown/LaTeX/PDF exports, and captures desktop/mobile screenshots under
 Override ports with `RESUMEPILOT_E2E_BACKEND_PORT` and
 `RESUMEPILOT_E2E_FRONTEND_PORT` if those defaults are occupied.
 
+## CI
+
+The GitHub Actions frontend job uses Node.js 24 and runs the static checks that
+do not require browser services:
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+```
+
+Playwright remains a local/manual smoke gate for now because it starts FastAPI,
+builds the production Next.js server, verifies export endpoints, and captures
+screenshots.
+
 ## OpenClaw WebChat / dashboard path
 
 The dashboard is aligned with the OpenClaw local Gateway flow:
