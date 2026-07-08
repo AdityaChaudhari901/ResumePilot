@@ -11,13 +11,19 @@ export async function proxyBackendResponse(path: string, init?: RequestInit): Pr
     cache: "no-store"
   });
   const contentType = backendResponse.headers.get("content-type") ?? "application/json";
+  const contentDisposition = backendResponse.headers.get("content-disposition");
   const responseBody = await backendResponse.arrayBuffer();
+  const headers = new Headers({
+    "content-type": contentType
+  });
+
+  if (contentDisposition) {
+    headers.set("content-disposition", contentDisposition);
+  }
 
   return new Response(responseBody, {
     status: backendResponse.status,
-    headers: {
-      "content-type": contentType
-    }
+    headers
   });
 }
 

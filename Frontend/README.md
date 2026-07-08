@@ -9,6 +9,13 @@ Next.js dashboard for the local ResumePilot MVP.
 - Tailwind CSS
 - Server route handlers as a backend-for-frontend proxy to FastAPI
 
+## Current dashboard capabilities
+
+- Resume upload through the same-origin `/api/resumes/upload` proxy.
+- Job analysis through `/api/jobs/analyze`.
+- Report viewing with JSON, Markdown, workflow trace, and LaTeX `.tex` downloads.
+- OpenClaw Gateway/provider readiness status.
+
 ## Local setup
 
 ```bash

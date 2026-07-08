@@ -7,6 +7,7 @@ import {
   CircleX,
   ClipboardList,
   Download,
+  FileCode2,
   GitBranch,
   ShieldCheck
 } from "lucide-react";
@@ -49,18 +50,31 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
   }
 
   const matchTone = scoreTone(report.match_score);
+  const latexDownloadHref = `/api/reports/${encodeURIComponent(
+    String(analysis.report_id)
+  )}/resume/latex`;
 
   return (
     <Panel
       action={
-        <ButtonLink
-          download={`resumepilot-report-${analysis.report_id}.md`}
-          href={`data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`}
-          icon={<Download className="h-4 w-4" aria-hidden="true" />}
-          variant="secondary"
-        >
-          Markdown
-        </ButtonLink>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <ButtonLink
+            download={`resumepilot-report-${analysis.report_id}.md`}
+            href={`data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`}
+            icon={<Download className="h-4 w-4" aria-hidden="true" />}
+            variant="secondary"
+          >
+            Markdown
+          </ButtonLink>
+          <ButtonLink
+            download={`resumepilot-report-${analysis.report_id}.tex`}
+            href={latexDownloadHref}
+            icon={<FileCode2 className="h-4 w-4" aria-hidden="true" />}
+            variant="secondary"
+          >
+            LaTeX
+          </ButtonLink>
+        </div>
       }
       eyebrow={`Report ${analysis.report_id}`}
       title="Evidence-backed fit"
