@@ -116,6 +116,7 @@ Every time prompts, models, or scoring rules change:
 - compare JSON validity
 - compare workflow trace timing shape
 - compare workflow provider/token metadata shape
+- compare workflow provider cost estimate shape when pricing is configured
 - compare latency and cost
 
 Current backend command:

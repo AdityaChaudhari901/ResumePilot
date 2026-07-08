@@ -264,8 +264,10 @@ Log for every analysis:
 - errors
 
 Cost telemetry must not be guessed. Store `cost_estimate_usd` only when a
-configured provider pricing source is available; otherwise store `null` and
-record an unavailable source in runtime metadata.
+configured provider/model/region pricing source is available and captured token
+usage includes input/output token splits. The MVP pricing table currently covers
+the configured Vertex global standard `google/gemini-3.5-flash` path. Otherwise
+store `null` and record an unavailable source in runtime metadata.
 
 ## Quality gates
 

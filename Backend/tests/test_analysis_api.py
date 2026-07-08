@@ -1,3 +1,5 @@
+import pytest
+
 from app.schemas.agent import (
     AgentStepName,
     AgentTokenUsage,
@@ -229,8 +231,12 @@ def test_crewai_success_trace_is_persisted(
     assert trace["token_usage"]["prompt_tokens"] == 250
     assert trace["token_usage"]["completion_tokens"] == 71
     assert trace["token_usage"]["successful_requests"] == 3
-    assert trace["cost_estimate_usd"] is None
+    assert trace["cost_estimate_usd"] == pytest.approx(0.001014)
     assert trace["runtime_metadata"]["runtime_status"] == "completed"
+    assert trace["runtime_metadata"]["cost_estimate_source"] == "provider_pricing_config"
+    assert trace["runtime_metadata"]["pricing_version"] == "2026-07-08.vertex-global-standard.v1"
+    assert trace["runtime_metadata"]["billable_input_tokens"] == 250
+    assert trace["runtime_metadata"]["billable_output_tokens"] == 71
     assert "crewai_unavailable" not in trace["validation_warning_codes"]
 
 

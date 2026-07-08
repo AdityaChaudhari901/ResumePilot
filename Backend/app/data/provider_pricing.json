@@ -1,0 +1,25 @@
+{
+  "version": "2026-07-08.vertex-global-standard.v1",
+  "verified_on": "2026-07-08",
+  "source_url": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing",
+  "currency": "USD",
+  "unit_tokens": 1000000,
+  "rates": [
+    {
+      "provider": "vertex",
+      "model": "google/gemini-3.5-flash",
+      "model_aliases": [
+        "gemini-3.5-flash",
+        "google/gemini-3.5-flash",
+        "google-vertex/gemini-3.5-flash"
+      ],
+      "canonical_model": "gemini-3.5-flash",
+      "region": "global",
+      "pricing_tier": "standard",
+      "input_per_1m_tokens_usd": "1.50",
+      "output_per_1m_tokens_usd": "9.00",
+      "cached_input_per_1m_tokens_usd": "0.15",
+      "notes": "Gemini 3.5 Flash global standard text pricing verified from Google Cloud Agent Platform pricing on 2026-07-08. Text output pricing covers response and reasoning tokens."
+    }
+  ]
+}

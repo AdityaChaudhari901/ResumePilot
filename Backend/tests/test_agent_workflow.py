@@ -1,3 +1,5 @@
+import pytest
+
 from app.schemas.agent import (
     AgentStepName,
     AgentTokenUsage,
@@ -206,10 +208,18 @@ def test_crewai_mode_uses_live_sections_then_validates(
     assert result.trace.token_usage is not None
     assert result.trace.token_usage.total_tokens == 123
     assert result.trace.token_usage.successful_requests == 3
-    assert result.trace.cost_estimate_usd is None
+    assert result.trace.cost_estimate_usd == pytest.approx(0.000432)
     assert result.trace.runtime_metadata["runtime_status"] == "completed"
     assert result.trace.runtime_metadata["token_usage_source"] == "crewai_llm_summary"
-    assert result.trace.runtime_metadata["cost_estimate_source"] == "unavailable"
+    assert result.trace.runtime_metadata["cost_estimate_source"] == "provider_pricing_config"
+    assert result.trace.runtime_metadata["pricing_version"] == (
+        "2026-07-08.vertex-global-standard.v1"
+    )
+    assert result.trace.runtime_metadata["pricing_source_url"] == (
+        "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing"
+    )
+    assert result.trace.runtime_metadata["billable_input_tokens"] == 90
+    assert result.trace.runtime_metadata["billable_output_tokens"] == 33
     assert result.report.executive_summary.startswith("CrewAI-reviewed fit")
     assert "validated resume evidence" in result.report.cover_letter
     assert "crewai_unavailable" not in result.trace.validation_warning_codes

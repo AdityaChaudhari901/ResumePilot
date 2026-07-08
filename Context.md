@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -34,8 +34,10 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/services/*.py`
   - `Backend/app/services/agent_workflow.py`
   - `Backend/app/services/crewai_workflow.py`
+  - `Backend/app/services/provider_pricing.py`
   - `Backend/app/services/latex_resume_renderer.py`
   - `Backend/app/services/pdf_resume_compiler.py`
+  - `Backend/app/data/provider_pricing.json`
   - `Backend/app/data/skill_dictionary.json`
   - `Backend/migrations/*.py`
   - `Backend/tests/*.py`
@@ -243,8 +245,15 @@ Completed live runtime provider observability slice:
 - Extracted token usage from CrewAI's LLM summary when the live runtime exposes it.
 - Persisted provider/model/token metadata through existing `workflow_trace_json` without a database migration.
 - Rendered a compact dashboard runtime section for traces that include provider metadata.
-- Kept `cost_estimate_usd` null until a configured provider pricing source exists, and recorded the unavailable source in runtime metadata.
 - Added backend/API tests for legacy traces, deterministic traces, CrewAI fallback metadata, and CrewAI success token usage.
+
+Completed provider pricing cost estimate slice:
+
+- Added `Backend/app/data/provider_pricing.json` as a versioned provider pricing table for the configured Vertex global standard `google/gemini-3.5-flash` path.
+- Added `Backend/app/services/provider_pricing.py` to compute cost estimates from captured prompt, cached prompt, and completion token usage with Decimal math and strict provider/model/region matching.
+- Populated live CrewAI `cost_estimate_usd` and runtime pricing metadata when CrewAI token usage matches the configured pricing source.
+- Kept deterministic traces, legacy traces, CrewAI fallback traces, and unconfigured provider/model/region traces cost-null instead of guessing.
+- Updated backend/API tests, README files, and MVP docs for pricing-backed workflow trace metadata.
 
 Completed backend Python 3.12 runtime and dependency lock slice:
 
@@ -301,7 +310,7 @@ Completed dashboard Playwright browser smoke slice:
 
 Next implementation scope:
 
-- Add report export polish, saved export history or DOCX export, provider pricing configuration for cost estimates, and CI artifact upload or screenshot baseline comparisons.
+- Add report export polish, saved export history or DOCX export, live-provider latency/cost aggregation in the backend quality gate, and CI artifact upload or screenshot baseline comparisons.
 
 ## Known Gaps
 
@@ -311,7 +320,7 @@ Next implementation scope:
 - The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency and token usage are visible in per-report traces but not included in the deterministic quality gate yet.
 - PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
 - DOCX export is not implemented yet.
-- Workflow trace stores mode, step summaries, validation warning codes, total latency, per-step latency, provider/model metadata, and token usage when CrewAI exposes it; cost estimates remain null until provider pricing is configured.
+- Workflow trace cost estimates currently cover only the configured Vertex global standard `google/gemini-3.5-flash` path; additional provider/model/region rates must be added before other traces can emit cost.
 - Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
 - Playwright browser smoke is implemented; CI artifact upload, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
@@ -325,15 +334,15 @@ Latest verification run: 2026-07-08
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
 | TeX compiler | `tectonic --version` | Passed: `Tectonic 0.16.9` |
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 29 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 34 passed, 1 Starlette/httpx deprecation warning |
 | Report export focused tests | `cd Backend && .venv/bin/pytest tests/test_pdf_resume_compiler.py tests/test_analysis_api.py tests/test_settings.py` | Passed: 10 passed, 1 Starlette/httpx deprecation warning |
-| Backend trace timing coverage | `cd Backend && .venv/bin/pytest` | Passed: workflow trace timing assertions covered in full backend run, 29 passed |
-| Backend runtime observability focused tests | `cd Backend && .venv/bin/pytest tests/test_agent_workflow.py tests/test_analysis_api.py` | Passed: 9 passed, 1 Starlette/httpx deprecation warning |
-| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 66 files already formatted, all checks passed |
+| Backend trace timing coverage | `cd Backend && .venv/bin/pytest` | Passed: workflow trace timing assertions covered in full backend run, 34 passed |
+| Backend runtime pricing focused tests | `cd Backend && .venv/bin/pytest tests/test_provider_pricing.py tests/test_agent_workflow.py tests/test_analysis_api.py` | Passed: 14 passed, 1 Starlette/httpx deprecation warning |
+| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 68 files already formatted, all checks passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.21 ms, p95 2.69 ms |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.94 ms, p95 4.13 ms |
 | Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
 | Generated ResumePilot PDF smoke | `cd Backend && .venv/bin/python - <<'PY' ... render_tailored_resume_latex(...) ... compile_latex_to_pdf(...) ... PY` | Passed: generated 19397-byte PDF with `%PDF-` prefix |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
@@ -463,6 +472,11 @@ Latest verification run: 2026-07-08
 - Extracted CrewAI token usage from the live LLM summary when available and persisted it through the existing report trace JSON.
 - Rendered runtime provider/model/token/cost metadata in the dashboard workflow trace panel.
 - Updated backend/frontend README files, MVP architecture/reliability/testing docs, and this context file for runtime observability.
+- Verified current Google pricing references for Gemini 3.5 Flash input, text output, and cached input rates before adding provider cost estimates.
+- Added versioned Vertex/global `google/gemini-3.5-flash` provider pricing data and a strict backend pricing calculator.
+- Wired pricing-backed `cost_estimate_usd` and pricing metadata into live CrewAI workflow traces when captured token usage is available.
+- Added focused pricing, workflow, and API tests, increasing backend coverage from 29 to 34 tests.
+- Updated backend/frontend README files, MVP docs, and this context file for pricing-backed runtime observability.
 
 ## Maintenance Rule
 

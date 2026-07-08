@@ -529,10 +529,10 @@ The trace endpoint returns the workflow mode, step statuses, step summaries,
 validation warning codes, optional `duration_ms` telemetry for the full workflow
 plus each step, and optional live-runtime metadata. Live CrewAI traces include
 provider/model fields, token usage when CrewAI exposes it, `cost_estimate_usd`
-when available, and runtime metadata describing whether token/cost data was
-reported. These fields are additive observability metadata; they must not
-change the evidence-first report content and older persisted traces without the
-optional fields remain valid.
+when a configured provider/model/region pricing source matches the trace, and
+runtime metadata describing the pricing source. These fields are additive
+observability metadata; they must not change the evidence-first report content
+and older persisted traces without the optional fields remain valid.
 
 ## Data model
 
@@ -1531,8 +1531,10 @@ Log for every analysis:
 - errors
 
 Cost telemetry must not be guessed. Store `cost_estimate_usd` only when a
-configured provider pricing source is available; otherwise store `null` and
-record an unavailable source in runtime metadata.
+configured provider/model/region pricing source is available and captured token
+usage includes input/output token splits. The MVP pricing table currently covers
+the configured Vertex global standard `google/gemini-3.5-flash` path. Otherwise
+store `null` and record an unavailable source in runtime metadata.
 
 ## Quality gates
 
@@ -2178,6 +2180,7 @@ Every time prompts, models, or scoring rules change:
 - compare JSON validity
 - compare workflow trace timing shape
 - compare workflow provider/token metadata shape
+- compare workflow provider cost estimate shape when pricing is configured
 - compare latency and cost
 
 Current frontend browser smoke command:

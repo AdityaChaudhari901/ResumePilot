@@ -12,7 +12,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Deterministic skill matching and report generation.
 - CrewAI-ready agent workflow boundary with deterministic fallback.
 - Optional live CrewAI structured-output agents for fit explanation, cover letter drafting, and interview coaching.
-- Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution, including latency, provider/model, token usage when exposed by CrewAI, and cost placeholders.
+- Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution, including latency, provider/model, token usage when exposed by CrewAI, and cost estimates when configured provider pricing matches the trace.
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
@@ -111,8 +111,15 @@ Authorization: Bearer <JOBCOPILOT_API_TOKEN>
 step summaries, validation warning codes, and optional `duration_ms` timings for
 the full workflow and each step. Live CrewAI traces also include provider/model
 metadata, optional token usage from CrewAI's LLM summary, `cost_estimate_usd`
-when available, and runtime metadata describing whether token/cost data was
-reported. Older persisted traces without these optional fields remain valid.
+when a matching rate exists in `app/data/provider_pricing.json`, and runtime
+metadata describing the pricing source. Older persisted traces without these
+optional fields remain valid.
+
+The current pricing table is intentionally scoped to the configured
+Vertex/global standard path for `google/gemini-3.5-flash`. Cost estimates are
+computed from captured prompt, cached prompt, and completion tokens only; if
+token split data or a provider/model/region rate is missing, the trace stores
+`cost_estimate_usd: null`.
 
 ## Accuracy Rule
 

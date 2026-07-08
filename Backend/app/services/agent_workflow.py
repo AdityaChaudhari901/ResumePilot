@@ -20,6 +20,7 @@ from app.schemas.match import MatchResult
 from app.schemas.report import ApplicationReport, InterviewQuestionGroup
 from app.schemas.resume import ResumeFact, ResumeProfile
 from app.services.crewai_workflow import build_crewai_workflow_runner
+from app.services.provider_pricing import ProviderCostEstimate, estimate_provider_cost
 from app.services.report_generator import generate_report
 from app.services.validator import validate_report_against_resume
 
@@ -212,6 +213,14 @@ def _run_crewai_application_agent_workflow(
         [*report.validation_warnings, *validate_report_against_resume(report, resume)]
     )
     report.validation_warnings = validation_warnings
+    provider = _runtime_provider(settings)
+    model = _runtime_model(settings)
+    cost_estimate = estimate_provider_cost(
+        provider=provider,
+        model=model,
+        region=settings.vertex_region,
+        token_usage=sections.token_usage,
+    )
 
     traces = [
         AgentStepTrace(
@@ -289,14 +298,15 @@ def _run_crewai_application_agent_workflow(
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
             duration_ms=_elapsed_ms(workflow_start) + (deterministic_result.trace.duration_ms or 0),
-            provider=_runtime_provider(settings),
-            model=_runtime_model(settings),
+            provider=provider,
+            model=model,
             token_usage=sections.token_usage,
-            cost_estimate_usd=None,
+            cost_estimate_usd=cost_estimate.amount_usd if cost_estimate else None,
             runtime_metadata=_runtime_metadata(
                 settings=settings,
                 status="completed",
                 token_usage=sections.token_usage,
+                cost_estimate=cost_estimate,
             ),
         ),
     )
@@ -629,6 +639,7 @@ def _runtime_metadata(
     settings: Settings,
     status: str,
     token_usage: AgentTokenUsage | None,
+    cost_estimate: ProviderCostEstimate | None = None,
     fallback_reason: str | None = None,
 ) -> dict[str, str | int | float | bool | None]:
     metadata: dict[str, str | int | float | bool | None] = {
@@ -639,6 +650,9 @@ def _runtime_metadata(
         "token_usage_source": "crewai_llm_summary" if token_usage else "unavailable",
         "cost_estimate_source": "unavailable",
     }
+    if cost_estimate:
+        metadata.update(cost_estimate.metadata)
+        metadata["cost_estimate_usd"] = cost_estimate.amount_usd
     if fallback_reason:
         metadata["fallback_reason"] = fallback_reason
     return metadata
