@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation and CrewAI-ready deterministic agent workflow boundary hardened inside `Backend/`.
+- Current state: four-folder workspace created; backend foundation, CrewAI-ready deterministic agent workflow boundary, and project-local OpenClaw `/job` skill implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -40,6 +40,9 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/scripts/run_golden_evals.py`
   - `Backend/evals/resumes/*.md`
   - `Backend/evals/jobs/*.txt`
+  - `Ai services/openclaw/workspace/skills/job/SKILL.md`
+  - `Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py`
+  - `Ai services/openclaw/tests/test_resumepilot_job.py`
 - Verified: both JSON schema files are valid JSON.
 - Local Python observed: Python 3.14.3.
 - `uv` is not currently available in PATH.
@@ -47,6 +50,8 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Project dependencies are declared in `Backend/pyproject.toml`.
 - Local API server verified on `http://127.0.0.1:8002`.
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
+- OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
+- OpenClaw onboarding/gateway provider setup was intentionally skipped during installation.
 
 ## Product Rule
 
@@ -133,10 +138,20 @@ Completed CrewAI-ready deterministic agent workflow boundary:
 - Fixed `OPENCLAW_SENDER_ALLOWLIST` parsing so local `.env` can use a simple comma-separated string.
 - Added tests for agent workflow trace, report sections, and new validation cases.
 
+Completed OpenClaw local integration:
+
+- Installed OpenClaw CLI locally and verified `openclaw --version`.
+- Added a project-local OpenClaw workspace under `Ai services/openclaw/workspace`.
+- Added the `job` skill for `/job` and `/skill job` usage.
+- Added the `resumepilot_job.py` helper that posts to `POST /chat/openclaw` with bearer-token auth.
+- Added helper unit tests and setup documentation for OpenClaw environment variables.
+- Verified OpenClaw detects the `job` skill as ready, visible to model, and available as a command.
+- Verified helper-to-backend smoke with a sample resume and sample job description.
+
 Next implementation scope:
 
+- Complete OpenClaw onboarding and channel pairing after a model provider/API key is selected.
 - Verify current CrewAI package/API docs, then replace or extend the deterministic fallback with live CrewAI structured-output agents.
-- Add OpenClaw local skill/config files after the API contract is stable.
 - Add dependency lock when finalizing local Python version/tooling.
 - Add frontend dashboard when backend report APIs are stable.
 
@@ -144,7 +159,7 @@ Next implementation scope:
 
 - No dependency lock exists yet.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
-- No OpenClaw local skill/config exists yet.
+- OpenClaw local skill exists, but OpenClaw gateway onboarding/channel pairing is not completed.
 - CrewAI/OpenClaw APIs should be verified against current docs before live integration.
 - Python 3.14 is installed locally, but Python 3.12 is the safer target for dependency compatibility.
 - Live CrewAI/provider-backed execution is not implemented yet; current workflow uses deterministic fallback contracts.
@@ -164,6 +179,11 @@ Latest verification run: 2026-07-08
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
 | Live API smoke | Upload sample resume, analyze sample JD, fetch JSON and Markdown reports | Passed: health 200, upload 201, analyze 200, report 200, markdown 200 |
 | Live OpenClaw smoke | `POST /chat/openclaw` with `paste:` job text and allowlisted sender | Passed: 200, status `completed`, Markdown report returned |
+| OpenClaw CLI | `openclaw --version` | Passed: `OpenClaw 2026.6.11` |
+| OpenClaw skill discovery | `OPENCLAW_WORKSPACE_DIR="$PWD/Ai services/openclaw/workspace" JOBCOPILOT_API_TOKEN=test-token openclaw skills list --eligible` | Passed: `job` ready |
+| OpenClaw skill check | `OPENCLAW_WORKSPACE_DIR="$PWD/Ai services/openclaw/workspace" JOBCOPILOT_API_TOKEN=test-token openclaw skills check` | Passed: `job` ready, visible, and available as command |
+| OpenClaw helper tests | `python3 -m unittest discover "Ai services/openclaw/tests"` | Passed: 4 tests |
+| OpenClaw helper smoke | Upload sample resume, run `resumepilot_job.py paste:<sample job>` against API on port 8002 | Passed: helper exit 0, Markdown report returned |
 
 ## Change Log
 
@@ -201,6 +221,10 @@ Latest verification run: 2026-07-08
 - Fixed local `OPENCLAW_SENDER_ALLOWLIST` environment parsing for comma-separated sender IDs.
 - Added workflow and validator tests, increasing backend coverage from 11 to 14 tests.
 - Updated backend and AI services documentation to describe the current deterministic fallback and future live CrewAI integration.
+- Installed OpenClaw CLI with onboarding skipped and verified version `2026.6.11`.
+- Added project-local OpenClaw workspace, `job` skill, and `resumepilot_job.py` helper around `/chat/openclaw`.
+- Added OpenClaw setup docs and helper unit tests.
+- Verified OpenClaw skill discovery/check and helper-to-backend smoke flow.
 
 ## Maintenance Rule
 
