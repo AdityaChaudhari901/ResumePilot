@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=5 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
     jobcopilot_api_token: str | None = Field(default=None, alias="JOBCOPILOT_API_TOKEN")
     openclaw_sender_allowlist_raw: str = Field(default="", alias="OPENCLAW_SENDER_ALLOWLIST")
+    llm_provider: str = Field(default="vertex", alias="LLM_PROVIDER")
+    vertex_project_id: str | None = Field(default=None, alias="VERTEX_PROJECT_ID")
+    vertex_region: str = Field(default="global", alias="VERTEX_REGION")
+    llm_model: str = Field(default="gemini-3.5-flash", alias="LLM_MODEL")
 
     allowed_resume_extensions: frozenset[str] = frozenset(
         {".pdf", ".docx", ".txt", ".md", ".markdown"}
@@ -36,6 +40,22 @@ class Settings(BaseSettings):
     @classmethod
     def expand_data_dir(cls, value: Path) -> Path:
         return value.expanduser().resolve()
+
+    @field_validator("llm_provider", "vertex_region", "llm_model")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value cannot be empty")
+        return normalized
+
+    @field_validator("vertex_project_id")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     @property
     def debug(self) -> bool:

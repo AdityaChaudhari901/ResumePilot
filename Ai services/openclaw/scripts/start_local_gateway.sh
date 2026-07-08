@@ -13,8 +13,6 @@ RESUMEPILOT_API_BASE_URL="${RESUMEPILOT_API_BASE_URL:-http://127.0.0.1:8002}"
 OPENCLAW_SENDER_ID="${OPENCLAW_SENDER_ID:-openclaw:local}"
 OPENCLAW_SESSION_ID="${OPENCLAW_SESSION_ID:-openclaw:resume-pilot}"
 OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
-OPENCLAW_MODEL_REFERENCE="${OPENCLAW_MODEL_REFERENCE:-google-vertex/gemini-2.5-flash}"
-GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
 
 ensure_path() {
   if command -v openclaw >/dev/null 2>&1; then
@@ -40,6 +38,18 @@ load_env_file() {
   fi
 }
 
+load_existing_gateway_token() {
+  if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ] || [ ! -f "$LOCAL_ENV_FILE" ]; then
+    return
+  fi
+
+  local token_line
+  token_line="$(grep -E '^OPENCLAW_GATEWAY_TOKEN=' "$LOCAL_ENV_FILE" | tail -n 1 || true)"
+  if [ -n "$token_line" ]; then
+    OPENCLAW_GATEWAY_TOKEN="${token_line#OPENCLAW_GATEWAY_TOKEN=}"
+  fi
+}
+
 generate_token() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -61,6 +71,11 @@ write_env_var() {
 }
 
 detect_project() {
+  if [ -n "$VERTEX_PROJECT_ID" ]; then
+    printf '%s\n' "$VERTEX_PROJECT_ID"
+    return
+  fi
+
   if [ -n "${GOOGLE_CLOUD_PROJECT:-}" ]; then
     printf '%s\n' "$GOOGLE_CLOUD_PROJECT"
     return
@@ -78,7 +93,19 @@ detect_project() {
 
 ensure_path
 load_env_file "$BACKEND_ENV_FILE"
-load_env_file "$LOCAL_ENV_FILE"
+load_existing_gateway_token
+
+LLM_PROVIDER="${LLM_PROVIDER:-vertex}"
+LLM_MODEL="${LLM_MODEL:-gemini-3.5-flash}"
+VERTEX_REGION="${VERTEX_REGION:-${GOOGLE_CLOUD_LOCATION:-global}}"
+VERTEX_PROJECT_ID="${VERTEX_PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-}}"
+OPENCLAW_MODEL_REFERENCE="${OPENCLAW_MODEL_REFERENCE:-google-vertex/$LLM_MODEL}"
+GOOGLE_CLOUD_LOCATION="$VERTEX_REGION"
+
+if [ "$LLM_PROVIDER" != "vertex" ]; then
+  echo "This script supports LLM_PROVIDER=vertex for OpenClaw google-vertex setup." >&2
+  exit 1
+fi
 
 if ! command -v openclaw >/dev/null 2>&1; then
   echo "OpenClaw CLI was not found. Install it with: curl -fsSL https://openclaw.ai/install.sh | bash" >&2
@@ -111,9 +138,14 @@ umask 077
   write_env_var OPENCLAW_SENDER_ID "$OPENCLAW_SENDER_ID"
   write_env_var OPENCLAW_SESSION_ID "$OPENCLAW_SESSION_ID"
   write_env_var OPENCLAW_GATEWAY_PORT "$OPENCLAW_GATEWAY_PORT"
+  write_env_var LLM_PROVIDER "$LLM_PROVIDER"
+  write_env_var VERTEX_PROJECT_ID "$GOOGLE_CLOUD_PROJECT"
+  write_env_var VERTEX_REGION "$GOOGLE_CLOUD_LOCATION"
+  write_env_var LLM_MODEL "$LLM_MODEL"
   write_env_var OPENCLAW_MODEL_REFERENCE "$OPENCLAW_MODEL_REFERENCE"
   write_env_var OPENCLAW_GATEWAY_TOKEN "$OPENCLAW_GATEWAY_TOKEN"
   write_env_var GOOGLE_CLOUD_PROJECT "$GOOGLE_CLOUD_PROJECT"
+  write_env_var GOOGLE_CLOUD_PROJECT_ID "$GOOGLE_CLOUD_PROJECT"
   write_env_var GOOGLE_CLOUD_LOCATION "$GOOGLE_CLOUD_LOCATION"
 } >"$LOCAL_ENV_FILE"
 
@@ -123,7 +155,12 @@ export OPENCLAW_SENDER_ID
 export OPENCLAW_SESSION_ID
 export OPENCLAW_GATEWAY_TOKEN
 export GOOGLE_CLOUD_PROJECT
+export GOOGLE_CLOUD_PROJECT_ID="$GOOGLE_CLOUD_PROJECT"
 export GOOGLE_CLOUD_LOCATION
+export VERTEX_PROJECT_ID="$GOOGLE_CLOUD_PROJECT"
+export VERTEX_REGION="$GOOGLE_CLOUD_LOCATION"
+export LLM_PROVIDER
+export LLM_MODEL
 
 echo "Starting OpenClaw Gateway for ResumePilot..."
 echo "Dashboard: http://127.0.0.1:$OPENCLAW_GATEWAY_PORT/"

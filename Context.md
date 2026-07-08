@@ -52,7 +52,8 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
 - OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
 - OpenClaw local config exists at `~/.openclaw/openclaw.json`; the included Google plugin is enabled.
-- Google Vertex selected as the current OpenClaw provider path (`google-vertex`) with default model `google-vertex/gemini-2.5-flash`.
+- Google Vertex selected as the current OpenClaw provider path (`google-vertex`) with default model `google-vertex/gemini-3.5-flash`.
+- Canonical local LLM env names are `LLM_PROVIDER=vertex`, `VERTEX_PROJECT_ID=alien-slice-499511-f8`, `VERTEX_REGION=global`, and `LLM_MODEL=gemini-3.5-flash`.
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
 - OpenClaw Gateway service is not installed as a daemon; foreground local startup is handled by `Ai services/openclaw/scripts/start_local_gateway.sh`.
 - Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
@@ -176,7 +177,8 @@ Completed OpenClaw Gateway and Vertex onboarding slice:
 - Added repeatable local scripts for OpenClaw Google Vertex configuration and foreground Gateway startup.
 - Added an ignored local Gateway env flow that generates a shared token without committing or printing it.
 - Ignored OpenClaw-generated workspace root bootstrap/state files while keeping the project `job` skill tracked.
-- Switched the demo Vertex model default to `google-vertex/gemini-2.5-flash` after `google-vertex/gemini-3.5-flash` returned a Vertex model-not-found response for the configured project/region.
+- Switched the demo Vertex model default to `google-vertex/gemini-3.5-flash` with `VERTEX_REGION=global` after direct Vertex validation confirmed the model works in the selected project.
+- Added backend settings support for the canonical Vertex env names so live CrewAI/provider integration can read the same configuration.
 - Extended the dashboard OpenClaw status API and card to report live Gateway reachability, provider, model reference, token presence, project readiness, and local commands.
 - Verified Vertex ADC and the selected model with a direct Google Vertex REST generation smoke.
 - Verified the Gateway starts on loopback and serves the Control UI; full OpenClaw agent CLI execution is still blocked by a local device scope upgrade pending approval.
@@ -205,7 +207,7 @@ Latest verification run: 2026-07-08
 
 | Check | Command | Result |
 |---|---|---|
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 14 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 15 passed, 1 Starlette/httpx deprecation warning |
 | Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations && .venv/bin/ruff check .` | Passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed |
@@ -225,11 +227,12 @@ Latest verification run: 2026-07-08
 | Dashboard proxy smoke | Health, upload sample resume, analyze sample JD, fetch JSON and Markdown through `http://127.0.0.1:3001/api/*` | Passed: health ok, resume parsed, analysis completed, Markdown report returned |
 | OpenClaw Vertex model discovery | `openclaw models list --provider google-vertex --plain` | Passed: listed Google Vertex model refs |
 | OpenClaw gateway status | `openclaw gateway status` | Verified not running: service not installed, loopback probe refused |
-| OpenClaw Vertex config | `./Ai services/openclaw/scripts/configure_vertex_gateway.sh` | Passed: Google plugin enabled, default model set to `google-vertex/gemini-2.5-flash`, config valid |
+| OpenClaw Vertex config | `LLM_PROVIDER=vertex VERTEX_PROJECT_ID=alien-slice-499511-f8 VERTEX_REGION=global LLM_MODEL=gemini-3.5-flash ./Ai services/openclaw/scripts/configure_vertex_gateway.sh` | Passed: Google plugin enabled, default model set to `google-vertex/gemini-3.5-flash`, config valid |
 | OpenClaw Gateway startup | `JOBCOPILOT_API_TOKEN=test-token ./Ai services/openclaw/scripts/start_local_gateway.sh` | Passed: Gateway ready on `127.0.0.1:18789`, Control UI served HTTP 200 |
-| Frontend OpenClaw status | `curl -sS http://127.0.0.1:3003/api/openclaw/status` | Passed: provider `google-vertex`, model `google-vertex/gemini-2.5-flash`, gateway reachable true |
-| Vertex ADC model smoke | Direct Vertex REST `generateContent` for `gemini-2.5-flash` | Passed: model returned `ok` without exposing the access token |
-| OpenClaw agent CLI smoke | `openclaw agent --message "/job paste:..."` | Blocked: local device scope upgrade pending approval; prior `gemini-3.5-flash` default also returned Vertex model-not-found |
+| Frontend OpenClaw status | `curl -sS http://127.0.0.1:3003/api/openclaw/status` | Passed: provider `google-vertex`, model `google-vertex/gemini-3.5-flash`, gateway reachable true |
+| Vertex ADC model smoke | Direct Vertex REST `generateContent` for `global` / `gemini-3.5-flash` | Passed: model returned `ok` without exposing the access token |
+| Backend Vertex settings | `cd Backend && .venv/bin/pytest tests/test_settings.py` | Passed through full backend pytest run |
+| OpenClaw agent CLI smoke | `openclaw agent --message "/job paste:..."` | Blocked: local device scope upgrade pending approval |
 
 ## Change Log
 
@@ -278,7 +281,9 @@ Latest verification run: 2026-07-08
 - Verified frontend audit, lint, typecheck, production build, backend tests, and live dashboard proxy smoke.
 - Added the official CrewAI documentation URL as the required reference before live CrewAI implementation.
 - Added OpenClaw Google Vertex configure/start scripts and an ignored local Gateway env flow.
-- Switched the OpenClaw demo model default to `google-vertex/gemini-2.5-flash` after live Vertex validation.
+- Updated Vertex defaults to `LLM_PROVIDER=vertex`, `VERTEX_REGION=global`, and `LLM_MODEL=gemini-3.5-flash`.
+- Added backend settings coverage for the canonical Vertex env names.
+- Switched the OpenClaw demo model default to `google-vertex/gemini-3.5-flash` after live Vertex validation.
 - Ignored local OpenClaw workspace bootstrap/state files generated during Gateway startup.
 - Extended the dashboard OpenClaw status route/card with live Gateway reachability and updated local commands.
 - Verified Vertex ADC direct model access and documented the remaining OpenClaw local device pairing blocker.

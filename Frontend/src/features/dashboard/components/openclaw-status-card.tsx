@@ -20,7 +20,7 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
               Provider
             </div>
             <p className="mt-2 font-mono text-xs text-muted-foreground">
-              {status?.provider ?? "google-vertex"}
+              {status?.modelReference ?? "google-vertex/gemini-3.5-flash"}
             </p>
           </div>
           <div className="rounded-md border border-border bg-surface p-3">
@@ -58,6 +58,7 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
             gateway token {status?.auth.hasGatewayToken ? "present" : "local prompt"}
           </Badge>
           <Badge tone="primary">{status?.auth.location ?? "not set"}</Badge>
+          <Badge tone="neutral">{status?.llmProvider ?? "vertex"}</Badge>
         </div>
 
         <ButtonLink

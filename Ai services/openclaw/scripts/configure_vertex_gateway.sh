@@ -6,9 +6,13 @@ OPENCLAW_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$OPENCLAW_DIR/../.." && pwd)"
 WORKSPACE_DIR="$OPENCLAW_DIR/workspace"
 
-OPENCLAW_MODEL_REFERENCE="${OPENCLAW_MODEL_REFERENCE:-google-vertex/gemini-2.5-flash}"
+LLM_PROVIDER="${LLM_PROVIDER:-vertex}"
+LLM_MODEL="${LLM_MODEL:-gemini-3.5-flash}"
+VERTEX_REGION="${VERTEX_REGION:-${GOOGLE_CLOUD_LOCATION:-global}}"
+VERTEX_PROJECT_ID="${VERTEX_PROJECT_ID:-${GOOGLE_CLOUD_PROJECT:-}}"
+OPENCLAW_MODEL_REFERENCE="${OPENCLAW_MODEL_REFERENCE:-google-vertex/$LLM_MODEL}"
 OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
-GOOGLE_CLOUD_LOCATION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
+GOOGLE_CLOUD_LOCATION="$VERTEX_REGION"
 ADC_FILE="${GOOGLE_APPLICATION_CREDENTIALS:-$HOME/.config/gcloud/application_default_credentials.json}"
 
 ensure_path() {
@@ -26,6 +30,11 @@ ensure_path() {
 }
 
 detect_project() {
+  if [ -n "$VERTEX_PROJECT_ID" ]; then
+    printf '%s\n' "$VERTEX_PROJECT_ID"
+    return
+  fi
+
   if [ -n "${GOOGLE_CLOUD_PROJECT:-}" ]; then
     printf '%s\n' "$GOOGLE_CLOUD_PROJECT"
     return
@@ -55,6 +64,11 @@ PY
 
 ensure_path
 
+if [ "$LLM_PROVIDER" != "vertex" ]; then
+  echo "This script supports LLM_PROVIDER=vertex for OpenClaw google-vertex setup." >&2
+  exit 1
+fi
+
 if ! command -v openclaw >/dev/null 2>&1; then
   echo "OpenClaw CLI was not found. Install it with: curl -fsSL https://openclaw.ai/install.sh | bash" >&2
   exit 1
@@ -77,7 +91,10 @@ if [ -z "$GOOGLE_CLOUD_PROJECT" ]; then
   exit 1
 fi
 export GOOGLE_CLOUD_PROJECT
+export GOOGLE_CLOUD_PROJECT_ID="$GOOGLE_CLOUD_PROJECT"
 export GOOGLE_CLOUD_LOCATION
+export VERTEX_PROJECT_ID="$GOOGLE_CLOUD_PROJECT"
+export VERTEX_REGION="$GOOGLE_CLOUD_LOCATION"
 
 echo "Configuring OpenClaw for ResumePilot..."
 openclaw plugins enable google

@@ -91,6 +91,8 @@ export interface HealthStatus {
 }
 
 export interface OpenClawStatus {
+  llmProvider: string;
+  llmModel: string;
   provider: string;
   modelReference: string;
   gatewayUrl: string;

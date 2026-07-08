@@ -63,9 +63,11 @@ Local prerequisite:
 
 ```bash
 gcloud auth application-default login
-gcloud config set project <gcp-project-id>
-export GOOGLE_CLOUD_PROJECT=<gcp-project-id>
-export GOOGLE_CLOUD_LOCATION=us-central1
+gcloud config set project alien-slice-499511-f8
+export LLM_PROVIDER=vertex
+export VERTEX_PROJECT_ID=alien-slice-499511-f8
+export VERTEX_REGION=global
+export LLM_MODEL=gemini-3.5-flash
 ```
 
 Enable the included Google plugin and set the default model reference after choosing a Vertex model available in your project and region:
@@ -77,12 +79,14 @@ Enable the included Google plugin and set the default model reference after choo
 The script enables the included Google plugin, sets the default model reference, points OpenClaw at the project-local workspace, keeps the Gateway on loopback, and validates the config. Override defaults when needed:
 
 ```bash
-OPENCLAW_MODEL_REFERENCE=google-vertex/gemini-2.5-flash \
-GOOGLE_CLOUD_LOCATION=us-central1 \
+LLM_PROVIDER=vertex \
+VERTEX_PROJECT_ID=alien-slice-499511-f8 \
+VERTEX_REGION=global \
+LLM_MODEL=gemini-3.5-flash \
 ./Ai\ services/openclaw/scripts/configure_vertex_gateway.sh
 ```
 
-The current demo default is `google-vertex/gemini-2.5-flash`. Use a stable model ID for demos when possible. Confirm availability in your Google Cloud project and region before relying on it for a recorded demo.
+The current demo default maps `LLM_MODEL=gemini-3.5-flash` to `OPENCLAW_MODEL_REFERENCE=google-vertex/gemini-3.5-flash`. Use a stable model ID for demos when possible. Confirm availability in your Google Cloud project and region before relying on it for a recorded demo.
 
 ## WebChat / Control UI
 

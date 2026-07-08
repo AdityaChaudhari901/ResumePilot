@@ -32,13 +32,19 @@ async function probeGateway(gatewayUrl: string): Promise<{ reachable: boolean; s
 
 export async function GET() {
   const gatewayUrl = createGatewayUrl();
-  const provider = process.env.OPENCLAW_PROVIDER ?? "google-vertex";
-  const modelReference = process.env.OPENCLAW_MODEL_REFERENCE ?? `${provider}/gemini-2.5-flash`;
-  const googleCloudProject = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCLOUD_PROJECT;
-  const googleCloudLocation = process.env.GOOGLE_CLOUD_LOCATION ?? process.env.GOOGLE_CLOUD_REGION;
+  const llmProvider = process.env.LLM_PROVIDER ?? "vertex";
+  const provider = process.env.OPENCLAW_PROVIDER ?? (llmProvider === "vertex" ? "google-vertex" : llmProvider);
+  const llmModel = process.env.LLM_MODEL ?? "gemini-3.5-flash";
+  const modelReference = process.env.OPENCLAW_MODEL_REFERENCE ?? `${provider}/${llmModel}`;
+  const googleCloudProject =
+    process.env.VERTEX_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCLOUD_PROJECT;
+  const googleCloudLocation =
+    process.env.VERTEX_REGION ?? process.env.GOOGLE_CLOUD_LOCATION ?? process.env.GOOGLE_CLOUD_REGION;
   const gatewayProbe = await probeGateway(gatewayUrl);
 
   return Response.json({
+    llmProvider,
+    llmModel,
     provider,
     modelReference,
     gatewayUrl,
