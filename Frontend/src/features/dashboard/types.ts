@@ -96,6 +96,11 @@ export interface OpenClawStatus {
   gatewayUrl: string;
   dashboardUrl: string;
   webSocketUrl: string;
+  gateway: {
+    reachable: boolean;
+    statusCode: number | null;
+    checkedAt: string;
+  };
   auth: {
     vertexAuth: string;
     hasGatewayToken: boolean;
@@ -103,6 +108,7 @@ export interface OpenClawStatus {
     location: string;
   };
   commands: {
+    configure: string;
     gateway: string;
     dashboard: string;
     setModel: string;

@@ -51,12 +51,12 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local API server verified on `http://127.0.0.1:8002`.
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
 - OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
-- OpenClaw onboarding/gateway provider setup was intentionally skipped during installation.
-- Google Vertex selected as the current OpenClaw provider path (`google-vertex`) for local Gateway demos.
-- Local Google Cloud ADC file is present, but no active `gcloud` project is configured in the current CLI context.
-- OpenClaw Gateway service is not installed/running yet; `~/.openclaw/openclaw.json` is still missing.
+- OpenClaw local config exists at `~/.openclaw/openclaw.json`; the included Google plugin is enabled.
+- Google Vertex selected as the current OpenClaw provider path (`google-vertex`) with default model `google-vertex/gemini-2.5-flash`.
+- Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
+- OpenClaw Gateway service is not installed as a daemon; foreground local startup is handled by `Ai services/openclaw/scripts/start_local_gateway.sh`.
 - Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
-- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`.
+- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL` and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
 
 ## Product Rule
 
@@ -171,9 +171,19 @@ Completed initial WebChat/dashboard slice:
 - Added an npm override for Next's transitive PostCSS version so frontend production audit reports zero vulnerabilities.
 - Verified dashboard proxy flow against FastAPI on `127.0.0.1:8002` and Next.js on `127.0.0.1:3001`.
 
+Completed OpenClaw Gateway and Vertex onboarding slice:
+
+- Added repeatable local scripts for OpenClaw Google Vertex configuration and foreground Gateway startup.
+- Added an ignored local Gateway env flow that generates a shared token without committing or printing it.
+- Ignored OpenClaw-generated workspace root bootstrap/state files while keeping the project `job` skill tracked.
+- Switched the demo Vertex model default to `google-vertex/gemini-2.5-flash` after `google-vertex/gemini-3.5-flash` returned a Vertex model-not-found response for the configured project/region.
+- Extended the dashboard OpenClaw status API and card to report live Gateway reachability, provider, model reference, token presence, project readiness, and local commands.
+- Verified Vertex ADC and the selected model with a direct Google Vertex REST generation smoke.
+- Verified the Gateway starts on loopback and serves the Control UI; full OpenClaw agent CLI execution is still blocked by a local device scope upgrade pending approval.
+
 Next implementation scope:
 
-- Complete OpenClaw onboarding and channel pairing with Google Vertex after the GCP project, region, and model are selected.
+- Repair/approve OpenClaw local device scope pairing so `openclaw agent` can execute the `/job` command through the running Gateway instead of falling back to embedded mode.
 - Verify current CrewAI package/API docs, then replace or extend the deterministic fallback with live CrewAI structured-output agents.
 - Add backend dependency lock when finalizing local Python version/tooling.
 - Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
@@ -182,8 +192,7 @@ Next implementation scope:
 
 - Backend dependency lock does not exist yet; frontend `package-lock.json` exists.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
-- OpenClaw local skill exists, but OpenClaw gateway onboarding/channel pairing is not completed.
-- Google Vertex provider path is selected, but the current local `gcloud` config has no active project and OpenClaw has no persisted gateway config yet.
+- OpenClaw local skill and Gateway config exist, but `openclaw agent` currently needs local device scope pairing repaired or approved before full Gateway agent turns work from the CLI.
 - CrewAI APIs should be verified against current official docs at `https://docs.crewai.com/` before live integration.
 - OpenClaw APIs should be verified against current official docs before live integration.
 - Python 3.14 is installed locally, but Python 3.12 is the safer target for dependency compatibility.
@@ -216,6 +225,11 @@ Latest verification run: 2026-07-08
 | Dashboard proxy smoke | Health, upload sample resume, analyze sample JD, fetch JSON and Markdown through `http://127.0.0.1:3001/api/*` | Passed: health ok, resume parsed, analysis completed, Markdown report returned |
 | OpenClaw Vertex model discovery | `openclaw models list --provider google-vertex --plain` | Passed: listed Google Vertex model refs |
 | OpenClaw gateway status | `openclaw gateway status` | Verified not running: service not installed, loopback probe refused |
+| OpenClaw Vertex config | `./Ai services/openclaw/scripts/configure_vertex_gateway.sh` | Passed: Google plugin enabled, default model set to `google-vertex/gemini-2.5-flash`, config valid |
+| OpenClaw Gateway startup | `JOBCOPILOT_API_TOKEN=test-token ./Ai services/openclaw/scripts/start_local_gateway.sh` | Passed: Gateway ready on `127.0.0.1:18789`, Control UI served HTTP 200 |
+| Frontend OpenClaw status | `curl -sS http://127.0.0.1:3003/api/openclaw/status` | Passed: provider `google-vertex`, model `google-vertex/gemini-2.5-flash`, gateway reachable true |
+| Vertex ADC model smoke | Direct Vertex REST `generateContent` for `gemini-2.5-flash` | Passed: model returned `ok` without exposing the access token |
+| OpenClaw agent CLI smoke | `openclaw agent --message "/job paste:..."` | Blocked: local device scope upgrade pending approval; prior `gemini-3.5-flash` default also returned Vertex model-not-found |
 
 ## Change Log
 
@@ -263,6 +277,11 @@ Latest verification run: 2026-07-08
 - Added frontend dependency lock, lint/typecheck/build scripts, and a PostCSS audit override for the Next.js dependency tree.
 - Verified frontend audit, lint, typecheck, production build, backend tests, and live dashboard proxy smoke.
 - Added the official CrewAI documentation URL as the required reference before live CrewAI implementation.
+- Added OpenClaw Google Vertex configure/start scripts and an ignored local Gateway env flow.
+- Switched the OpenClaw demo model default to `google-vertex/gemini-2.5-flash` after live Vertex validation.
+- Ignored local OpenClaw workspace bootstrap/state files generated during Gateway startup.
+- Extended the dashboard OpenClaw status route/card with live Gateway reachability and updated local commands.
+- Verified Vertex ADC direct model access and documented the remaining OpenClaw local device pairing blocker.
 
 ## Maintenance Rule
 

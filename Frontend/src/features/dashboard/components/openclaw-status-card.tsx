@@ -40,13 +40,17 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
             Local commands
           </div>
           <div className="space-y-2 font-mono text-xs text-white/80">
+            <p>{status?.commands.configure ?? "./Ai services/openclaw/scripts/configure_vertex_gateway.sh"}</p>
             <p>{status?.commands.setModel ?? "openclaw models set google-vertex/<model-id>"}</p>
-            <p>{status?.commands.gateway ?? "openclaw gateway run --bind loopback"}</p>
+            <p>{status?.commands.gateway ?? "./Ai services/openclaw/scripts/start_local_gateway.sh"}</p>
             <p>{status?.commands.dashboard ?? "openclaw dashboard"}</p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={status?.gateway.reachable ? "success" : "warning"}>
+            gateway {status?.gateway.reachable ? "online" : "offline"}
+          </Badge>
           <Badge tone={status?.auth.projectConfigured ? "success" : "warning"}>
             GCP project {status?.auth.projectConfigured ? "set" : "not set"}
           </Badge>

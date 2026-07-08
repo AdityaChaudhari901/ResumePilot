@@ -20,3 +20,13 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+Ai services/openclaw/workspace/AGENTS.md
+Ai services/openclaw/workspace/BOOTSTRAP.md
+Ai services/openclaw/workspace/HEARTBEAT.md
+Ai services/openclaw/workspace/IDENTITY.md
+Ai services/openclaw/workspace/MEMORY.md
+Ai services/openclaw/workspace/SOUL.md
+Ai services/openclaw/workspace/TOOLS.md
+Ai services/openclaw/workspace/USER.md
+Ai services/openclaw/workspace/memory/
+Ai services/openclaw/workspace/openclaw-workspace-state.json

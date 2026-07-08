@@ -71,19 +71,25 @@ export GOOGLE_CLOUD_LOCATION=us-central1
 Enable the included Google plugin and set the default model reference after choosing a Vertex model available in your project and region:
 
 ```bash
-openclaw plugins enable google
-openclaw models set google-vertex/<model-id>
+./Ai\ services/openclaw/scripts/configure_vertex_gateway.sh
 ```
 
-Use a stable model ID for demos when possible. Confirm availability in your Google Cloud project and region before relying on it for a recorded demo.
+The script enables the included Google plugin, sets the default model reference, points OpenClaw at the project-local workspace, keeps the Gateway on loopback, and validates the config. Override defaults when needed:
+
+```bash
+OPENCLAW_MODEL_REFERENCE=google-vertex/gemini-2.5-flash \
+GOOGLE_CLOUD_LOCATION=us-central1 \
+./Ai\ services/openclaw/scripts/configure_vertex_gateway.sh
+```
+
+The current demo default is `google-vertex/gemini-2.5-flash`. Use a stable model ID for demos when possible. Confirm availability in your Google Cloud project and region before relying on it for a recorded demo.
 
 ## WebChat / Control UI
 
 Start the Gateway locally and open the browser dashboard:
 
 ```bash
-openclaw gateway run --bind loopback
-openclaw dashboard
+./Ai\ services/openclaw/scripts/start_local_gateway.sh
 ```
 
 Default local dashboard:
@@ -93,6 +99,17 @@ http://127.0.0.1:18789/
 ```
 
 The Control UI is an admin surface. Keep it on loopback, Tailscale, or an SSH tunnel; do not expose it publicly.
+
+The start script creates `Ai services/openclaw/.local/openclaw-gateway.env` with a generated gateway token and local runtime settings. The file is ignored by Git and should stay on the local machine. In a second shell, load it before opening the dashboard:
+
+```bash
+set -a
+source "./Ai services/openclaw/.local/openclaw-gateway.env"
+set +a
+openclaw dashboard
+```
+
+If OpenClaw reports `scope upgrade pending approval` for the local CLI, approve the pending device request from the Control UI or run the `openclaw devices approve <request-id>` command printed by OpenClaw with the local gateway token loaded in the shell. Do not disable gateway token auth to work around pairing.
 
 Run from OpenClaw chat:
 
