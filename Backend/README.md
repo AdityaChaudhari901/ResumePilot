@@ -16,6 +16,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
+- Evidence-backed LaTeX resume export using the uploaded resume facts and supported tailored bullets.
 - API token protection for the OpenClaw endpoint.
 
 ## Local Setup
@@ -75,7 +76,7 @@ alembic upgrade head
 `evals/outputs/backend_quality_gate.json`. The latest local run measured 20
 golden resume/JD pairs with 100% schema pass rate, 0 evidence gaps, 0
 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits,
-1.96 ms average latency, and 2.27 ms p95 latency in deterministic fallback mode.
+2.06 ms average latency, and 2.47 ms p95 latency in deterministic fallback mode.
 
 ## API Surface
 
@@ -85,6 +86,7 @@ unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits,
 - `GET /reports/{report_id}`
 - `GET /reports/{report_id}/markdown`
 - `GET /reports/{report_id}/trace`
+- `GET /reports/{report_id}/resume/latex`
 - `POST /chat/openclaw`
 
 The `/chat/openclaw` endpoint requires:

@@ -169,6 +169,7 @@ Acceptance criteria:
 - Deterministic skill matcher.
 - CrewAI agents for structured analysis and writing.
 - Markdown and JSON reports.
+- Evidence-backed LaTeX resume export from validated report data.
 - OpenClaw `/job` command integration.
 - Basic web UI or Swagger UI for resume upload.
 - CLI for local demo.
@@ -518,6 +519,8 @@ Request:
 ```http
 GET /reports/{report_id}
 GET /reports/{report_id}/markdown
+GET /reports/{report_id}/trace
+GET /reports/{report_id}/resume/latex
 ```
 
 ## Data model

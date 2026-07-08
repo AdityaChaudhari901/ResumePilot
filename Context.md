@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -34,11 +34,13 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/services/*.py`
   - `Backend/app/services/agent_workflow.py`
   - `Backend/app/services/crewai_workflow.py`
+  - `Backend/app/services/latex_resume_renderer.py`
   - `Backend/app/data/skill_dictionary.json`
   - `Backend/migrations/*.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/tests/test_backend_quality_gate.py`
+  - `Backend/tests/test_latex_resume_renderer.py`
   - `Backend/scripts/run_golden_evals.py`
   - `Backend/scripts/run_backend_quality_gate.py`
   - `Backend/scripts/bootstrap_py312.sh`
@@ -102,7 +104,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Browser fallback | Playwright, only when needed |
 | Agent orchestration | CrewAI |
 | LLM provider layer | CrewAI config or LiteLLM-compatible wrapper |
-| Reports | JSON and Markdown |
+| Reports | JSON, Markdown, and LaTeX `.tex` resume export |
 | Auth | Local API token via `JOBCOPILOT_API_TOKEN` |
 | Frontend | Next.js App Router, React, TypeScript, Tailwind CSS |
 | Frontend API bridge | Next.js route handlers as backend-for-frontend proxy |
@@ -238,9 +240,18 @@ Completed deterministic backend speed/accuracy quality gate slice:
 - Added focused tests for the gate and threshold failure explanations.
 - Updated backend README and testing docs with the quality-gate command and measured local deterministic results.
 
+Completed evidence-backed LaTeX resume export backend slice:
+
+- Added `Backend/app/services/latex_resume_renderer.py` using Aditya's compact one-page ATS LaTeX resume structure.
+- Added `GET /reports/{report_id}/resume/latex`, returning a downloadable `.tex` file with `application/x-tex` media type and a stable attachment filename.
+- The LaTeX export renders candidate/contact data, professional summary, evidence-backed skills, tailored resume highlights, experience, projects, education, and certifications from persisted `ResumeProfile`, `JobProfile`, and `ApplicationReport` data.
+- The renderer escapes LaTeX metacharacters and excludes missing or `add_only_if_true` skills from owned resume sections.
+- Added focused tests for LaTeX escaping, missing-skill exclusion, and API download behavior.
+- Updated backend README and architecture docs with the new report export endpoint.
+
 Next implementation scope:
 
-- Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
+- Add dashboard LaTeX download support, then add report export polish and visual regression/browser automation when the UI flow stabilizes.
 
 ## Known Gaps
 
@@ -248,6 +259,7 @@ Next implementation scope:
 - OpenClaw APIs should be verified against current official docs before live integration.
 - Backend lock is a pinned pip constraints file, not a hash-locked artifact; add hash locking or container builds before remote production deployment.
 - The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency, token usage, and cost are not included yet.
+- LaTeX `.tex` export is implemented; local PDF compilation is not implemented yet and should wait until TeX tooling and sandboxing behavior are verified.
 - Workflow trace currently stores mode, step summaries, and validation warning codes; per-step latency/cost telemetry is not persisted yet.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
 - Playwright browser smoke is blocked until Playwright tooling is installed; current dashboard verification uses lint/typecheck/build plus same-origin HTTP proxy smoke.
@@ -261,13 +273,14 @@ Latest verification run: 2026-07-08
 | Python runtime | `cd Backend && .venv/bin/python --version && .venv/bin/python -m pip check` | Passed: Python 3.12.13, no broken requirements |
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 19 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 22 passed, 1 Starlette/httpx deprecation warning |
+| LaTeX export focused tests | `cd Backend && .venv/bin/pytest tests/test_latex_resume_renderer.py tests/test_analysis_api.py` | Passed: 4 passed, 1 Starlette/httpx deprecation warning |
 | Backend trace focused tests | `cd Backend && .venv/bin/pytest tests/test_analysis_api.py tests/test_agent_workflow.py` | Passed: 6 passed, 1 Starlette/httpx deprecation warning |
-| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 60 files already formatted, all checks passed |
+| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 64 files already formatted, all checks passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 1.96 ms, p95 2.27 ms |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.06 ms, p95 2.47 ms |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
 | Live API smoke | Upload sample resume, analyze sample JD, fetch JSON and Markdown reports | Passed: health 200, upload 201, analyze 200, report 200, markdown 200 |
 | Live OpenClaw smoke | `POST /chat/openclaw` with `paste:` job text and allowlisted sender | Passed: 200, status `completed`, Markdown report returned |

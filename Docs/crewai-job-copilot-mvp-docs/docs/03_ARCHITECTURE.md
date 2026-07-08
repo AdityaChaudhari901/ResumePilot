@@ -138,6 +138,7 @@ Request:
 GET /reports/{report_id}
 GET /reports/{report_id}/markdown
 GET /reports/{report_id}/trace
+GET /reports/{report_id}/resume/latex
 ```
 
 ## Data model

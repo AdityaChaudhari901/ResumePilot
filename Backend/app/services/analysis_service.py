@@ -14,6 +14,7 @@ from app.schemas.resume import ResumeProfile
 from app.services.agent_workflow import run_application_agent_workflow
 from app.services.file_storage import StoredUpload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
+from app.services.latex_resume_renderer import render_tailored_resume_latex
 from app.services.matcher import match_resume_to_job
 from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import extract_resume_text, parse_resume_profile
@@ -132,6 +133,16 @@ def get_report_trace(db: Session, report_id: int) -> ReportWorkflowTraceResponse
         report_id=analysis.id,
         trace=_workflow_trace_from_record(analysis),
     )
+
+
+def get_tailored_resume_latex(db: Session, report_id: int) -> str:
+    analysis = AnalysisRepository(db).get(report_id)
+    if not analysis:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    report = ApplicationReport.model_validate(analysis.report_json)
+    resume = ResumeProfile.model_validate(analysis.resume.profile_json)
+    job = JobProfile.model_validate(analysis.job.profile_json)
+    return render_tailored_resume_latex(report=report, resume=resume, job=job)
 
 
 def _job_text_from_request(request: JobAnalysisRequest) -> str:

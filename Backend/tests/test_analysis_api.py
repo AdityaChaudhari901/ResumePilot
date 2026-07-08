@@ -25,6 +25,18 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert markdown_response.status_code == 200
     assert "# Job Fit Report" in markdown_response.text
 
+    latex_response = client.get(f"/reports/{body['report_id']}/resume/latex")
+    assert latex_response.status_code == 200
+    assert latex_response.headers["content-type"].startswith("application/x-tex")
+    assert (
+        latex_response.headers["content-disposition"]
+        == f'attachment; filename="resumepilot-report-{body["report_id"]}.tex"'
+    )
+    assert r"\documentclass[letterpaper,10pt]{article}" in latex_response.text
+    assert r"\section{Evidence-Backed Tailored Highlights}" in latex_response.text
+    assert "Python" in latex_response.text
+    assert "Docker" not in latex_response.text
+
     trace_response = client.get(f"/reports/{body['report_id']}/trace")
     assert trace_response.status_code == 200
     trace_body = trace_response.json()
