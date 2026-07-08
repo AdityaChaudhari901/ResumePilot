@@ -1,6 +1,7 @@
 from app.schemas.agent import (
     AgentStepName,
     AgentWorkflowMode,
+    AgentWorkflowTrace,
     CoverLetterAgentOutput,
     InterviewCoachAgentOutput,
     ResumeMatchAgentOutput,
@@ -39,6 +40,29 @@ def test_agent_workflow_generates_validated_report_sections(sample_resume_text, 
     }
     assert all(bullet.evidence_ids for bullet in result.report.tailored_bullets)
     assert "cover_letter_has_unsupported_skill" not in result.trace.validation_warning_codes
+    assert isinstance(result.trace.duration_ms, int)
+    assert result.trace.duration_ms >= 0
+    assert all(isinstance(step.duration_ms, int) for step in result.trace.steps)
+    assert all(step.duration_ms >= 0 for step in result.trace.steps if step.duration_ms is not None)
+
+
+def test_agent_workflow_trace_accepts_legacy_payload_without_timings():
+    trace = AgentWorkflowTrace.model_validate(
+        {
+            "mode": "deterministic_fallback",
+            "steps": [
+                {
+                    "name": "validation_gate",
+                    "status": "degraded",
+                    "summary": "Legacy trace without timing fields.",
+                }
+            ],
+            "validation_warning_codes": [],
+        }
+    )
+
+    assert trace.duration_ms is None
+    assert trace.steps[0].duration_ms is None
 
 
 def test_crewai_mode_falls_back_when_runtime_is_unavailable(
@@ -71,6 +95,8 @@ def test_crewai_mode_falls_back_when_runtime_is_unavailable(
     assert result.trace.mode == AgentWorkflowMode.deterministic_fallback
     assert result.trace.steps[0].name == AgentStepName.crewai_runtime
     assert result.trace.steps[0].status == "failed"
+    assert isinstance(result.trace.steps[0].duration_ms, int)
+    assert isinstance(result.trace.duration_ms, int)
     assert "crewai_unavailable" in result.trace.validation_warning_codes
 
 
@@ -127,6 +153,11 @@ def test_crewai_mode_uses_live_sections_then_validates(
                         ),
                     ]
                 ),
+                step_durations_ms={
+                    AgentStepName.resume_match.value: 11,
+                    AgentStepName.cover_letter.value: 22,
+                    AgentStepName.interview_coach.value: 33,
+                },
             )
 
     monkeypatch.setattr(
@@ -145,6 +176,8 @@ def test_crewai_mode_uses_live_sections_then_validates(
     assert result.trace.mode == AgentWorkflowMode.crewai
     assert result.trace.steps[1].name == AgentStepName.crewai_runtime
     assert result.trace.steps[1].status == "completed"
+    assert isinstance(result.trace.duration_ms, int)
+    assert all(step.duration_ms is not None for step in result.trace.steps)
     assert result.report.executive_summary.startswith("CrewAI-reviewed fit")
     assert "validated resume evidence" in result.report.cover_letter
     assert "crewai_unavailable" not in result.trace.validation_warning_codes

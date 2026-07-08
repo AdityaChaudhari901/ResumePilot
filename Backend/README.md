@@ -12,7 +12,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Deterministic skill matching and report generation.
 - CrewAI-ready agent workflow boundary with deterministic fallback.
 - Optional live CrewAI structured-output agents for fit explanation, cover letter drafting, and interview coaching.
-- Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution.
+- Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution, including total and per-step latency timings.
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
@@ -106,6 +106,11 @@ The `/chat/openclaw` endpoint requires:
 ```http
 Authorization: Bearer <JOBCOPILOT_API_TOKEN>
 ```
+
+`GET /reports/{report_id}/trace` returns the workflow mode, step statuses,
+step summaries, validation warning codes, and optional `duration_ms` timings for
+the full workflow and each step. Older persisted traces without timing fields
+remain valid.
 
 ## Accuracy Rule
 

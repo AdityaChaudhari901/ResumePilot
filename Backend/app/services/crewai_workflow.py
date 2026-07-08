@@ -1,10 +1,14 @@
 import json
 import os
 import sys
+from time import perf_counter
 from typing import Any
+
+from pydantic import Field
 
 from app.core.config import Settings
 from app.schemas.agent import (
+    AgentStepName,
     CoverLetterAgentOutput,
     InterviewCoachAgentOutput,
     ResumeMatchAgentOutput,
@@ -24,6 +28,7 @@ class CrewAIWorkflowSections(StrictBaseModel):
     resume_match: ResumeMatchAgentOutput
     cover_letter: CoverLetterAgentOutput
     interview_coach: InterviewCoachAgentOutput
+    step_durations_ms: dict[str, int] = Field(default_factory=dict)
 
 
 class CrewAIWorkflowRunner:
@@ -43,69 +48,85 @@ class CrewAIWorkflowRunner:
         deterministic_report: ApplicationReport,
     ) -> CrewAIWorkflowSections:
         self._prepare_runtime()
+        step_durations_ms: dict[str, int] = {}
+
+        resume_match_started_at = perf_counter()
+        resume_match = self._run_agent(
+            role="Evidence-bound resume match analyst",
+            goal=(
+                "Explain the deterministic resume/job match in concise, useful language "
+                "without changing the score, missing skills, or evidence."
+            ),
+            response_format=ResumeMatchAgentOutput,
+            prompt=self._prompt(
+                "Resume Match Agent",
+                [
+                    "Explain fit using only deterministic input.",
+                    "Do not add skills or evidence IDs.",
+                    "Keep confidence aligned to the deterministic match confidence.",
+                ],
+                resume=resume,
+                job=job,
+                match=match,
+                deterministic_report=deterministic_report,
+            ),
+        )
+        step_durations_ms[AgentStepName.resume_match.value] = _elapsed_ms(resume_match_started_at)
+
+        cover_letter_started_at = perf_counter()
+        cover_letter = self._run_agent(
+            role="Evidence-bound cover letter writer",
+            goal=(
+                "Draft a concise cover letter from validated fit evidence only, with a "
+                "clear confidence note."
+            ),
+            response_format=CoverLetterAgentOutput,
+            prompt=self._prompt(
+                "Cover Letter Agent",
+                [
+                    "Keep the letter under 300 words.",
+                    "Use only supported resume evidence and matched skills.",
+                    "Avoid exaggerated claims such as perfect fit unless the score is very high.",
+                    "Return evidence IDs that support the draft.",
+                ],
+                resume=resume,
+                job=job,
+                match=match,
+                deterministic_report=deterministic_report,
+            ),
+        )
+        step_durations_ms[AgentStepName.cover_letter.value] = _elapsed_ms(cover_letter_started_at)
+
+        interview_coach_started_at = perf_counter()
+        interview_coach = self._run_agent(
+            role="Evidence-bound interview coach",
+            goal=(
+                "Generate targeted interview preparation grouped by technical, behavioral, "
+                "project, and gap-focused categories."
+            ),
+            response_format=InterviewCoachAgentOutput,
+            prompt=self._prompt(
+                "Interview Coach Agent",
+                [
+                    "Tie suggested answer evidence IDs to resume facts.",
+                    "Flag weak and missing areas honestly.",
+                    "Do not invent projects, employers, metrics, degrees, or certifications.",
+                ],
+                resume=resume,
+                job=job,
+                match=match,
+                deterministic_report=deterministic_report,
+            ),
+        )
+        step_durations_ms[AgentStepName.interview_coach.value] = _elapsed_ms(
+            interview_coach_started_at
+        )
+
         return CrewAIWorkflowSections(
-            resume_match=self._run_agent(
-                role="Evidence-bound resume match analyst",
-                goal=(
-                    "Explain the deterministic resume/job match in concise, useful language "
-                    "without changing the score, missing skills, or evidence."
-                ),
-                response_format=ResumeMatchAgentOutput,
-                prompt=self._prompt(
-                    "Resume Match Agent",
-                    [
-                        "Explain fit using only deterministic input.",
-                        "Do not add skills or evidence IDs.",
-                        "Keep confidence aligned to the deterministic match confidence.",
-                    ],
-                    resume=resume,
-                    job=job,
-                    match=match,
-                    deterministic_report=deterministic_report,
-                ),
-            ),
-            cover_letter=self._run_agent(
-                role="Evidence-bound cover letter writer",
-                goal=(
-                    "Draft a concise cover letter from validated fit evidence only, with a "
-                    "clear confidence note."
-                ),
-                response_format=CoverLetterAgentOutput,
-                prompt=self._prompt(
-                    "Cover Letter Agent",
-                    [
-                        "Keep the letter under 300 words.",
-                        "Use only supported resume evidence and matched skills.",
-                        "Avoid exaggerated claims such as perfect fit unless the score is very "
-                        "high.",
-                        "Return evidence IDs that support the draft.",
-                    ],
-                    resume=resume,
-                    job=job,
-                    match=match,
-                    deterministic_report=deterministic_report,
-                ),
-            ),
-            interview_coach=self._run_agent(
-                role="Evidence-bound interview coach",
-                goal=(
-                    "Generate targeted interview preparation grouped by technical, behavioral, "
-                    "project, and gap-focused categories."
-                ),
-                response_format=InterviewCoachAgentOutput,
-                prompt=self._prompt(
-                    "Interview Coach Agent",
-                    [
-                        "Tie suggested answer evidence IDs to resume facts.",
-                        "Flag weak and missing areas honestly.",
-                        "Do not invent projects, employers, metrics, degrees, or certifications.",
-                    ],
-                    resume=resume,
-                    job=job,
-                    match=match,
-                    deterministic_report=deterministic_report,
-                ),
-            ),
+            resume_match=resume_match,
+            cover_letter=cover_letter,
+            interview_coach=interview_coach,
+            step_durations_ms=step_durations_ms,
         )
 
     def _prepare_runtime(self) -> None:
@@ -226,3 +247,7 @@ def _coerce_pydantic_output[OutputModelT: StrictBaseModel](
     raise CrewAIWorkflowUnavailable(
         f"CrewAI returned no typed output for {response_format.__name__}."
     )
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, round((perf_counter() - started_at) * 1000))

@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from time import perf_counter
+
 from app.core.config import Settings, get_cached_settings
 from app.schemas.agent import (
     AgentStepName,
@@ -62,28 +65,32 @@ def _run_deterministic_application_agent_workflow(
     deterministic parsing, matching, and validation as the source of truth.
     """
 
+    workflow_start = perf_counter()
     base_report = generate_report(analysis_id=analysis_id, resume=resume, job=job, match=match)
+    jd_step_start = perf_counter()
     traces = [
-        AgentStepTrace(
+        _step_trace(
             name=AgentStepName.jd_parser,
             status="completed",
             summary=(
                 "Used structured JobProfile produced by deterministic job parsing; "
                 "no hidden requirements inferred."
             ),
+            started_at=jd_step_start,
         )
     ]
 
-    fit = _resume_match_agent(resume, job, match)
+    fit, duration_ms = _timed_call(lambda: _resume_match_agent(resume, job, match))
     traces.append(
         AgentStepTrace(
             name=AgentStepName.resume_match,
             status="completed",
             summary=f"Explained fit with {len(fit.evidence_ids)} resume evidence references.",
+            duration_ms=duration_ms,
         )
     )
 
-    ats = _ats_optimizer_agent(base_report, match)
+    ats, duration_ms = _timed_call(lambda: _ats_optimizer_agent(base_report, match))
     traces.append(
         AgentStepTrace(
             name=AgentStepName.ats_optimizer,
@@ -92,10 +99,11 @@ def _run_deterministic_application_agent_workflow(
                 f"Prepared {len(ats.tailored_bullets)} bullet suggestions and "
                 f"{len(ats.keyword_suggestions)} keyword suggestions."
             ),
+            duration_ms=duration_ms,
         )
     )
 
-    cover_letter = _cover_letter_agent(resume, job, match)
+    cover_letter, duration_ms = _timed_call(lambda: _cover_letter_agent(resume, job, match))
     traces.append(
         AgentStepTrace(
             name=AgentStepName.cover_letter,
@@ -104,15 +112,17 @@ def _run_deterministic_application_agent_workflow(
                 "Drafted cover letter from matched resume evidence only; "
                 f"{len(cover_letter.evidence_ids)} evidence references used."
             ),
+            duration_ms=duration_ms,
         )
     )
 
-    interview = _interview_coach_agent(resume, match)
+    interview, duration_ms = _timed_call(lambda: _interview_coach_agent(resume, match))
     traces.append(
         AgentStepTrace(
             name=AgentStepName.interview_coach,
             status="completed",
             summary=f"Prepared {len(interview.question_groups)} interview question groups.",
+            duration_ms=duration_ms,
         )
     )
 
@@ -127,12 +137,13 @@ def _run_deterministic_application_agent_workflow(
         }
     )
 
+    validation_step_start = perf_counter()
     validation_warnings = _dedupe_warnings(
         [*report.validation_warnings, *validate_report_against_resume(report, resume)]
     )
     report.validation_warnings = validation_warnings
     traces.append(
-        AgentStepTrace(
+        _step_trace(
             name=AgentStepName.validation_gate,
             status="completed" if not validation_warnings else "degraded",
             summary=(
@@ -140,6 +151,7 @@ def _run_deterministic_application_agent_workflow(
                 if not validation_warnings
                 else f"Validation returned {len(validation_warnings)} warning(s)."
             ),
+            started_at=validation_step_start,
         )
     )
 
@@ -149,6 +161,7 @@ def _run_deterministic_application_agent_workflow(
             mode=AgentWorkflowMode.deterministic_fallback,
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
+            duration_ms=_elapsed_ms(workflow_start),
         ),
     )
 
@@ -161,6 +174,8 @@ def _run_crewai_application_agent_workflow(
     deterministic_result: AgentWorkflowResult,
     settings: Settings,
 ) -> AgentWorkflowResult:
+    workflow_start = perf_counter()
+    crewai_step_start = perf_counter()
     try:
         sections = build_crewai_workflow_runner(settings).run(
             resume=resume,
@@ -169,9 +184,16 @@ def _run_crewai_application_agent_workflow(
             deterministic_report=deterministic_result.report,
         )
     except Exception as exc:
-        return _with_crewai_fallback_warning(deterministic_result, exc)
+        return _with_crewai_fallback_warning(
+            deterministic_result,
+            exc,
+            crewai_duration_ms=_elapsed_ms(crewai_step_start),
+        )
 
-    ats = _ats_optimizer_agent(deterministic_result.report, match)
+    crewai_duration_ms = _elapsed_ms(crewai_step_start)
+    ats, ats_duration_ms = _timed_call(
+        lambda: _ats_optimizer_agent(deterministic_result.report, match)
+    )
     report = deterministic_result.report.model_copy(
         deep=True,
         update={
@@ -183,6 +205,7 @@ def _run_crewai_application_agent_workflow(
             "next_actions": _next_actions(deterministic_result.report, sections.resume_match, ats),
         },
     )
+    validation_step_start = perf_counter()
     validation_warnings = _dedupe_warnings(
         [*report.validation_warnings, *validate_report_against_resume(report, resume)]
     )
@@ -196,6 +219,10 @@ def _run_crewai_application_agent_workflow(
                 "Used structured JobProfile produced by deterministic job parsing; "
                 "no hidden requirements inferred."
             ),
+            duration_ms=_step_duration(
+                deterministic_result.trace.steps,
+                AgentStepName.jd_parser,
+            ),
         ),
         AgentStepTrace(
             name=AgentStepName.crewai_runtime,
@@ -204,6 +231,7 @@ def _run_crewai_application_agent_workflow(
                 "Executed live CrewAI structured-output agents with model "
                 f"{settings.crewai_llm_model or settings.llm_model}."
             ),
+            duration_ms=crewai_duration_ms,
         ),
         AgentStepTrace(
             name=AgentStepName.resume_match,
@@ -212,6 +240,7 @@ def _run_crewai_application_agent_workflow(
                 "CrewAI explained deterministic fit with "
                 f"{len(sections.resume_match.evidence_ids)} resume evidence references."
             ),
+            duration_ms=sections.step_durations_ms.get(AgentStepName.resume_match.value),
         ),
         AgentStepTrace(
             name=AgentStepName.ats_optimizer,
@@ -220,6 +249,7 @@ def _run_crewai_application_agent_workflow(
                 "Kept ATS keyword and bullet suggestions deterministic so evidence IDs remain "
                 "source-of-truth controlled."
             ),
+            duration_ms=ats_duration_ms,
         ),
         AgentStepTrace(
             name=AgentStepName.cover_letter,
@@ -228,6 +258,7 @@ def _run_crewai_application_agent_workflow(
                 "CrewAI drafted cover letter from validated evidence; "
                 f"{len(sections.cover_letter.evidence_ids)} evidence references used."
             ),
+            duration_ms=sections.step_durations_ms.get(AgentStepName.cover_letter.value),
         ),
         AgentStepTrace(
             name=AgentStepName.interview_coach,
@@ -236,8 +267,9 @@ def _run_crewai_application_agent_workflow(
                 "CrewAI prepared "
                 f"{len(sections.interview_coach.question_groups)} interview question groups."
             ),
+            duration_ms=sections.step_durations_ms.get(AgentStepName.interview_coach.value),
         ),
-        AgentStepTrace(
+        _step_trace(
             name=AgentStepName.validation_gate,
             status="completed" if not validation_warnings else "degraded",
             summary=(
@@ -245,6 +277,7 @@ def _run_crewai_application_agent_workflow(
                 if not validation_warnings
                 else f"Validation returned {len(validation_warnings)} warning(s)."
             ),
+            started_at=validation_step_start,
         ),
     ]
     return AgentWorkflowResult(
@@ -253,6 +286,7 @@ def _run_crewai_application_agent_workflow(
             mode=AgentWorkflowMode.crewai,
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
+            duration_ms=_elapsed_ms(workflow_start) + (deterministic_result.trace.duration_ms or 0),
         ),
     )
 
@@ -260,6 +294,8 @@ def _run_crewai_application_agent_workflow(
 def _with_crewai_fallback_warning(
     deterministic_result: AgentWorkflowResult,
     exc: Exception,
+    *,
+    crewai_duration_ms: int | None = None,
 ) -> AgentWorkflowResult:
     report = deterministic_result.report.model_copy(deep=True)
     warning = ValidationWarning(
@@ -279,6 +315,7 @@ def _with_crewai_fallback_warning(
                 "CrewAI live execution unavailable; deterministic fallback returned. "
                 f"Reason: {_public_error_summary(exc)}"
             ),
+            duration_ms=crewai_duration_ms,
         ),
         *deterministic_result.trace.steps,
     ]
@@ -288,6 +325,7 @@ def _with_crewai_fallback_warning(
             mode=AgentWorkflowMode.deterministic_fallback,
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
+            duration_ms=(deterministic_result.trace.duration_ms or 0) + (crewai_duration_ms or 0),
         ),
     )
 
@@ -517,6 +555,38 @@ def _human_list(values: list[str]) -> str:
 
 def _unique(values) -> list:
     return list(dict.fromkeys(values))
+
+
+def _step_trace(
+    *,
+    name: AgentStepName,
+    status: str,
+    summary: str,
+    started_at: float,
+) -> AgentStepTrace:
+    return AgentStepTrace(
+        name=name,
+        status=status,
+        summary=summary,
+        duration_ms=_elapsed_ms(started_at),
+    )
+
+
+def _timed_call[OutputT](callback: Callable[[], OutputT]) -> tuple[OutputT, int]:
+    started_at = perf_counter()
+    result = callback()
+    return result, _elapsed_ms(started_at)
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, round((perf_counter() - started_at) * 1000))
+
+
+def _step_duration(steps: list[AgentStepTrace], name: AgentStepName) -> int | None:
+    for step in steps:
+        if step.name == name:
+            return step.duration_ms
+    return None
 
 
 def _public_error_summary(exc: Exception) -> str:

@@ -29,12 +29,14 @@ export interface AgentStepTrace {
   name: AgentStepName;
   status: AgentStepStatus;
   summary: string;
+  duration_ms?: number | null;
 }
 
 export interface AgentWorkflowTrace {
   mode: AgentWorkflowMode;
   steps: AgentStepTrace[];
   validation_warning_codes: string[];
+  duration_ms?: number | null;
 }
 
 export interface ReportWorkflowTraceResponse {

@@ -67,6 +67,7 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
   await expect(page.getByRole("heading", { name: "Missing or weak" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Workflow trace" })).toBeVisible();
   await expect(page.getByText("Deterministic fallback")).toBeVisible();
+  await expect(page.getByText(/\d+(?:\.\d)? (?:ms|s) total/)).toBeVisible();
 
   const latexHref = await page.getByRole("link", { name: "LaTeX" }).getAttribute("href");
   return extractReportId(latexHref);

@@ -30,6 +30,7 @@ class AgentStepTrace(StrictBaseModel):
     name: AgentStepName
     status: str = Field(pattern="^(completed|degraded|failed)$")
     summary: str = Field(min_length=1)
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 class ResumeMatchAgentOutput(StrictBaseModel):
@@ -61,6 +62,7 @@ class AgentWorkflowTrace(StrictBaseModel):
     mode: AgentWorkflowMode
     steps: list[AgentStepTrace] = Field(min_length=1)
     validation_warning_codes: list[str] = Field(default_factory=list)
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 class AgentWorkflowResult(StrictBaseModel):

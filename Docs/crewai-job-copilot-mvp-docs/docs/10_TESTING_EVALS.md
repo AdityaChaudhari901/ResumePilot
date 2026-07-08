@@ -21,6 +21,7 @@
 - export report Markdown, LaTeX, and PDF
 - OpenClaw endpoint -> report
 - invalid token -> 401
+- report trace includes workflow mode, step statuses, and timing telemetry
 - blocked scrape -> paste fallback message
 
 ### Agent tests
@@ -113,6 +114,7 @@ Every time prompts, models, or scoring rules change:
 - compare match scores
 - compare unsupported-claim count
 - compare JSON validity
+- compare workflow trace timing shape
 - compare latency and cost
 
 Current backend command:
@@ -137,8 +139,9 @@ npm run test:e2e
 ```
 
 The Playwright smoke starts FastAPI and the production Next.js server, uploads a
-sample resume, analyzes the sample job, verifies Markdown/LaTeX/PDF exports, and
-captures desktop/mobile screenshots in ignored local artifacts.
+sample resume, analyzes the sample job, verifies workflow trace timing,
+Markdown/LaTeX/PDF exports, and captures desktop/mobile screenshots in ignored
+local artifacts.
 
 ## Demo dataset plan
 

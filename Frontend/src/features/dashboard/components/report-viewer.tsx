@@ -224,6 +224,7 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
   }
 
   const completedSteps = trace.steps.filter((step) => step.status === "completed").length;
+  const totalDuration = formatDuration(trace.duration_ms);
 
   return (
     <section
@@ -246,6 +247,7 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
               {completedSteps}/{trace.steps.length} steps completed
+              {totalDuration ? ` · ${totalDuration} total` : ""}
             </p>
           </div>
         </div>
@@ -253,23 +255,32 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
       </div>
 
       <div className="mt-4 space-y-2">
-        {trace.steps.map((step, index) => (
-          <div
-            className="flex min-w-0 gap-3 rounded-md border border-border bg-background p-3"
-            key={`${step.name}-${index}`}
-          >
-            <StepStatusIcon status={step.status} />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm font-medium">{STEP_LABELS[step.name]}</p>
-                <Badge tone={stepStatusTone(step.status)}>{stepStatusLabel(step.status)}</Badge>
+        {trace.steps.map((step, index) => {
+          const stepDuration = formatDuration(step.duration_ms);
+
+          return (
+            <div
+              className="flex min-w-0 gap-3 rounded-md border border-border bg-background p-3"
+              key={`${step.name}-${index}`}
+            >
+              <StepStatusIcon status={step.status} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{STEP_LABELS[step.name]}</p>
+                  <Badge tone={stepStatusTone(step.status)}>{stepStatusLabel(step.status)}</Badge>
+                  {stepDuration ? (
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {stepDuration}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
+                  {step.summary}
+                </p>
               </div>
-              <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
-                {step.summary}
-              </p>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {trace.validation_warning_codes.length > 0 && (
@@ -325,4 +336,15 @@ function stepStatusTone(status: AgentStepStatus): "success" | "warning" | "dange
     return "danger";
   }
   return "warning";
+}
+
+function formatDuration(durationMs: number | null | undefined): string | null {
+  if (durationMs === null || durationMs === undefined) {
+    return null;
+  }
+  if (durationMs < 1000) {
+    return `${durationMs} ms`;
+  }
+  const seconds = durationMs / 1000;
+  return `${seconds >= 10 ? seconds.toFixed(0) : seconds.toFixed(1)} s`;
 }

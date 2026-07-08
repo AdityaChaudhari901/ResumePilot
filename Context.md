@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with total/per-step latency timings, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -228,6 +228,15 @@ Completed workflow trace persistence and dashboard visibility slice:
 - Added API tests for deterministic trace persistence, CrewAI fallback persistence, and mocked CrewAI success persistence.
 - Updated backend/docs API references to include the trace endpoint.
 
+Completed workflow trace timing telemetry slice:
+
+- Added backward-compatible `duration_ms` fields to workflow traces and trace steps.
+- Measured deterministic workflow steps, live CrewAI runtime execution, individual CrewAI agent sections, ATS regeneration, validation, and total workflow latency with monotonic timers.
+- Persisted trace timing through existing report trace JSON so old traces without timing fields still validate.
+- Added dashboard rendering for total workflow duration and per-step durations.
+- Added backend and Playwright assertions for timing telemetry shape and visibility.
+- Updated backend/frontend README files and MVP docs with the trace timing contract.
+
 Completed backend Python 3.12 runtime and dependency lock slice:
 
 - Added root `.python-version` with Python `3.12.13`.
@@ -283,7 +292,7 @@ Completed dashboard Playwright browser smoke slice:
 
 Next implementation scope:
 
-- Add report export polish, saved export history or DOCX export, per-step latency/cost telemetry, and CI artifact upload or screenshot baseline comparisons.
+- Add report export polish, saved export history or DOCX export, token/cost telemetry, and CI artifact upload or screenshot baseline comparisons.
 
 ## Known Gaps
 
@@ -293,7 +302,7 @@ Next implementation scope:
 - The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency, token usage, and cost are not included yet.
 - PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
 - DOCX export is not implemented yet.
-- Workflow trace currently stores mode, step summaries, and validation warning codes; per-step latency/cost telemetry is not persisted yet.
+- Workflow trace stores mode, step summaries, validation warning codes, total latency, and per-step latency; token and cost telemetry are not persisted yet.
 - Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
 - Playwright browser smoke is implemented; CI artifact upload, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
@@ -307,14 +316,14 @@ Latest verification run: 2026-07-08
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
 | TeX compiler | `tectonic --version` | Passed: `Tectonic 0.16.9` |
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 28 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 29 passed, 1 Starlette/httpx deprecation warning |
 | Report export focused tests | `cd Backend && .venv/bin/pytest tests/test_pdf_resume_compiler.py tests/test_analysis_api.py tests/test_settings.py` | Passed: 10 passed, 1 Starlette/httpx deprecation warning |
-| Backend trace focused tests | `cd Backend && .venv/bin/pytest tests/test_analysis_api.py tests/test_agent_workflow.py` | Passed: 6 passed, 1 Starlette/httpx deprecation warning |
+| Backend trace timing coverage | `cd Backend && .venv/bin/pytest` | Passed: workflow trace timing assertions covered in full backend run, 29 passed |
 | Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 66 files already formatted, all checks passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.37 ms, p95 3.06 ms |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.97 ms, p95 4.71 ms |
 | Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
 | Generated ResumePilot PDF smoke | `cd Backend && .venv/bin/python - <<'PY' ... render_tailored_resume_latex(...) ... compile_latex_to_pdf(...) ... PY` | Passed: generated 19397-byte PDF with `%PDF-` prefix |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
@@ -328,9 +337,11 @@ Latest verification run: 2026-07-08
 | Frontend audit | `cd Frontend && npm audit --omit=dev` | Passed: 0 vulnerabilities after PostCSS override |
 | Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
-| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: Next.js production build generated app and API routes including `/api/reports/[reportId]/resume/latex` and `/api/reports/[reportId]/resume/pdf` |
+| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: Next.js production build generated app and API routes including `/api/reports/[reportId]/trace`, `/api/reports/[reportId]/resume/latex`, and `/api/reports/[reportId]/resume/pdf` |
 | Playwright Chromium install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e:install` | Passed: Chromium already available for Playwright |
-| Dashboard Playwright browser smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build, FastAPI on `127.0.0.1:8040`, Next.js on `127.0.0.1:3040`, 2 Chromium tests passed, Markdown/LaTeX/PDF exports verified |
+| Dashboard Playwright browser smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build, FastAPI on `127.0.0.1:8040`, Next.js on `127.0.0.1:3040`, 2 Chromium tests passed, workflow trace timing and Markdown/LaTeX/PDF exports verified |
+| E2E port cleanup | `lsof -nP -iTCP:8040 -sTCP:LISTEN` and `lsof -nP -iTCP:3040 -sTCP:LISTEN` | Passed: no listeners after Playwright completed |
+| Diff whitespace | `git diff --check` | Passed |
 | Dashboard screenshots | `Frontend/.local/playwright-results/**/dashboard-desktop.png` and `Frontend/.local/playwright-results/**/dashboard-mobile.png` | Passed: desktop and mobile screenshots captured in ignored local artifacts |
 | Dashboard LaTeX proxy smoke | Backend on `127.0.0.1:8033`, Next.js on `127.0.0.1:3033`, upload/analyze/fetch LaTeX through `/api/*` | Passed: health 200, upload 201, analyze 200, LaTeX 200, `content-type: application/x-tex`, attachment filename preserved |
 | Dashboard PDF proxy smoke | Backend on `127.0.0.1:8034`, Next.js on `127.0.0.1:3034`, upload/analyze/fetch PDF through `/api/*` | Passed: health 200, upload 201, analyze 200, PDF 200, `content-type: application/pdf`, attachment filename preserved, 19397-byte `%PDF-` payload |
@@ -434,6 +445,9 @@ Latest verification run: 2026-07-08
 - Added frontend e2e scripts, Playwright config, desktop/mobile screenshot capture, and ignored local browser test artifacts.
 - Updated root/frontend README files, testing docs, tech-stack docs, and this context file with the Playwright browser smoke workflow.
 - Verified Playwright Chromium install, frontend lint/typecheck, dashboard e2e smoke, backend tests, backend quality gate, and clean e2e smoke ports.
+- Added backward-compatible workflow trace `duration_ms` telemetry for total and per-step latency across deterministic fallback, live CrewAI success, and CrewAI fallback paths.
+- Rendered workflow trace timing in the dashboard and added backend/API/Playwright assertions for timing presence.
+- Updated backend/frontend README files, MVP architecture/reliability/testing docs, and this context file for trace timing telemetry.
 
 ## Maintenance Rule
 

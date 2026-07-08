@@ -146,6 +146,8 @@ Reject generated claims if they include:
 - API success rate
 - average latency
 - p95 latency
+- workflow total latency
+- per-step workflow latency
 - rate-limit retry count
 - failed scrape rate
 - validation failure rate
@@ -251,6 +253,8 @@ Log for every analysis:
 - parsing latency
 - matching latency
 - LLM latency
+- workflow trace total latency
+- per-step workflow trace latency
 - validation status
 - token usage/cost if available
 - errors

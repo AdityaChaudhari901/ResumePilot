@@ -52,6 +52,8 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
         AgentStepName.interview_coach,
         AgentStepName.validation_gate,
     ]
+    assert isinstance(trace_body["trace"]["duration_ms"], int)
+    assert all(isinstance(step["duration_ms"], int) for step in trace_body["trace"]["steps"])
 
 
 def test_read_tailored_resume_pdf_download(
@@ -136,6 +138,8 @@ def test_crewai_fallback_trace_is_persisted(
     assert trace["mode"] == AgentWorkflowMode.deterministic_fallback
     assert trace["steps"][0]["name"] == AgentStepName.crewai_runtime
     assert trace["steps"][0]["status"] == "failed"
+    assert isinstance(trace["steps"][0]["duration_ms"], int)
+    assert isinstance(trace["duration_ms"], int)
     assert "crewai_unavailable" in trace["validation_warning_codes"]
 
 
@@ -200,6 +204,8 @@ def test_crewai_success_trace_is_persisted(
         step for step in trace["steps"] if step["name"] == AgentStepName.crewai_runtime
     )
     assert runtime_step["status"] == "completed"
+    assert isinstance(runtime_step["duration_ms"], int)
+    assert isinstance(trace["duration_ms"], int)
     assert "crewai_unavailable" not in trace["validation_warning_codes"]
 
 
