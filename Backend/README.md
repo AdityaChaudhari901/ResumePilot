@@ -35,6 +35,9 @@ uvicorn app.main:app --reload
 
 Open Swagger UI at `http://127.0.0.1:8000/docs`.
 
+`GET /health` is a liveness check. `GET /ready` checks database connectivity and
+optionally verifies that the database revision matches Alembic head.
+
 The backend runtime is pinned to Python `>=3.12,<3.14`. The bootstrap script uses
 `requirements/py312-dev-ai.constraints.txt` so the local dev and live CrewAI
 dependency graph stays reproducible.
@@ -69,6 +72,32 @@ endpoint to remove expired resumes, reports, orphan jobs, and uploaded files:
 ```env
 DATA_RETENTION_DAYS=30
 ```
+
+## Production Runtime Contract
+
+Production runs must use PostgreSQL and Alembic migrations:
+
+```env
+APP_ENV=production
+DATABASE_URL=postgresql+psycopg://user:password@host:5432/resumepilot
+AUTH_REQUIRED=true
+AUTH_TRUSTED_PROXY_SECRET=<long-random-shared-secret>
+JOBCOPILOT_API_TOKEN=<long-random-token>
+AUTO_CREATE_DB_SCHEMA=false
+REQUIRE_DB_MIGRATIONS=true
+```
+
+When `APP_ENV=production`, the backend refuses to start with SQLite, missing
+signed-proxy auth, missing OpenClaw token, schema auto-creation, enabled debug
+mode, or disabled migration readiness checks. Production schema changes must go
+through Alembic:
+
+```bash
+alembic upgrade head
+```
+
+The repository includes a root `docker-compose.yml` with PostgreSQL, migrated
+FastAPI, and Next.js services. See `../Docs/DEPLOYMENT.md`.
 
 ## Optional Live CrewAI Mode
 
@@ -138,6 +167,7 @@ provider credentials and networked model calls.
 ## API Surface
 
 - `GET /health`
+- `GET /ready`
 - `POST /resumes/upload`
 - `DELETE /resumes/{resume_id}`
 - `POST /jobs/analyze`

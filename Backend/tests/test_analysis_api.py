@@ -23,6 +23,28 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert body["status"] == "completed"
     assert body["match_score"] >= 70
 
+    history_response = client.get("/reports")
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert len(history["items"]) == 1
+    history_item = history["items"][0]
+    assert history_item["report_id"] == body["report_id"]
+    assert history_item["analysis_id"] == body["analysis_id"]
+    assert history_item["resume_id"] == body["resume_id"]
+    assert history_item["company"] == "NovaHire AI"
+    assert history_item["role"] == "Junior Backend Engineer"
+    assert history_item["resume_candidate_name"] == "Aarav Sharma"
+    assert history_item["matched_skills_count"] >= 1
+    assert history_item["created_at"]
+
+    resume_response = client.get(f"/resumes/{body['resume_id']}")
+    assert resume_response.status_code == 200
+    resume = resume_response.json()
+    assert resume["resume_id"] == body["resume_id"]
+    assert resume["candidate"]["name"] == "Aarav Sharma"
+    assert resume["skills"]
+    assert resume["facts"]
+
     report_response = client.get(f"/reports/{body['report_id']}")
     assert report_response.status_code == 200
     report = report_response.json()
@@ -291,7 +313,9 @@ def _upload_and_analyze(
     )
 
     assert analyze_response.status_code == 200
-    return analyze_response.json()
+    body = analyze_response.json()
+    body["resume_id"] = resume_id
+    return body
 
 
 def _set_dev_user_plan(client, plan: str) -> None:

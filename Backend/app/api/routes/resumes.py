@@ -6,7 +6,7 @@ from app.core.config import Settings
 from app.schemas.auth import CurrentUser
 from app.schemas.privacy import ResumeDeleteResponse
 from app.schemas.resume import ResumeProfile, ResumeUploadResponse
-from app.services.analysis_service import create_resume_from_upload
+from app.services.analysis_service import create_resume_from_upload, get_resume_profile
 from app.services.file_storage import store_resume_upload
 from app.services.privacy_service import delete_resume
 
@@ -29,6 +29,15 @@ async def upload_resume(
         status="parsed",
         warnings=profile.warnings,
     )
+
+
+@router.get("/{resume_id}", response_model=ResumeProfile)
+def read_resume_profile(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ResumeProfile:
+    return get_resume_profile(db, resume_id, current_user)
 
 
 @router.delete("/{resume_id}", response_model=ResumeDeleteResponse)

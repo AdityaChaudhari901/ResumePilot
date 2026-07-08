@@ -67,6 +67,13 @@ flowchart TD
 GET /health
 ```
 
+```http
+GET /ready
+```
+
+`/health` is process liveness. `/ready` verifies database connectivity and, for
+production, confirms the database is at the current Alembic migration head.
+
 ### Resume upload
 
 ```http

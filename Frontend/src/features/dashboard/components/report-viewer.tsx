@@ -146,11 +146,17 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
                 <div className="rounded-md border border-border bg-surface p-3" key={item.skill}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{item.skill}</p>
-                    <Badge tone="success">{item.match_type}</Badge>
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                      <Badge tone="success">{item.match_type}</Badge>
+                      <Badge tone={confidenceTone(item.confidence)}>
+                        {item.confidence} confidence
+                      </Badge>
+                    </div>
                   </div>
                   <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
                     {item.job_evidence_text}
                   </p>
+                  <EvidenceIdBadges evidenceIds={item.resume_evidence_ids} />
                 </div>
               ))}
             </div>
@@ -312,12 +318,57 @@ function EvidenceIdBadges({ evidenceIds }: { evidenceIds: string[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {evidenceIds.map((evidenceId) => (
-        <Badge key={evidenceId} tone="primary">
-          {evidenceId}
+        <Badge key={evidenceId} tone={evidenceTone(evidenceId)}>
+          {evidenceLabel(evidenceId)}
         </Badge>
       ))}
     </div>
   );
+}
+
+function evidenceTone(evidenceId: string): "success" | "warning" | "primary" | "neutral" {
+  if (evidenceId.startsWith("projects_") || evidenceId.startsWith("experience_")) {
+    return "success";
+  }
+  if (evidenceId.startsWith("skills_") || evidenceId.startsWith("summary_")) {
+    return "warning";
+  }
+  if (evidenceId.startsWith("education_") || evidenceId.startsWith("certifications_")) {
+    return "primary";
+  }
+  return "neutral";
+}
+
+function evidenceLabel(evidenceId: string): string {
+  if (evidenceId.startsWith("projects_")) {
+    return `${evidenceId} · project`;
+  }
+  if (evidenceId.startsWith("experience_")) {
+    return `${evidenceId} · work`;
+  }
+  if (evidenceId.startsWith("skills_")) {
+    return `${evidenceId} · skills-only`;
+  }
+  if (evidenceId.startsWith("summary_")) {
+    return `${evidenceId} · summary`;
+  }
+  if (evidenceId.startsWith("education_")) {
+    return `${evidenceId} · education`;
+  }
+  if (evidenceId.startsWith("certifications_")) {
+    return `${evidenceId} · certification`;
+  }
+  return evidenceId;
+}
+
+function confidenceTone(confidence: ApplicationReport["matched_skills"][number]["confidence"]) {
+  if (confidence === "high") {
+    return "success";
+  }
+  if (confidence === "low") {
+    return "warning";
+  }
+  return "neutral";
 }
 
 interface WorkflowTracePanelProps {

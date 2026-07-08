@@ -1,3 +1,7 @@
+from fastapi.testclient import TestClient
+
+from app.core.config import Settings
+from app.main import create_app
 from app.schemas.agent import AgentWorkflowMode
 
 USER_A_HEADERS = {
@@ -23,6 +27,54 @@ def test_usage_summary_starts_with_free_plan_limits(client):
     assert _limit(body, "analyses") == {"used": 0, "limit": 3, "remaining": 3}
     assert _limit(body, "exports") == {"used": 0, "limit": 5, "remaining": 5}
     assert _limit(body, "crewai_runs") == {"used": 0, "limit": 0, "remaining": 0}
+
+
+def test_configured_dev_user_can_start_on_paid_local_plan(tmp_path):
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_URL=f"sqlite:///{tmp_path / 'resumepilot-dev-plan.db'}",
+        RESUMEPILOT_DATA_DIR=tmp_path / "data",
+        DEV_USER_PLAN="premium",
+        DEV_USER_SUBSCRIPTION_STATUS="active",
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/usage/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan"] == "premium"
+    assert body["subscription_status"] == "active"
+    assert body["live_crewai_enabled"] is True
+    assert _limit(body, "analyses") == {"used": 0, "limit": 500, "remaining": 500}
+
+
+def test_paid_local_plan_seed_only_applies_to_configured_dev_user(tmp_path):
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_URL=f"sqlite:///{tmp_path / 'resumepilot-tenant-plan.db'}",
+        RESUMEPILOT_DATA_DIR=tmp_path / "data",
+        DEV_USER_PLAN="premium",
+        DEV_USER_SUBSCRIPTION_STATUS="active",
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as test_client:
+        response = test_client.get(
+            "/usage/summary",
+            headers={
+                "X-ResumePilot-User": "non-dev-user",
+                "X-ResumePilot-Email": "non-dev@example.com",
+                "X-ResumePilot-Name": "Non Dev User",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan"] == "free"
+    assert body["subscription_status"] == "inactive"
+    assert body["live_crewai_enabled"] is False
 
 
 def test_analysis_usage_is_metered_and_limited(client, sample_resume_text, sample_job_text):

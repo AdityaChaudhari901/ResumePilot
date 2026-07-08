@@ -29,6 +29,24 @@ npm run test:e2e:install
 npm run test:e2e
 ```
 
+## Production-Like Docker Stack
+
+Copy the example env file, replace every placeholder secret, then start the
+PostgreSQL-backed stack:
+
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production up --build
+```
+
+FastAPI exposes `/health` for liveness and `/ready` for database/migration
+readiness. The backend refuses unsafe production startup, including SQLite,
+missing signed-proxy auth, missing OpenClaw token, schema auto-creation, or
+disabled migration checks.
+
+Read [Docs/DEPLOYMENT.md](Docs/DEPLOYMENT.md) before using this outside local
+development.
+
 ## CI
 
 GitHub Actions runs `.github/workflows/ci.yml` on pushes and pull requests to

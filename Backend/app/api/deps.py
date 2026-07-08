@@ -99,6 +99,8 @@ def get_current_user(
         external_id=external_id,
         email=email,
         display_name=display_name,
+        initial_plan=_initial_plan_for_user(external_id, settings),
+        initial_subscription_status=_initial_subscription_status_for_user(external_id, settings),
     )
 
 
@@ -138,3 +140,21 @@ def _header_value(request: Request, header_name: str) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _initial_plan_for_user(external_id: str, settings: Settings) -> str:
+    if _is_configured_dev_user(external_id, settings):
+        return settings.dev_user_plan
+    return "free"
+
+
+def _initial_subscription_status_for_user(external_id: str, settings: Settings) -> str:
+    if _is_configured_dev_user(external_id, settings):
+        return settings.dev_user_subscription_status
+    return "inactive"
+
+
+def _is_configured_dev_user(external_id: str, settings: Settings) -> bool:
+    return (
+        settings.app_env in {"development", "test"} and external_id == settings.dev_user_external_id
+    )

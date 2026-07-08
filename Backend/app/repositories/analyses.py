@@ -1,5 +1,5 @@
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import AnalysisRecord
 
@@ -13,6 +13,20 @@ class AnalysisRepository:
             select(AnalysisRecord)
             .where(AnalysisRecord.id == analysis_id, AnalysisRecord.user_id == user_id)
             .limit(1)
+        )
+
+    def list_recent(self, *, user_id: int, limit: int = 20) -> list[AnalysisRecord]:
+        return list(
+            self.db.scalars(
+                select(AnalysisRecord)
+                .options(
+                    selectinload(AnalysisRecord.resume),
+                    selectinload(AnalysisRecord.job),
+                )
+                .where(AnalysisRecord.user_id == user_id)
+                .order_by(AnalysisRecord.created_at.desc(), AnalysisRecord.id.desc())
+                .limit(limit)
+            )
         )
 
     def add(self, record: AnalysisRecord) -> AnalysisRecord:

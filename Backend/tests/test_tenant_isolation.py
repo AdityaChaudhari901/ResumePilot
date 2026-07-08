@@ -25,9 +25,17 @@ def test_reports_resumes_and_audit_events_are_tenant_scoped(
     )
 
     assert client.get(f"/reports/{user_a['report_id']}", headers=USER_A_HEADERS).status_code == 200
+    user_a_history = client.get("/reports", headers=USER_A_HEADERS)
+    assert user_a_history.status_code == 200
+    assert [item["report_id"] for item in user_a_history.json()["items"]] == [user_a["report_id"]]
+    user_a_resume = client.get(f"/resumes/{user_a['resume_id']}", headers=USER_A_HEADERS)
+    assert user_a_resume.status_code == 200
+    assert user_a_resume.json()["resume_id"] == user_a["resume_id"]
     assert client.get("/audit/events", headers=USER_A_HEADERS).json()["count"] > 0
 
     assert client.get(f"/reports/{user_a['report_id']}", headers=USER_B_HEADERS).status_code == 404
+    assert client.get(f"/resumes/{user_a['resume_id']}", headers=USER_B_HEADERS).status_code == 404
+    assert client.get("/reports", headers=USER_B_HEADERS).json()["items"] == []
     assert (
         client.get(f"/reports/{user_a['report_id']}/markdown", headers=USER_B_HEADERS).status_code
         == 404

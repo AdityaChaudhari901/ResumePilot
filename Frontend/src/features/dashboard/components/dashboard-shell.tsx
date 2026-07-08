@@ -11,7 +11,9 @@ import { AccountSessionCard } from "@/features/dashboard/components/account-sess
 import { HealthStrip } from "@/features/dashboard/components/health-strip";
 import { JobAnalysisCard } from "@/features/dashboard/components/job-analysis-card";
 import { OpenClawStatusCard } from "@/features/dashboard/components/openclaw-status-card";
+import { ReportHistoryCard } from "@/features/dashboard/components/report-history-card";
 import { ReportViewer } from "@/features/dashboard/components/report-viewer";
+import { ResumeProfileReviewCard } from "@/features/dashboard/components/resume-profile-review-card";
 import { ResumeUploadCard } from "@/features/dashboard/components/resume-upload-card";
 import { UsageStatusCard } from "@/features/dashboard/components/usage-status-card";
 import { SAMPLE_JOB_TEXT } from "@/features/dashboard/constants";
@@ -22,7 +24,10 @@ import type {
   HealthStatus,
   JobAnalysisResponse,
   OpenClawStatus,
+  ReportHistoryItem,
+  ReportHistoryResponse,
   ReportWorkflowTraceResponse,
+  ResumeProfile,
   ResumeUploadResponse,
   UsageSummaryResponse
 } from "@/features/dashboard/types";
@@ -32,6 +37,7 @@ interface DashboardStatusPayload {
   auth: DashboardAuthSession | null;
   health: HealthStatus;
   openclaw: OpenClawStatus;
+  reports: ReportHistoryItem[];
   usage: UsageSummaryResponse | null;
 }
 
@@ -46,8 +52,22 @@ async function fetchDashboardStatus(): Promise<DashboardStatusPayload> {
     auth: authResponse.ok ? ((await authResponse.json()) as DashboardAuthSession) : null,
     health: (await healthResponse.json()) as HealthStatus,
     openclaw: (await openclawResponse.json()) as OpenClawStatus,
+    reports: await fetchReportHistory(),
     usage: await fetchUsageSummary()
   };
+}
+
+async function fetchReportHistory(): Promise<ReportHistoryItem[]> {
+  try {
+    const response = await fetch("/api/reports?limit=20", { cache: "no-store" });
+    if (!response.ok) {
+      return [];
+    }
+    const payload = (await response.json()) as ReportHistoryResponse;
+    return payload.items;
+  } catch {
+    return [];
+  }
 }
 
 async function fetchUsageSummary(): Promise<UsageSummaryResponse | null> {
@@ -60,6 +80,16 @@ async function fetchUsageSummary(): Promise<UsageSummaryResponse | null> {
   } catch {
     return null;
   }
+}
+
+async function fetchResumeProfile(resumeId: number): Promise<ResumeProfile> {
+  const response = await fetch(`/api/resumes/${encodeURIComponent(String(resumeId))}`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return (await response.json()) as ResumeProfile;
 }
 
 interface DashboardShellProps {
@@ -76,12 +106,15 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [file, setFile] = useState<File | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [jobText, setJobText] = useState("");
   const [openclaw, setOpenclaw] = useState<OpenClawStatus | null>(null);
   const [report, setReport] = useState<ApplicationReport | null>(null);
+  const [reportHistory, setReportHistory] = useState<ReportHistoryItem[]>([]);
   const [resume, setResume] = useState<ResumeUploadResponse | null>(null);
+  const [resumeProfile, setResumeProfile] = useState<ResumeProfile | null>(null);
   const [role, setRole] = useState("");
   const [usage, setUsage] = useState<UsageSummaryResponse | null>(null);
   const [workflowTrace, setWorkflowTrace] = useState<AgentWorkflowTrace | null>(null);
@@ -92,7 +125,9 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     setAuthSession(status.auth);
     setHealth(status.health);
     setOpenclaw(status.openclaw);
+    setReportHistory(status.reports);
     setUsage(status.usage);
+    setIsLoadingHistory(false);
     setIsLoadingStatus(false);
   }, []);
 
@@ -109,7 +144,9 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       setHealth(status.health);
       setAuthSession(status.auth);
       setOpenclaw(status.openclaw);
+      setReportHistory(status.reports);
       setUsage(status.usage);
+      setIsLoadingHistory(false);
       setIsLoadingStatus(false);
     }
 
@@ -147,10 +184,13 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         throw new Error(await readApiError(response));
       }
 
-      setResume((await response.json()) as ResumeUploadResponse);
+      const nextResume = (await response.json()) as ResumeUploadResponse;
+      setResume(nextResume);
+      setResumeProfile(await fetchResumeProfile(nextResume.resume_id));
       setAnalysis(null);
       setReport(null);
       setWorkflowTrace(null);
+      setReportHistory(await fetchReportHistory());
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Resume upload failed");
     } finally {
@@ -167,6 +207,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 
     setErrorMessage(null);
     setIsAnalyzing(true);
+    setAnalysis(null);
+    setReport(null);
     setWorkflowTrace(null);
 
     try {
@@ -190,6 +232,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       const nextAnalysis = (await response.json()) as JobAnalysisResponse;
       setAnalysis(nextAnalysis);
       await loadReport(nextAnalysis.report_id);
+      setReportHistory(await fetchReportHistory());
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Job analysis failed");
     } finally {
@@ -216,6 +259,38 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       setWorkflowTrace(tracePayload.trace);
     } else {
       setWorkflowTrace(null);
+    }
+  }
+
+  async function handleSelectReport(item: ReportHistoryItem) {
+    setErrorMessage(null);
+    const nextAnalysis: JobAnalysisResponse = {
+      analysis_id: item.analysis_id,
+      match_score: item.match_score,
+      report_id: item.report_id,
+      status: item.status
+    };
+    setAnalysis(nextAnalysis);
+    setReport(null);
+    setWorkflowTrace(null);
+    setResume((currentResume) =>
+      currentResume?.resume_id === item.resume_id
+        ? currentResume
+        : {
+            candidate_name: item.resume_candidate_name,
+            resume_id: item.resume_id,
+            status: "parsed",
+            warnings: []
+          }
+    );
+    try {
+      const [profile] = await Promise.all([
+        fetchResumeProfile(item.resume_id),
+        loadReport(item.report_id)
+      ]);
+      setResumeProfile(profile);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Report history load failed");
     }
   }
 
@@ -266,6 +341,13 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               onSubmit={handleUpload}
               resume={resume}
             />
+            <ReportHistoryCard
+              isLoading={isLoadingHistory}
+              items={reportHistory}
+              onSelectReport={(item) => void handleSelectReport(item)}
+              selectedReportId={analysis?.report_id ?? null}
+            />
+            <ResumeProfileReviewCard profile={resumeProfile} />
             <AccountSessionCard session={authSession} />
             <OpenClawStatusCard status={openclaw} />
             <UsageStatusCard usage={usage} />

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
@@ -7,7 +9,7 @@ from app.core.config import Settings
 from app.schemas.agent import ReportWorkflowTraceResponse
 from app.schemas.auth import CurrentUser
 from app.schemas.privacy import ReportDeleteResponse
-from app.schemas.report import ApplicationReport
+from app.schemas.report import ApplicationReport, ReportHistoryResponse
 from app.services.analysis_service import (
     ensure_report_access,
     get_report,
@@ -16,6 +18,7 @@ from app.services.analysis_service import (
     get_tailored_resume_docx,
     get_tailored_resume_latex,
     get_tailored_resume_pdf,
+    list_report_history,
 )
 from app.services.audit_service import record_audit_event
 from app.services.privacy_service import delete_report
@@ -23,6 +26,15 @@ from app.services.usage_service import enforce_export_limit, record_export_usage
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@router.get("", response_model=ReportHistoryResponse)
+def list_reports(
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ReportHistoryResponse:
+    return list_report_history(db, current_user, limit=limit)
 
 
 @router.get("/{report_id}", response_model=ApplicationReport)

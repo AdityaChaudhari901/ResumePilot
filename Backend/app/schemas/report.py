@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import Field
 
 from app.schemas.common import StrictBaseModel, ValidationWarning
@@ -39,3 +41,25 @@ class ApplicationReport(StrictBaseModel):
     interview_questions: list[InterviewQuestionGroup] = Field(default_factory=list)
     validation_warnings: list[ValidationWarning] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
+
+
+class ReportHistoryItem(StrictBaseModel):
+    report_id: int
+    analysis_id: int
+    resume_id: int
+    job_id: int
+    company: str | None = None
+    role: str | None = None
+    resume_candidate_name: str | None = None
+    status: str
+    match_score: float = Field(ge=0, le=100)
+    workflow_mode: str
+    validation_warnings_count: int = Field(ge=0)
+    matched_skills_count: int = Field(ge=0)
+    missing_skills_count: int = Field(ge=0)
+    weak_skills_count: int = Field(ge=0)
+    created_at: datetime
+
+
+class ReportHistoryResponse(StrictBaseModel):
+    items: list[ReportHistoryItem] = Field(default_factory=list)

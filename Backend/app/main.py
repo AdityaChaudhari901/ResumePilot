@@ -4,17 +4,20 @@ from fastapi import FastAPI
 from app.api.routes import audit, chat, health, jobs, privacy, reports, resumes, usage
 from app.core.config import Settings, get_cached_settings
 from app.core.logging import configure_logging
+from app.core.production import validate_production_settings
 from app.db.session import create_database_engine, create_session_factory, initialize_database
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or get_cached_settings()
+    validate_production_settings(app_settings)
     configure_logging(app_settings.debug)
     app_settings.data_dir.mkdir(parents=True, exist_ok=True)
     app_settings.upload_dir.mkdir(parents=True, exist_ok=True)
 
     engine = create_database_engine(app_settings)
-    initialize_database(engine)
+    if app_settings.create_db_schema_on_startup:
+        initialize_database(engine)
     session_factory = create_session_factory(engine)
 
     app = FastAPI(

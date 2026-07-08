@@ -5,6 +5,42 @@ export interface ResumeUploadResponse {
   warnings: ValidationWarning[];
 }
 
+export type Confidence = "high" | "medium" | "low";
+
+export interface CandidateProfile {
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  location: string | null;
+  links: string[];
+}
+
+export interface ResumeFact {
+  id: string;
+  text: string;
+  section: string;
+  confidence: Confidence;
+}
+
+export interface ResumeSkill {
+  name: string;
+  category: string;
+  evidence_ids: string[];
+  confidence: Confidence;
+}
+
+export interface ResumeProfile {
+  resume_id: number;
+  candidate: CandidateProfile;
+  skills: ResumeSkill[];
+  experience: ResumeFact[];
+  projects: ResumeFact[];
+  education: ResumeFact[];
+  certifications: ResumeFact[];
+  facts: ResumeFact[];
+  warnings: ValidationWarning[];
+}
+
 export interface JobAnalysisResponse {
   analysis_id: number;
   report_id: number;
@@ -123,6 +159,28 @@ export interface ApplicationReport {
   interview_questions: InterviewQuestionGroup[];
   validation_warnings: ValidationWarning[];
   next_actions: string[];
+}
+
+export interface ReportHistoryItem {
+  report_id: number;
+  analysis_id: number;
+  resume_id: number;
+  job_id: number;
+  company: string | null;
+  role: string | null;
+  resume_candidate_name: string | null;
+  status: string;
+  match_score: number;
+  workflow_mode: string;
+  validation_warnings_count: number;
+  matched_skills_count: number;
+  missing_skills_count: number;
+  weak_skills_count: number;
+  created_at: string;
+}
+
+export interface ReportHistoryResponse {
+  items: ReportHistoryItem[];
 }
 
 export interface HealthStatus {

@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, signed BFF-to-FastAPI user identity boundary with Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with account/session visibility plus usage visibility and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, production startup safety checks, Docker Compose production-like stack, signed BFF-to-FastAPI user identity boundary with Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, tenant-scoped report history and resume profile review APIs, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with account/session visibility, usage visibility, report ledger, resume extraction review, evidence-strength labels, and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -28,6 +28,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/main.py`
   - `Backend/app/api/routes/*.py`
   - `Backend/app/core/*.py`
+  - `Backend/app/core/production.py`
   - `Backend/app/db/*.py`
   - `Backend/app/repositories/*.py`
   - `Backend/app/repositories/usage_events.py`
@@ -42,6 +43,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/services/usage_service.py`
   - `Backend/app/services/provider_pricing.py`
   - `Backend/app/services/privacy_service.py`
+  - `Backend/app/services/readiness_service.py`
   - `Backend/app/services/docx_resume_renderer.py`
   - `Backend/app/services/latex_resume_renderer.py`
   - `Backend/app/services/pdf_resume_compiler.py`
@@ -59,12 +61,18 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/scripts/run_backend_quality_gate.py`
   - `Backend/scripts/bootstrap_py312.sh`
   - `Backend/requirements/py312-dev-ai.constraints.txt`
+  - `Backend/Dockerfile`
+  - `Backend/.env.example`
   - `Backend/evals/resumes/*.md`
   - `Backend/evals/jobs/*.txt`
   - `Frontend/e2e/*.ts`
   - `Frontend/playwright.config.ts`
+  - `Frontend/Dockerfile`
+  - `Frontend/.env.example`
   - `Frontend/src/proxy.ts`
   - `Frontend/src/app/api/auth/session/route.ts`
+  - `Frontend/src/app/api/reports/route.ts`
+  - `Frontend/src/app/api/resumes/[resumeId]/route.ts`
   - `Frontend/src/app/api/openclaw/control/route.ts`
   - `Frontend/src/app/api/usage/summary/route.ts`
   - `Frontend/src/app/sign-in/[[...sign-in]]/page.tsx`
@@ -72,6 +80,9 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Frontend/src/lib/auth.ts`
   - `Frontend/src/lib/openclaw.ts`
   - `.github/workflows/ci.yml`
+  - `docker-compose.yml`
+  - `.env.production.example`
+  - `Docs/DEPLOYMENT.md`
   - `Ai services/openclaw/workspace/skills/job/SKILL.md`
   - `Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py`
   - `Ai services/openclaw/scripts/register_vertex_model.py`
@@ -98,10 +109,13 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
 - OpenClaw Gateway service is installed as a local LaunchAgent on `127.0.0.1:18789`; project-local foreground startup remains available through `Ai services/openclaw/scripts/start_local_gateway.sh`.
 - Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, lucide-react, and optional Clerk App Router auth support.
-- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, expose DOCX report download through `/api/reports/[reportId]/resume/docx`, expose PDF report download through `/api/reports/[reportId]/resume/pdf`, probe OpenClaw Gateway/model/session readiness through `/api/openclaw/status`, and open authenticated local OpenClaw Control UI tabs through `/api/openclaw/control`.
+- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report history through `/api/reports`, expose parsed resume profiles through `/api/resumes/[resumeId]`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, expose DOCX report download through `/api/reports/[reportId]/resume/docx`, expose PDF report download through `/api/reports/[reportId]/resume/pdf`, probe OpenClaw Gateway/model/session readiness through `/api/openclaw/status`, and open authenticated local OpenClaw Control UI tabs through `/api/openclaw/control`.
 - Frontend auth provider mode is controlled by `RESUMEPILOT_AUTH_PROVIDER`: `local` for deterministic local dev, `clerk` for Clerk App Router sessions, and `trusted_headers` for identity-aware reverse proxies.
 - FastAPI production auth mode requires `AUTH_REQUIRED=true` and `AUTH_TRUSTED_PROXY_SECRET` so tenant identity headers must be signed by the trusted Next.js BFF instead of accepted directly from browsers.
+- Production startup refuses SQLite, debug mode, missing signed-proxy auth, missing `JOBCOPILOT_API_TOKEN`, schema auto-creation, or disabled migration readiness checks.
+- `GET /health` is process liveness; `GET /ready` verifies database connectivity and, in production, Alembic migration head alignment.
 - Usage limits are currently enforced in-process from plan definitions: `free` allows 3 monthly analyses, 5 exports, and no live CrewAI; `pro` allows 100 monthly analyses, 100 exports, and no live CrewAI; `premium` allows 500 monthly analyses, 500 exports, and 100 live CrewAI runs.
+- Local development/test auto-created dev users can be seeded with `DEV_USER_PLAN` and `DEV_USER_SUBSCRIPTION_STATUS` for isolated browser verification; non-dev authenticated users still default to `free`/`inactive` until a real subscription flow updates them.
 - Live CrewAI execution is plan-gated. Free and Pro users are downgraded to deterministic fallback before any live CrewAI runner is called; only premium users consume `crewai_run` usage and billable cost estimates.
 
 ## Product Rule
@@ -146,7 +160,8 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Frontend icons | lucide-react |
 | Testing | pytest, httpx, respx, Playwright |
 | CI | GitHub Actions with Python 3.12 backend gate and Node.js 24 frontend static checks |
-| Packaging | Docker Compose later, not required on day one |
+| Production-like local stack | Docker Compose with PostgreSQL, FastAPI, and Next.js |
+| Packaging | Docker Compose production-like stack |
 
 ## Build Order
 
@@ -392,9 +407,19 @@ Completed dashboard Playwright browser smoke slice:
 - Updated root/frontend README files and testing docs with the browser smoke command and artifact locations.
 - Verified Playwright Chromium setup and the dashboard e2e smoke with 2 passing browser tests.
 
+Completed application workspace and evidence review slice:
+
+- Added tenant-scoped `GET /reports` report history with bounded limits and report/job/resume metadata.
+- Added tenant-scoped `GET /resumes/{resume_id}` parsed resume profile review endpoint.
+- Added backend tests proving report history and resume profile reads are owner-scoped.
+- Added Next.js BFF routes for report history and resume profile review.
+- Added dashboard `Report ledger` and `Resume extraction` panels so a user can reopen prior reports and inspect parsed skills/facts after upload.
+- Added evidence-strength labels to the report viewer so project/work evidence, skills-only evidence, summary evidence, education, and certification references are distinguishable.
+- Updated Playwright desktop/mobile smoke coverage for report history, resume extraction review, and existing export flow.
+
 Next implementation scope:
 
-- Add saved export history, richer export management, live-provider latency/cost aggregation in the backend quality gate, screenshot baseline/accessibility checks for the dashboard, and optional UI controls for audit/deletion workflows.
+- Add saved export history, richer export management, live-provider latency/cost aggregation in the backend quality gate, screenshot baseline/accessibility checks for the dashboard, multiple-resume default selection, and optional UI controls for audit/deletion workflows.
 
 ## Known Gaps
 
@@ -424,6 +449,16 @@ Latest verification run: 2026-07-09
 | Backend CI compile after repair | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Backend CI golden evals after repair | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: evaluated 20 pairs |
 | Backend CI quality gate after repair | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, schema pass 100%, evidence gaps 0, unsupported warnings 0, required-skill routing gaps 0, avg 8.91 ms, p95 12.48 ms |
+| Workspace API focused tests | `cd Backend && .venv/bin/pytest tests/test_analysis_api.py tests/test_tenant_isolation.py` | Passed: 8 passed, 1 Starlette/httpx deprecation warning |
+| Backend tests after workspace slice | `cd Backend && .venv/bin/pytest` | Passed: 60 passed, 1 Starlette/httpx deprecation warning |
+| Backend format and lint after workspace slice | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check app tests scripts migrations` | Passed: 92 files already formatted, all checks passed |
+| Backend compile after workspace slice | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
+| Backend golden evals after workspace slice | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: evaluated 20 pairs |
+| Backend quality gate after workspace slice | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, schema pass 100%, evidence gaps 0, unsupported warnings 0, required-skill routing gaps 0, avg 8.57 ms, p95 12.25 ms |
+| Frontend lint after workspace slice | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
+| Frontend typecheck after workspace slice | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Frontend production build after workspace slice | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: Next.js generated `/api/reports` and `/api/resumes/[resumeId]` routes |
+| Dashboard Playwright workspace smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: 2 Chromium tests covering report ledger, resume extraction review, report rendering, and Markdown/DOCX/LaTeX/PDF exports |
 | Python runtime | `cd Backend && .venv/bin/python --version && .venv/bin/python -m pip check` | Passed: Python 3.12.13, no broken requirements |
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
@@ -508,6 +543,8 @@ Latest verification run: 2026-07-09
 
 ### 2026-07-09
 
+- Added the application workspace slice with tenant-scoped report history, parsed resume profile review, dashboard report ledger, extraction review panel, and evidence-strength labels in the report viewer.
+- Verified the workspace slice with backend focused tests, full backend pytest, backend format/lint, frontend lint/typecheck/build, and Playwright desktop/mobile browser smoke.
 - Repaired the failed GitHub Actions backend quality gate by applying Ruff formatting/import ordering to backend models, migration, and tests, then wrapping long report-generator fixture literals.
 - Verified the CI backend sequence locally after repair: format check, lint, pytest, compileall, golden evals, and deterministic backend quality gate all passed.
 
@@ -638,6 +675,20 @@ Latest verification run: 2026-07-09
 - Scoped resume upload/reuse, job analysis, report reads/exports/traces, OpenClaw latest-resume lookup, report/resume deletion, retention purge, and audit event listing by current user.
 - Added tenant isolation tests proving cross-user report access/deletes/analyze attempts return 404, same resume files can be uploaded by different users without storage collision, audit events are user-scoped, and `AUTH_REQUIRED=true` rejects missing user context.
 - Verified Alembic upgrade on a fresh SQLite database, full backend pytest, Python compileall, frontend lint/typecheck/build, OpenClaw helper tests, health checks, and Playwright desktop/mobile dashboard smoke on fresh local ports `8014` and `3004`.
+- Fixed dashboard report accuracy during analysis/history transitions by clearing stale report and workflow trace state before loading a new report.
+- Added local dev-user plan seeding settings so Playwright can verify multi-report workflows without weakening production free-plan limits.
+- Ignored generated `Frontend/.local` browser artifacts in ESLint so E2E reports/traces do not break source linting.
+- Added backend coverage for dev-user plan seeding and tenant default-plan boundaries.
+- Added Playwright coverage proving the report ledger reopens the selected saved report and export links point to the selected report ID.
+- Verified full backend pytest, Ruff format/check, Python compileall, golden evals, backend quality gate, frontend lint/typecheck/build, and Playwright dashboard E2E with three passing Chromium tests.
+- Added production startup validation that rejects unsafe `APP_ENV=production` settings such as SQLite, missing signed-proxy auth, missing OpenClaw token, debug mode, schema auto-creation, or disabled migration readiness checks.
+- Added `GET /ready` with database connectivity and Alembic-head migration readiness checks while keeping `GET /health` as liveness.
+- Added PostgreSQL driver dependency support through `psycopg[binary]`.
+- Added backend and frontend Dockerfiles, `.dockerignore` files, root Docker Compose stack, production env example, local env examples, and deployment runbook.
+- Added a GitHub Actions deployment-config job that validates `docker-compose.yml` with `.env.production.example`.
+- Added tests for readiness success/failure, Alembic-upgraded database readiness, production default settings, and production config validation.
+- Verified targeted readiness/settings/auth tests, full backend pytest, Ruff format/check, Python compileall, golden evals, backend quality gate, frontend lint/typecheck/build, Playwright dashboard E2E, and Docker Compose config validation.
+- Attempted Docker Compose image build, but local Docker daemon was not running at `unix:///Users/adityachaudhari/.colima/default/docker.sock`, so image build verification remains pending.
 
 ## Maintenance Rule
 

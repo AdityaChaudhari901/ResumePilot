@@ -10,7 +10,7 @@ from app.repositories.resumes import ResumeRepository
 from app.schemas.agent import AgentWorkflowMode, AgentWorkflowTrace, ReportWorkflowTraceResponse
 from app.schemas.auth import CurrentUser
 from app.schemas.job import JobAnalysisRequest, JobAnalysisResponse, JobProfile
-from app.schemas.report import ApplicationReport
+from app.schemas.report import ApplicationReport, ReportHistoryItem, ReportHistoryResponse
 from app.schemas.resume import ResumeProfile
 from app.services.agent_workflow import run_application_agent_workflow
 from app.services.audit_service import record_audit_event
@@ -191,6 +191,25 @@ def latest_resume(db: Session, current_user: CurrentUser) -> ResumeRecord | None
     return ResumeRepository(db).latest(user_id=current_user.id)
 
 
+def get_resume_profile(db: Session, resume_id: int, current_user: CurrentUser) -> ResumeProfile:
+    resume_record = ResumeRepository(db).get(resume_id, user_id=current_user.id)
+    if not resume_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
+    return ResumeProfile.model_validate(resume_record.profile_json)
+
+
+def list_report_history(
+    db: Session,
+    current_user: CurrentUser,
+    *,
+    limit: int = 20,
+) -> ReportHistoryResponse:
+    analyses = AnalysisRepository(db).list_recent(user_id=current_user.id, limit=limit)
+    return ReportHistoryResponse(
+        items=[_report_history_item_from_record(analysis) for analysis in analyses]
+    )
+
+
 def get_report(db: Session, report_id: int, current_user: CurrentUser) -> ApplicationReport:
     analysis = AnalysisRepository(db).get(report_id, user_id=current_user.id)
     if not analysis:
@@ -340,3 +359,43 @@ def _workflow_trace_from_record(analysis: AnalysisRecord) -> AgentWorkflowTrace:
         return AgentWorkflowTrace.model_validate(trace_json)
     except ValidationError:
         return AgentWorkflowTrace.model_validate(default_workflow_trace())
+
+
+def _report_history_item_from_record(analysis: AnalysisRecord) -> ReportHistoryItem:
+    counts = _report_history_counts_from_record(analysis)
+    return ReportHistoryItem(
+        report_id=analysis.id,
+        analysis_id=analysis.id,
+        resume_id=analysis.resume_id,
+        job_id=analysis.job_id,
+        company=analysis.job.company,
+        role=analysis.job.role,
+        resume_candidate_name=analysis.resume.candidate_name,
+        status=analysis.status,
+        match_score=analysis.match_score,
+        workflow_mode=analysis.workflow_mode,
+        validation_warnings_count=counts["validation_warnings"],
+        matched_skills_count=counts["matched_skills"],
+        missing_skills_count=counts["missing_skills"],
+        weak_skills_count=counts["weak_skills"],
+        created_at=analysis.created_at,
+    )
+
+
+def _report_history_counts_from_record(analysis: AnalysisRecord) -> dict[str, int]:
+    try:
+        report = ApplicationReport.model_validate(analysis.report_json)
+    except ValidationError:
+        match_result = analysis.match_result_json or {}
+        return {
+            "validation_warnings": len(analysis.validation_warnings_json or []),
+            "matched_skills": len(match_result.get("matched_skills") or []),
+            "missing_skills": len(match_result.get("missing_skills") or []),
+            "weak_skills": len(match_result.get("weak_skills") or []),
+        }
+    return {
+        "validation_warnings": len(report.validation_warnings),
+        "matched_skills": len(report.matched_skills),
+        "missing_skills": len(report.missing_skills),
+        "weak_skills": len(report.weak_skills),
+    }

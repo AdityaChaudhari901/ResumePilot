@@ -32,6 +32,8 @@ export default defineConfig({
         `DATABASE_URL=sqlite:///./${backendDataDir}/playwright-smoke.db ` +
         `RESUMEPILOT_DATA_DIR=${backendDataDir} ` +
         "JOBCOPILOT_API_TOKEN=test-token " +
+        "DEV_USER_PLAN=premium " +
+        "DEV_USER_SUBSCRIPTION_STATUS=active " +
         `.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`,
       reuseExistingServer,
       timeout: 30_000,

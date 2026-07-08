@@ -11,6 +11,8 @@ def get_or_create_user(
     external_id: str,
     email: str | None = None,
     display_name: str | None = None,
+    initial_plan: str = "free",
+    initial_subscription_status: str = "inactive",
 ) -> CurrentUser:
     repository = UserRepository(db)
     record = repository.get_by_external_id(external_id)
@@ -19,8 +21,8 @@ def get_or_create_user(
             external_id=external_id,
             email=email,
             display_name=display_name,
-            plan="free",
-            subscription_status="inactive",
+            plan=initial_plan,
+            subscription_status=initial_subscription_status,
         )
         repository.save(record)
         return _current_user_from_record(record)

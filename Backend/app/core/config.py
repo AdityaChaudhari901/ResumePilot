@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     app_name: str = "ResumePilot"
     app_env: str = Field(default="development", alias="APP_ENV")
     app_debug: bool = Field(default=False, alias="APP_DEBUG")
+    auto_create_db_schema: bool | None = Field(default=None, alias="AUTO_CREATE_DB_SCHEMA")
+    require_db_migrations: bool | None = Field(default=None, alias="REQUIRE_DB_MIGRATIONS")
 
     database_url: str = Field(
         default_factory=lambda: f"sqlite:///{Path.home() / '.resumepilot' / 'resumepilot.db'}",
@@ -61,6 +63,18 @@ class Settings(BaseSettings):
         min_length=1,
         max_length=255,
     )
+    dev_user_plan: str = Field(
+        default="free",
+        alias="DEV_USER_PLAN",
+        min_length=1,
+        max_length=64,
+    )
+    dev_user_subscription_status: str = Field(
+        default="inactive",
+        alias="DEV_USER_SUBSCRIPTION_STATUS",
+        min_length=1,
+        max_length=64,
+    )
     llm_provider: str = Field(default="vertex", alias="LLM_PROVIDER")
     vertex_project_id: str | None = Field(default=None, alias="VERTEX_PROJECT_ID")
     vertex_region: str = Field(default="global", alias="VERTEX_REGION")
@@ -102,6 +116,21 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("auto_create_db_schema", "require_db_migrations", mode="before")
+    @classmethod
+    def normalize_optional_bool(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+    @field_validator("app_env")
+    @classmethod
+    def normalize_app_env(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("APP_ENV cannot be empty")
+        return normalized
+
     @field_validator("llm_provider", "vertex_region", "llm_model")
     @classmethod
     def normalize_required_text(cls, value: str) -> str:
@@ -123,7 +152,12 @@ class Settings(BaseSettings):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("dev_user_external_id", "dev_user_display_name")
+    @field_validator(
+        "dev_user_external_id",
+        "dev_user_display_name",
+        "dev_user_plan",
+        "dev_user_subscription_status",
+    )
     @classmethod
     def normalize_dev_user_text(cls, value: str) -> str:
         normalized = value.strip()
@@ -138,6 +172,22 @@ class Settings(BaseSettings):
     @property
     def upload_dir(self) -> Path:
         return self.data_dir / "uploads"
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+    @property
+    def create_db_schema_on_startup(self) -> bool:
+        if self.auto_create_db_schema is not None:
+            return self.auto_create_db_schema
+        return not self.is_production
+
+    @property
+    def check_db_migrations_on_readiness(self) -> bool:
+        if self.require_db_migrations is not None:
+            return self.require_db_migrations
+        return self.is_production
 
     @property
     def openclaw_sender_allowlist(self) -> list[str]:

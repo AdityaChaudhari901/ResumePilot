@@ -24,9 +24,13 @@ def test_vertex_llm_settings_are_loaded_from_env_names(tmp_path):
         AUTH_REQUIRED=True,
         AUTH_TRUSTED_PROXY_SECRET="proxy-secret",
         AUTH_SIGNATURE_TTL_SECONDS=600,
+        AUTO_CREATE_DB_SCHEMA=False,
+        REQUIRE_DB_MIGRATIONS=True,
         DEV_USER_EXTERNAL_ID="dev-user",
         DEV_USER_EMAIL="dev@example.com",
         DEV_USER_DISPLAY_NAME="Dev User",
+        DEV_USER_PLAN="premium",
+        DEV_USER_SUBSCRIPTION_STATUS="active",
     )
 
     assert settings.llm_provider == "vertex"
@@ -46,9 +50,15 @@ def test_vertex_llm_settings_are_loaded_from_env_names(tmp_path):
     assert settings.auth_required is True
     assert settings.auth_trusted_proxy_secret == "proxy-secret"
     assert settings.auth_signature_ttl_seconds == 600
+    assert settings.auto_create_db_schema is False
+    assert settings.require_db_migrations is True
+    assert settings.create_db_schema_on_startup is False
+    assert settings.check_db_migrations_on_readiness is True
     assert settings.dev_user_external_id == "dev-user"
     assert settings.dev_user_email == "dev@example.com"
     assert settings.dev_user_display_name == "Dev User"
+    assert settings.dev_user_plan == "premium"
+    assert settings.dev_user_subscription_status == "active"
 
 
 def test_empty_data_retention_days_disables_retention(tmp_path):
@@ -60,3 +70,17 @@ def test_empty_data_retention_days_disables_retention(tmp_path):
     )
 
     assert settings.data_retention_days is None
+
+
+def test_production_defaults_disable_schema_creation_and_require_migrations(tmp_path):
+    settings = Settings(
+        APP_ENV="production",
+        DATABASE_URL="postgresql+psycopg://user:password@example.com:5432/resumepilot",
+        RESUMEPILOT_DATA_DIR=tmp_path / "data",
+        AUTH_REQUIRED=True,
+        AUTH_TRUSTED_PROXY_SECRET="proxy-secret",
+        JOBCOPILOT_API_TOKEN="jobcopilot-token",
+    )
+
+    assert settings.create_db_schema_on_startup is False
+    assert settings.check_db_migrations_on_readiness is True
