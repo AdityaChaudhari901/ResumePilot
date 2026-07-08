@@ -18,6 +18,7 @@ cd Backend
 scripts/bootstrap_py312.sh --recreate
 source .venv/bin/activate
 pytest
+python scripts/run_backend_quality_gate.py
 ```
 
 The backend runtime is standardized on Python 3.12 because live CrewAI execution

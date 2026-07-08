@@ -15,6 +15,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution.
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
+- Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
 - API token protection for the OpenClaw endpoint.
 
 ## Local Setup
@@ -66,8 +67,15 @@ pytest
 ruff check .
 python -m compileall app tests
 python scripts/run_golden_evals.py
+python scripts/run_backend_quality_gate.py
 alembic upgrade head
 ```
+
+`scripts/run_backend_quality_gate.py` writes an ignored JSON report to
+`evals/outputs/backend_quality_gate.json`. The latest local run measured 20
+golden resume/JD pairs with 100% schema pass rate, 0 evidence gaps, 0
+unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits,
+1.96 ms average latency, and 2.27 ms p95 latency in deterministic fallback mode.
 
 ## API Surface
 

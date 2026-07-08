@@ -107,10 +107,24 @@ All reports must validate against `ApplicationReportSchema`.
 Every time prompts, models, or scoring rules change:
 
 - run golden eval set
+- run backend quality gate
 - compare match scores
 - compare unsupported-claim count
 - compare JSON validity
 - compare latency and cost
+
+Current backend command:
+
+```bash
+cd Backend
+python scripts/run_backend_quality_gate.py
+```
+
+The gate measures the deterministic golden corpus for schema pass rate,
+evidence gaps, unsupported claim warnings, required-skill routing gaps,
+sensitive-output hits, average latency, and p95 latency. The generated JSON
+report is written to `Backend/evals/outputs/backend_quality_gate.json`, which is
+ignored by git.
 
 ## Demo dataset plan
 
@@ -150,5 +164,6 @@ Do not invent these metrics. Measure them first.
 - run ruff/formatting if configured
 - run type checks if configured
 - run sample analysis
+- run backend quality gate
 - validate generated report JSON
 - fail build if unsupported claim detector fails

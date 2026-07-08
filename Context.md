@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -38,7 +38,9 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/migrations/*.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
+  - `Backend/tests/test_backend_quality_gate.py`
   - `Backend/scripts/run_golden_evals.py`
+  - `Backend/scripts/run_backend_quality_gate.py`
   - `Backend/scripts/bootstrap_py312.sh`
   - `Backend/requirements/py312-dev-ai.constraints.txt`
   - `Backend/evals/resumes/*.md`
@@ -228,6 +230,14 @@ Completed backend Python 3.12 runtime and dependency lock slice:
 - Recreated the default ignored `Backend/.venv` as Python 3.12.13 using the bootstrap script.
 - Updated root and backend README setup commands to use the Python 3.12 bootstrap path.
 
+Completed deterministic backend speed/accuracy quality gate slice:
+
+- Added `Backend/scripts/run_backend_quality_gate.py` for a repeatable backend readiness gate before frontend expansion.
+- The gate runs the existing 4 resume x 5 job golden corpus through deterministic parsing, matching, workflow report generation, Pydantic schema validation, evidence validation, required-skill routing checks, sensitive-output checks, and latency measurement.
+- Default thresholds require 100% schema pass rate, 0 evidence gaps, 0 unsupported warning counts, 0 required-skill routing gaps, 0 sensitive-output hits, average latency under 500 ms, and p95 latency under 1500 ms.
+- Added focused tests for the gate and threshold failure explanations.
+- Updated backend README and testing docs with the quality-gate command and measured local deterministic results.
+
 Next implementation scope:
 
 - Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
@@ -237,6 +247,7 @@ Next implementation scope:
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw APIs should be verified against current official docs before live integration.
 - Backend lock is a pinned pip constraints file, not a hash-locked artifact; add hash locking or container builds before remote production deployment.
+- The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency, token usage, and cost are not included yet.
 - Workflow trace currently stores mode, step summaries, and validation warning codes; per-step latency/cost telemetry is not persisted yet.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
 - Playwright browser smoke is blocked until Playwright tooling is installed; current dashboard verification uses lint/typecheck/build plus same-origin HTTP proxy smoke.
@@ -256,6 +267,7 @@ Latest verification run: 2026-07-08
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 1.96 ms, p95 2.27 ms |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
 | Live API smoke | Upload sample resume, analyze sample JD, fetch JSON and Markdown reports | Passed: health 200, upload 201, analyze 200, report 200, markdown 200 |
 | Live OpenClaw smoke | `POST /chat/openclaw` with `paste:` job text and allowlisted sender | Passed: 200, status `completed`, Markdown report returned |
