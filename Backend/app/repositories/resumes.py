@@ -8,15 +8,24 @@ class ResumeRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def get(self, resume_id: int) -> ResumeRecord | None:
-        return self.db.get(ResumeRecord, resume_id)
-
-    def get_by_file_hash(self, file_hash: str) -> ResumeRecord | None:
-        return self.db.scalar(select(ResumeRecord).where(ResumeRecord.file_hash == file_hash))
-
-    def latest(self) -> ResumeRecord | None:
+    def get(self, resume_id: int, *, user_id: int) -> ResumeRecord | None:
         return self.db.scalar(
             select(ResumeRecord)
+            .where(ResumeRecord.id == resume_id, ResumeRecord.user_id == user_id)
+            .limit(1)
+        )
+
+    def get_by_file_hash(self, file_hash: str, *, user_id: int) -> ResumeRecord | None:
+        return self.db.scalar(
+            select(ResumeRecord)
+            .where(ResumeRecord.file_hash == file_hash, ResumeRecord.user_id == user_id)
+            .limit(1)
+        )
+
+    def latest(self, *, user_id: int) -> ResumeRecord | None:
+        return self.db.scalar(
+            select(ResumeRecord)
+            .where(ResumeRecord.user_id == user_id)
             .order_by(ResumeRecord.created_at.desc(), ResumeRecord.id.desc())
             .limit(1)
         )

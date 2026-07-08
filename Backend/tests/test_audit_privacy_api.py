@@ -48,7 +48,7 @@ def test_delete_resume_removes_resume_reports_upload_and_writes_audit_event(
     client, settings, sample_resume_text, sample_job_text
 ):
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
-    upload_files_before = list(settings.upload_dir.iterdir())
+    upload_files_before = list(settings.upload_dir.glob("users/*/*"))
     assert upload_files_before
 
     delete_response = client.delete(f"/resumes/{body['resume_id']}")
@@ -60,7 +60,7 @@ def test_delete_resume_removes_resume_reports_upload_and_writes_audit_event(
     assert delete_body["deleted_reports"] == 1
     assert delete_body["deleted_upload_files"] == 1
     assert client.get(f"/reports/{body['report_id']}").status_code == 404
-    assert list(settings.upload_dir.iterdir()) == []
+    assert list(settings.upload_dir.glob("users/*/*")) == []
 
     events_response = client.get("/audit/events?event_type=resume.deleted")
     assert events_response.status_code == 200

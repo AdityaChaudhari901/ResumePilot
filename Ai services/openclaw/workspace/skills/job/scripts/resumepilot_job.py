@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_SENDER_ID = "openclaw:local"
 DEFAULT_SESSION_ID = "openclaw:resume-pilot"
+COMMAND_PREFIX_RE = re.compile(r"^/(?:job|skill\s+job)(?:\s+|$)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,7 @@ def config_from_env() -> ResumePilotConfig:
 
 def normalize_command_args(raw_args: str) -> str:
     cleaned = raw_args.strip()
+    cleaned = COMMAND_PREFIX_RE.sub("", cleaned, count=1).strip()
     if cleaned.lower().startswith("paste "):
         return "paste:" + cleaned[6:].strip()
     return cleaned

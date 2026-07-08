@@ -37,6 +37,30 @@ class Settings(BaseSettings):
     )
     jobcopilot_api_token: str | None = Field(default=None, alias="JOBCOPILOT_API_TOKEN")
     openclaw_sender_allowlist_raw: str = Field(default="", alias="OPENCLAW_SENDER_ALLOWLIST")
+    auth_required: bool = Field(default=False, alias="AUTH_REQUIRED")
+    auth_trusted_proxy_secret: str | None = Field(
+        default=None,
+        alias="AUTH_TRUSTED_PROXY_SECRET",
+    )
+    auth_signature_ttl_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        alias="AUTH_SIGNATURE_TTL_SECONDS",
+    )
+    dev_user_external_id: str = Field(
+        default="local-dev-user",
+        alias="DEV_USER_EXTERNAL_ID",
+        min_length=1,
+        max_length=255,
+    )
+    dev_user_email: str | None = Field(default=None, alias="DEV_USER_EMAIL")
+    dev_user_display_name: str = Field(
+        default="Local Developer",
+        alias="DEV_USER_DISPLAY_NAME",
+        min_length=1,
+        max_length=255,
+    )
     llm_provider: str = Field(default="vertex", alias="LLM_PROVIDER")
     vertex_project_id: str | None = Field(default=None, alias="VERTEX_PROJECT_ID")
     vertex_region: str = Field(default="global", alias="VERTEX_REGION")
@@ -86,13 +110,26 @@ class Settings(BaseSettings):
             raise ValueError("value cannot be empty")
         return normalized
 
-    @field_validator("vertex_project_id", "crewai_llm_model")
+    @field_validator(
+        "vertex_project_id",
+        "crewai_llm_model",
+        "dev_user_email",
+        "auth_trusted_proxy_secret",
+    )
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
         return normalized or None
+
+    @field_validator("dev_user_external_id", "dev_user_display_name")
+    @classmethod
+    def normalize_dev_user_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value cannot be empty")
+        return normalized
 
     @property
     def debug(self) -> bool:

@@ -145,6 +145,9 @@ export interface OpenClawStatus {
   modelReference: string;
   gatewayUrl: string;
   dashboardUrl: string;
+  chatUrl: string;
+  rawDashboardUrl: string;
+  rawChatUrl: string;
   webSocketUrl: string;
   gateway: {
     reachable: boolean;
@@ -157,6 +160,13 @@ export interface OpenClawStatus {
     projectConfigured: boolean;
     location: string;
   };
+  readiness: {
+    modelRegistered: boolean;
+    agentModelRegistered: boolean;
+    mainSessionRegistered: boolean;
+    dashboardLaunch: string;
+    status: "ready" | "needs_setup";
+  };
   commands: {
     configure: string;
     gateway: string;
@@ -164,3 +174,40 @@ export interface OpenClawStatus {
     setModel: string;
   };
 }
+
+export type UsageLimitMetric = "analyses" | "exports" | "crewai_runs";
+
+export interface PlanLimit {
+  metric: UsageLimitMetric;
+  used: number;
+  limit: number | null;
+  remaining: number | null;
+  reset_at: string;
+}
+
+export interface UsageSummaryResponse {
+  user_id: number;
+  plan: string;
+  subscription_status: string;
+  current_period_start: string;
+  current_period_end: string;
+  limits: PlanLimit[];
+  total_cost_estimate_usd: number;
+  live_crewai_enabled: boolean;
+}
+
+export type AuthProvider = "local" | "clerk" | "trusted_headers";
+
+export type DashboardAuthSession =
+  | {
+      isAuthenticated: true;
+      provider: AuthProvider;
+      externalId: string;
+      email: string | null;
+      displayName: string | null;
+    }
+  | {
+      isAuthenticated: false;
+      provider: AuthProvider;
+      reason: string;
+    };

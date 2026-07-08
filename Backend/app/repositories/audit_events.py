@@ -11,10 +11,15 @@ class AuditEventRepository:
     def list(
         self,
         *,
+        user_id: int,
         limit: int,
         event_type: str | None = None,
     ) -> list[AuditEventRecord]:
-        statement = select(AuditEventRecord).order_by(AuditEventRecord.created_at.desc())
+        statement = (
+            select(AuditEventRecord)
+            .where(AuditEventRecord.user_id == user_id)
+            .order_by(AuditEventRecord.created_at.desc())
+        )
         if event_type:
             statement = statement.where(AuditEventRecord.event_type == event_type)
         return list(self.db.scalars(statement.limit(limit)))

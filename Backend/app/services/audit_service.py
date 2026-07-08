@@ -12,9 +12,11 @@ def add_audit_event(
     *,
     event_type: str,
     payload: dict[str, Any],
+    user_id: int | None = None,
     request_id: str | None = None,
 ) -> AuditEventRecord:
     record = AuditEventRecord(
+        user_id=user_id,
         event_type=event_type,
         request_id=request_id,
         payload_json=_sanitize_payload(payload),
@@ -27,12 +29,14 @@ def record_audit_event(
     *,
     event_type: str,
     payload: dict[str, Any],
+    user_id: int | None = None,
     request_id: str | None = None,
 ) -> AuditEventRecord:
     record = add_audit_event(
         db,
         event_type=event_type,
         payload=payload,
+        user_id=user_id,
         request_id=request_id,
     )
     db.commit()
@@ -43,10 +47,11 @@ def record_audit_event(
 def list_audit_events(
     db: Session,
     *,
+    user_id: int,
     limit: int,
     event_type: str | None = None,
 ) -> AuditEventListResponse:
-    records = AuditEventRepository(db).list(limit=limit, event_type=event_type)
+    records = AuditEventRepository(db).list(user_id=user_id, limit=limit, event_type=event_type)
     events = [_event_response(record) for record in records]
     return AuditEventListResponse(events=events, count=len(events))
 

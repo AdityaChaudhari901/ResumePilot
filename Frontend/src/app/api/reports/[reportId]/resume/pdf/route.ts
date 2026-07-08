@@ -8,7 +8,9 @@ interface ReportPdfRouteContext {
   }>;
 }
 
-export async function GET(_request: Request, context: ReportPdfRouteContext) {
+export async function GET(request: Request, context: ReportPdfRouteContext) {
   const { reportId } = await context.params;
-  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}/resume/pdf`);
+  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}/resume/pdf`, undefined, {
+    request
+  });
 }

@@ -8,7 +8,9 @@ interface ReportLatexRouteContext {
   }>;
 }
 
-export async function GET(_request: Request, context: ReportLatexRouteContext) {
+export async function GET(request: Request, context: ReportLatexRouteContext) {
   const { reportId } = await context.params;
-  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}/resume/latex`);
+  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}/resume/latex`, undefined, {
+    request
+  });
 }

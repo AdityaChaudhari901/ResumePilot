@@ -7,42 +7,70 @@ import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { AccountSessionCard } from "@/features/dashboard/components/account-session-card";
 import { HealthStrip } from "@/features/dashboard/components/health-strip";
 import { JobAnalysisCard } from "@/features/dashboard/components/job-analysis-card";
 import { OpenClawStatusCard } from "@/features/dashboard/components/openclaw-status-card";
 import { ReportViewer } from "@/features/dashboard/components/report-viewer";
 import { ResumeUploadCard } from "@/features/dashboard/components/resume-upload-card";
+import { UsageStatusCard } from "@/features/dashboard/components/usage-status-card";
 import { SAMPLE_JOB_TEXT } from "@/features/dashboard/constants";
 import type {
   AgentWorkflowTrace,
   ApplicationReport,
+  DashboardAuthSession,
   HealthStatus,
   JobAnalysisResponse,
   OpenClawStatus,
   ReportWorkflowTraceResponse,
-  ResumeUploadResponse
+  ResumeUploadResponse,
+  UsageSummaryResponse
 } from "@/features/dashboard/types";
 import { readApiError } from "@/features/dashboard/utils/api-error";
 
 interface DashboardStatusPayload {
+  auth: DashboardAuthSession | null;
   health: HealthStatus;
   openclaw: OpenClawStatus;
+  usage: UsageSummaryResponse | null;
 }
 
 async function fetchDashboardStatus(): Promise<DashboardStatusPayload> {
-  const [healthResponse, openclawResponse] = await Promise.all([
+  const [authResponse, healthResponse, openclawResponse] = await Promise.all([
+    fetch("/api/auth/session", { cache: "no-store" }),
     fetch("/api/health", { cache: "no-store" }),
     fetch("/api/openclaw/status", { cache: "no-store" })
   ]);
 
   return {
+    auth: authResponse.ok ? ((await authResponse.json()) as DashboardAuthSession) : null,
     health: (await healthResponse.json()) as HealthStatus,
-    openclaw: (await openclawResponse.json()) as OpenClawStatus
+    openclaw: (await openclawResponse.json()) as OpenClawStatus,
+    usage: await fetchUsageSummary()
   };
 }
 
-export function DashboardShell() {
+async function fetchUsageSummary(): Promise<UsageSummaryResponse | null> {
+  try {
+    const response = await fetch("/api/usage/summary", { cache: "no-store" });
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as UsageSummaryResponse;
+  } catch {
+    return null;
+  }
+}
+
+interface DashboardShellProps {
+  initialAuthSession: DashboardAuthSession;
+}
+
+export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [analysis, setAnalysis] = useState<JobAnalysisResponse | null>(null);
+  const [authSession, setAuthSession] = useState<DashboardAuthSession | null>(
+    initialAuthSession
+  );
   const [company, setCompany] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -51,18 +79,20 @@ export function DashboardShell() {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [jobText, setJobText] = useState("");
-  const [markdown, setMarkdown] = useState("");
   const [openclaw, setOpenclaw] = useState<OpenClawStatus | null>(null);
   const [report, setReport] = useState<ApplicationReport | null>(null);
   const [resume, setResume] = useState<ResumeUploadResponse | null>(null);
   const [role, setRole] = useState("");
+  const [usage, setUsage] = useState<UsageSummaryResponse | null>(null);
   const [workflowTrace, setWorkflowTrace] = useState<AgentWorkflowTrace | null>(null);
 
   const loadStatus = useCallback(async () => {
     setIsLoadingStatus(true);
     const status = await fetchDashboardStatus();
+    setAuthSession(status.auth);
     setHealth(status.health);
     setOpenclaw(status.openclaw);
+    setUsage(status.usage);
     setIsLoadingStatus(false);
   }, []);
 
@@ -77,7 +107,9 @@ export function DashboardShell() {
       }
 
       setHealth(status.health);
+      setAuthSession(status.auth);
       setOpenclaw(status.openclaw);
+      setUsage(status.usage);
       setIsLoadingStatus(false);
     }
 
@@ -118,7 +150,6 @@ export function DashboardShell() {
       setResume((await response.json()) as ResumeUploadResponse);
       setAnalysis(null);
       setReport(null);
-      setMarkdown("");
       setWorkflowTrace(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Resume upload failed");
@@ -167,22 +198,18 @@ export function DashboardShell() {
   }
 
   async function loadReport(reportId: number) {
-    const [reportResponse, markdownResponse, traceResponse] = await Promise.all([
+    const [reportResponse, traceResponse, usageSummary] = await Promise.all([
       fetch(`/api/reports/${reportId}`, { cache: "no-store" }),
-      fetch(`/api/reports/${reportId}/markdown`, { cache: "no-store" }),
-      fetch(`/api/reports/${reportId}/trace`, { cache: "no-store" })
+      fetch(`/api/reports/${reportId}/trace`, { cache: "no-store" }),
+      fetchUsageSummary()
     ]);
 
     if (!reportResponse.ok) {
       throw new Error(await readApiError(reportResponse));
     }
 
-    if (!markdownResponse.ok) {
-      throw new Error(await readApiError(markdownResponse));
-    }
-
     setReport((await reportResponse.json()) as ApplicationReport);
-    setMarkdown(await markdownResponse.text());
+    setUsage(usageSummary);
 
     if (traceResponse.ok) {
       const tracePayload = (await traceResponse.json()) as ReportWorkflowTraceResponse;
@@ -239,7 +266,9 @@ export function DashboardShell() {
               onSubmit={handleUpload}
               resume={resume}
             />
+            <AccountSessionCard session={authSession} />
             <OpenClawStatusCard status={openclaw} />
+            <UsageStatusCard usage={usage} />
             <Panel as="aside" eyebrow="Boundary" title="Validation gate">
               <ul className="space-y-3 text-sm leading-6 text-muted-foreground">
                 <li>Unsupported work history is rejected before the report is shown.</li>
@@ -268,7 +297,6 @@ export function DashboardShell() {
             />
             <ReportViewer
               analysis={analysis}
-              markdown={markdown}
               report={report}
               workflowTrace={workflowTrace}
             />

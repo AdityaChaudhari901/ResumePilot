@@ -8,7 +8,9 @@ interface ReportTraceRouteContext {
   }>;
 }
 
-export async function GET(_request: Request, context: ReportTraceRouteContext) {
+export async function GET(request: Request, context: ReportTraceRouteContext) {
   const { reportId } = await context.params;
-  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}/trace`);
+  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}/trace`, undefined, {
+    request
+  });
 }

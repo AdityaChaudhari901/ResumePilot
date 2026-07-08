@@ -11,6 +11,8 @@ import {
   FileDown,
   FileText,
   GitBranch,
+  ListChecks,
+  SearchCheck,
   ShieldCheck
 } from "lucide-react";
 
@@ -29,12 +31,11 @@ import { formatScore, scoreLabel, scoreTone } from "@/features/dashboard/utils/r
 
 interface ReportViewerProps {
   analysis: JobAnalysisResponse | null;
-  markdown: string;
   report: ApplicationReport | null;
   workflowTrace: AgentWorkflowTrace | null;
 }
 
-export function ReportViewer({ analysis, markdown, report, workflowTrace }: ReportViewerProps) {
+export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerProps) {
   if (!report || !analysis) {
     return (
       <Panel eyebrow="Step 03" title="Report">
@@ -61,6 +62,10 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
   const pdfDownloadHref = `/api/reports/${encodeURIComponent(
     String(analysis.report_id)
   )}/resume/pdf`;
+  const markdownDownloadHref = `/api/reports/${encodeURIComponent(
+    String(analysis.report_id)
+  )}/markdown`;
+  const topKeywords = report.ats_keywords.slice(0, 10);
 
   return (
     <Panel
@@ -68,7 +73,7 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
         <div className="flex flex-wrap items-center justify-end gap-2">
           <ButtonLink
             download={`resumepilot-report-${analysis.report_id}.md`}
-            href={`data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`}
+            href={markdownDownloadHref}
             icon={<Download className="h-4 w-4" aria-hidden="true" />}
             variant="secondary"
           >
@@ -168,7 +173,17 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
                   <p className="mt-2 text-xs text-muted-foreground">{item.recommendation}</p>
                 </div>
               ))}
-              {report.missing_skills.length === 0 && (
+              {report.weak_skills.slice(0, 5).map((item) => (
+                <div className="rounded-md border border-border bg-surface p-3" key={item.skill}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">{item.skill}</p>
+                    <Badge tone="warning">weak evidence</Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{item.reason}</p>
+                  <EvidenceIdBadges evidenceIds={item.resume_evidence_ids} />
+                </div>
+              ))}
+              {report.missing_skills.length === 0 && report.weak_skills.length === 0 && (
                 <div className="rounded-md border border-border bg-surface p-3 text-sm text-muted-foreground">
                   No missing skills found by the deterministic matcher.
                 </div>
@@ -185,18 +200,92 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
           <div className="space-y-2">
             {report.tailored_bullets.map((item) => (
               <div className="rounded-md border border-border bg-surface p-3" key={item.bullet}>
-                <p className="text-sm leading-6">{item.bullet}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {item.evidence_ids.map((evidenceId) => (
-                    <Badge key={evidenceId} tone="primary">
-                      {evidenceId}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <p className="text-sm leading-6">{item.bullet}</p>
+                  {item.unsupported_claims.length > 0 ? (
+                    <Badge className="shrink-0" tone="warning">
+                      review only
                     </Badge>
-                  ))}
+                  ) : null}
                 </div>
+                <EvidenceIdBadges evidenceIds={item.evidence_ids} />
+                {item.jd_keywords_used.length > 0 ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Uses JD keywords: {item.jd_keywords_used.join(", ")}
+                  </p>
+                ) : null}
               </div>
             ))}
+            {report.tailored_bullets.length === 0 ? (
+              <div className="rounded-md border border-border bg-surface p-3 text-sm text-muted-foreground">
+                No project or experience evidence was strong enough for an exportable tailored
+                bullet. Add truthful project/work evidence before editing the resume.
+              </div>
+            ) : null}
           </div>
         </section>
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <div>
+            <div className="mb-3 flex items-center gap-2">
+              <SearchCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h3 className="text-sm font-semibold">ATS keywords</h3>
+            </div>
+            <div className="space-y-2">
+              {topKeywords.map((item) => (
+                <div className="rounded-md border border-border bg-surface p-3" key={item.keyword}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">{item.keyword}</p>
+                    <Badge tone={keywordStatusTone(item.status)}>
+                      {keywordStatusLabel(item.status)}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{item.note}</p>
+                  <EvidenceIdBadges evidenceIds={item.evidence_ids} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-3 flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-validation" aria-hidden="true" />
+              <h3 className="text-sm font-semibold">Next actions</h3>
+            </div>
+            <ol className="space-y-2">
+              {report.next_actions.map((action) => (
+                <li
+                  className="rounded-md border border-border bg-surface p-3 text-sm leading-6 text-muted-foreground"
+                  key={action}
+                >
+                  {action}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        {report.validation_warnings.length > 0 ? (
+          <section>
+            <div className="mb-3 flex items-center gap-2">
+              <CircleAlert className="h-4 w-4 text-warning" aria-hidden="true" />
+              <h3 className="text-sm font-semibold">Validation warnings</h3>
+            </div>
+            <div className="space-y-2">
+              {report.validation_warnings.map((warning) => (
+                <div className="rounded-md border border-border bg-surface p-3" key={warning.code}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="warning">{warning.code}</Badge>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    {warning.message}
+                  </p>
+                  <EvidenceIdBadges evidenceIds={warning.evidence_ids} />
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     </Panel>
   );
@@ -212,6 +301,21 @@ function Metric({ label, value }: MetricProps) {
     <div className="rounded-md border border-border bg-surface p-3">
       <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">{label}</p>
       <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function EvidenceIdBadges({ evidenceIds }: { evidenceIds: string[] }) {
+  if (evidenceIds.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {evidenceIds.map((evidenceId) => (
+        <Badge key={evidenceId} tone="primary">
+          {evidenceId}
+        </Badge>
+      ))}
     </div>
   );
 }
@@ -404,4 +508,23 @@ function formatCost(costEstimateUsd: number | null | undefined): string {
     return "Not available";
   }
   return `$${costEstimateUsd.toFixed(6)}`;
+}
+
+function keywordStatusLabel(status: ApplicationReport["ats_keywords"][number]["status"]): string {
+  if (status === "add_only_if_true") {
+    return "add only if true";
+  }
+  return status;
+}
+
+function keywordStatusTone(
+  status: ApplicationReport["ats_keywords"][number]["status"]
+): "success" | "warning" | "neutral" {
+  if (status === "supported") {
+    return "success";
+  }
+  if (status === "add_only_if_true") {
+    return "warning";
+  }
+  return "neutral";
 }

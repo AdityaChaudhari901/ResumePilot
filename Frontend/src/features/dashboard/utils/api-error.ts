@@ -17,6 +17,10 @@ function messageFromPayload(payload: unknown): string | null {
     return typedPayload.detail;
   }
 
+  if (isRecord(typedPayload.detail) && typeof typedPayload.detail.message === "string") {
+    return typedPayload.detail.message;
+  }
+
   if (Array.isArray(typedPayload.detail) && typedPayload.detail.length > 0) {
     const firstError = typedPayload.detail[0];
     if (isRecord(firstError) && typeof firstError.msg === "string") {

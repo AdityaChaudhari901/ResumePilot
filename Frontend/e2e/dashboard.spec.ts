@@ -50,6 +50,8 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
 async function completeDashboardDemoFlow(page: Page): Promise<string> {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Application review console" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Session" })).toBeVisible();
+  await expect(page.getByText("authenticated", { exact: true })).toBeVisible();
 
   await page.getByLabel("Resume file").setInputFiles(RESUME_FIXTURE);
   await expect(page.getByText("backend_fresher.md")).toBeVisible();
@@ -71,9 +73,14 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
   await expect(page.getByText("Match score")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Matched skills" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Missing or weak" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ATS keywords" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Workflow trace" })).toBeVisible();
   await expect(page.getByText("Deterministic fallback")).toBeVisible();
   await expect(page.getByText(/\d+(?:\.\d)? (?:ms|s) total/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Plan usage" })).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Analyses usage" })).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Exports usage" })).toBeVisible();
 
   const latexHref = await page.getByRole("link", { name: "LaTeX" }).getAttribute("href");
   return extractReportId(latexHref);

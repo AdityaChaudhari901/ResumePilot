@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 
 import "./globals.css";
 
@@ -12,9 +13,15 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
+  const document = (
     <html lang="en">
       <body>{children}</body>
     </html>
   );
+
+  if (process.env.RESUMEPILOT_AUTH_PROVIDER === "clerk") {
+    return <ClerkProvider>{document}</ClerkProvider>;
+  }
+
+  return document;
 }

@@ -21,6 +21,12 @@ def test_vertex_llm_settings_are_loaded_from_env_names(tmp_path):
         DATA_RETENTION_DAYS=30,
         ENABLE_JOB_BROWSER_FALLBACK=False,
         JOB_BROWSER_TIMEOUT_MS=12000,
+        AUTH_REQUIRED=True,
+        AUTH_TRUSTED_PROXY_SECRET="proxy-secret",
+        AUTH_SIGNATURE_TTL_SECONDS=600,
+        DEV_USER_EXTERNAL_ID="dev-user",
+        DEV_USER_EMAIL="dev@example.com",
+        DEV_USER_DISPLAY_NAME="Dev User",
     )
 
     assert settings.llm_provider == "vertex"
@@ -37,6 +43,12 @@ def test_vertex_llm_settings_are_loaded_from_env_names(tmp_path):
     assert settings.data_retention_days == 30
     assert settings.enable_job_browser_fallback is False
     assert settings.job_browser_timeout_ms == 12000
+    assert settings.auth_required is True
+    assert settings.auth_trusted_proxy_secret == "proxy-secret"
+    assert settings.auth_signature_ttl_seconds == 600
+    assert settings.dev_user_external_id == "dev-user"
+    assert settings.dev_user_email == "dev@example.com"
+    assert settings.dev_user_display_name == "Dev User"
 
 
 def test_empty_data_retention_days_disables_retention(tmp_path):

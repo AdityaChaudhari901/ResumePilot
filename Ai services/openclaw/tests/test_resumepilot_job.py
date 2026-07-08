@@ -37,6 +37,20 @@ class ResumePilotJobHelperTests(unittest.TestCase):
             "paste:Role: Backend Engineer",
         )
 
+    def test_normalize_command_args_strips_job_prefix(self) -> None:
+        self.assertEqual(
+            resumepilot_job.normalize_command_args("/job paste Role: Backend Engineer"),
+            "paste:Role: Backend Engineer",
+        )
+
+    def test_normalize_command_args_strips_skill_job_prefix(self) -> None:
+        self.assertEqual(
+            resumepilot_job.normalize_command_args(
+                "/skill job paste:Role: Backend Engineer"
+            ),
+            "paste:Role: Backend Engineer",
+        )
+
     def test_build_payload_uses_openclaw_identity(self) -> None:
         config = resumepilot_job.ResumePilotConfig(
             api_base_url="http://127.0.0.1:8002",

@@ -14,6 +14,7 @@ OPENCLAW_MODEL_REFERENCE="${OPENCLAW_MODEL_REFERENCE:-google-vertex/$LLM_MODEL}"
 OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 GOOGLE_CLOUD_LOCATION="$VERTEX_REGION"
 ADC_FILE="${GOOGLE_APPLICATION_CREDENTIALS:-$HOME/.config/gcloud/application_default_credentials.json}"
+REGISTER_VERTEX_MODEL_SCRIPT="$SCRIPT_DIR/register_vertex_model.py"
 
 ensure_path() {
   if command -v openclaw >/dev/null 2>&1; then
@@ -62,6 +63,32 @@ PY
   fi
 }
 
+set_launchctl_env() {
+  if ! command -v launchctl >/dev/null 2>&1; then
+    return
+  fi
+
+  launchctl setenv RESUMEPILOT_API_BASE_URL "${RESUMEPILOT_API_BASE_URL:-http://127.0.0.1:8002}"
+  launchctl setenv OPENCLAW_WORKSPACE_DIR "$WORKSPACE_DIR"
+  launchctl setenv OPENCLAW_SENDER_ID "${OPENCLAW_SENDER_ID:-openclaw:local}"
+  launchctl setenv OPENCLAW_SESSION_ID "${OPENCLAW_SESSION_ID:-openclaw:resume-pilot}"
+  launchctl setenv LLM_PROVIDER "$LLM_PROVIDER"
+  launchctl setenv VERTEX_PROJECT_ID "$GOOGLE_CLOUD_PROJECT"
+  launchctl setenv VERTEX_REGION "$GOOGLE_CLOUD_LOCATION"
+  launchctl setenv LLM_MODEL "$LLM_MODEL"
+  launchctl setenv OPENCLAW_MODEL_REFERENCE "$OPENCLAW_MODEL_REFERENCE"
+  launchctl setenv GOOGLE_CLOUD_PROJECT "$GOOGLE_CLOUD_PROJECT"
+  launchctl setenv GOOGLE_CLOUD_PROJECT_ID "$GOOGLE_CLOUD_PROJECT"
+  launchctl setenv GOOGLE_CLOUD_LOCATION "$GOOGLE_CLOUD_LOCATION"
+
+  if [ -n "${JOBCOPILOT_API_TOKEN:-}" ]; then
+    launchctl setenv JOBCOPILOT_API_TOKEN "$JOBCOPILOT_API_TOKEN"
+  fi
+  if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+    launchctl setenv OPENCLAW_GATEWAY_TOKEN "$OPENCLAW_GATEWAY_TOKEN"
+  fi
+}
+
 ensure_path
 
 if [ "$LLM_PROVIDER" != "vertex" ]; then
@@ -105,6 +132,8 @@ openclaw config set gateway.port "$OPENCLAW_GATEWAY_PORT" --strict-json
 openclaw config set gateway.auth.mode token
 openclaw config set agents.defaults.workspace "$WORKSPACE_DIR"
 openclaw config set agents.defaults.repoRoot "$REPO_ROOT"
+python3 "$REGISTER_VERTEX_MODEL_SCRIPT"
+set_launchctl_env
 
 if gcloud services list \
   --enabled \

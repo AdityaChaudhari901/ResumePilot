@@ -190,6 +190,8 @@ def _extract_job_skills(lines: list[str]) -> tuple[list[JobSkill], list[JobSkill
             current_context = "required"
         elif any(marker in lowered for marker in PREFERRED_MARKERS):
             current_context = "preferred"
+        elif any(marker in lowered for marker in RESPONSIBILITY_MARKERS + BENEFIT_MARKERS):
+            current_context = "keyword"
 
         skills = find_skills(line)
         if not skills:

@@ -10,5 +10,7 @@ export async function POST(request: Request) {
       "content-type": "application/json"
     },
     body
+  }, {
+    request
   });
 }

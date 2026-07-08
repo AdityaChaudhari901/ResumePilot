@@ -7,5 +7,7 @@ export async function POST(request: Request) {
   return proxyBackendResponse("/resumes/upload", {
     method: "POST",
     body: formData
+  }, {
+    request
   });
 }

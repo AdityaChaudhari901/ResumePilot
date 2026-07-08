@@ -25,7 +25,12 @@ class StoredUpload:
         self.stored_path = stored_path
 
 
-async def store_resume_upload(file: UploadFile, settings: Settings) -> StoredUpload:
+async def store_resume_upload(
+    file: UploadFile,
+    settings: Settings,
+    *,
+    owner_namespace: str | None = None,
+) -> StoredUpload:
     original_name = Path(file.filename or "resume").name
     extension = Path(original_name).suffix.lower()
     if extension not in settings.allowed_resume_extensions:
@@ -47,8 +52,9 @@ async def store_resume_upload(file: UploadFile, settings: Settings) -> StoredUpl
         )
 
     file_hash = sha256_bytes(content)
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = settings.upload_dir / f"{file_hash}{extension}"
+    upload_dir = _upload_dir_for_owner(settings, owner_namespace)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stored_path = upload_dir / f"{file_hash}{extension}"
     if not stored_path.exists():
         stored_path.write_bytes(content)
 
@@ -60,3 +66,12 @@ async def store_resume_upload(file: UploadFile, settings: Settings) -> StoredUpl
         file_hash=file_hash,
         stored_path=stored_path,
     )
+
+
+def _upload_dir_for_owner(settings: Settings, owner_namespace: str | None) -> Path:
+    if not owner_namespace:
+        return settings.upload_dir
+    safe_namespace = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "_" for char in owner_namespace.strip()
+    )
+    return settings.upload_dir / "users" / (safe_namespace or "unknown")

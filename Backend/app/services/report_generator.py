@@ -1,3 +1,5 @@
+import re
+
 from app.schemas.common import ValidationWarning
 from app.schemas.job import JobProfile
 from app.schemas.match import MatchResult
@@ -8,6 +10,23 @@ from app.schemas.report import (
     TailoredBullet,
 )
 from app.schemas.resume import ResumeFact, ResumeProfile
+
+TAILORED_BULLET_LIMIT = 5
+TAILORED_BULLET_SOURCE_SECTIONS = {"experience", "projects"}
+MIN_TAILORED_FACT_WORDS = 5
+
+ACTION_VERBS = {
+    "built",
+    "created",
+    "designed",
+    "developed",
+    "implemented",
+    "improved",
+    "launched",
+    "optimized",
+    "owned",
+    "shipped",
+}
 
 
 def generate_report(
@@ -114,32 +133,103 @@ def _executive_summary(
 
 def _tailored_bullets(resume: ResumeProfile, match: MatchResult) -> list[TailoredBullet]:
     facts_by_id = {fact.id: fact for fact in resume.facts}
+    skills_by_fact_id: dict[str, list[str]] = {}
+    fact_order: list[str] = []
+
+    for matched_skill in match.matched_skills:
+        evidence_id = _select_tailored_evidence_id(
+            matched_skill.resume_evidence_ids,
+            facts_by_id,
+            selected_fact_ids=set(fact_order),
+        )
+        if not evidence_id:
+            continue
+        if evidence_id not in skills_by_fact_id:
+            if len(fact_order) >= TAILORED_BULLET_LIMIT:
+                continue
+            skills_by_fact_id[evidence_id] = []
+            fact_order.append(evidence_id)
+        if matched_skill.skill not in skills_by_fact_id[evidence_id]:
+            skills_by_fact_id[evidence_id].append(matched_skill.skill)
+
     bullets: list[TailoredBullet] = []
-    used_facts: set[str] = set()
-    for matched_skill in match.matched_skills[:5]:
-        evidence_id = matched_skill.resume_evidence_ids[0]
-        if evidence_id in used_facts:
-            continue
-        fact = facts_by_id.get(evidence_id)
-        if not fact:
-            continue
+    for evidence_id in fact_order:
+        fact = facts_by_id[evidence_id]
+        jd_keywords = skills_by_fact_id[evidence_id][:4]
         bullets.append(
             TailoredBullet(
-                bullet=_rewrite_fact_as_bullet(fact, matched_skill.skill),
+                bullet=_rewrite_fact_as_bullet(fact, jd_keywords),
                 evidence_ids=[evidence_id],
-                jd_keywords_used=[matched_skill.skill],
+                jd_keywords_used=jd_keywords,
                 unsupported_claims=[],
             )
         )
-        used_facts.add(evidence_id)
     return bullets
 
 
-def _rewrite_fact_as_bullet(fact: ResumeFact, skill: str) -> str:
-    text = fact.text.rstrip(".")
-    if skill.lower() not in text.lower():
-        return f"{text}, aligning with {skill} requirements."
+def _select_tailored_evidence_id(
+    evidence_ids: list[str],
+    facts_by_id: dict[str, ResumeFact],
+    *,
+    selected_fact_ids: set[str],
+) -> str | None:
+    candidate_ids = [
+        evidence_id
+        for evidence_id in evidence_ids
+        if _is_tailored_fact_candidate(facts_by_id.get(evidence_id))
+    ]
+    for evidence_id in candidate_ids:
+        if evidence_id in selected_fact_ids:
+            return evidence_id
+    return candidate_ids[0] if candidate_ids else None
+
+
+def _is_tailored_fact_candidate(fact: ResumeFact | None) -> bool:
+    if not fact or fact.section not in TAILORED_BULLET_SOURCE_SECTIONS:
+        return False
+    text = _clean_fact_text(fact.text)
+    if len(text.split()) < MIN_TAILORED_FACT_WORDS:
+        return False
+    return bool(_starts_with_action_verb(text) or _contains_action_verb(text))
+
+
+def _rewrite_fact_as_bullet(fact: ResumeFact, skills: list[str]) -> str:
+    text = _ensure_sentence(_clean_fact_text(fact.text))
+    missing_keywords = [
+        skill for skill in skills if skill and skill.casefold() not in text.casefold()
+    ]
+    if not missing_keywords:
+        return text
+
+    stem = text[:-1] if text.endswith(".") else text
+    return f"{stem}, emphasizing {_human_list(missing_keywords[:3])} for the target role."
+
+
+def _clean_fact_text(value: str) -> str:
+    text = re.sub(r"\s+", " ", value).strip()
+    text = text.strip(" -*•\t")
+    if text and text[0].islower():
+        text = f"{text[0].upper()}{text[1:]}"
+    return text
+
+
+def _ensure_sentence(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return text
+    if text.endswith((".", "!", "?")):
+        return text
     return f"{text}."
+
+
+def _starts_with_action_verb(value: str) -> bool:
+    first_word = re.match(r"[A-Za-z]+", value)
+    return bool(first_word and first_word.group(0).casefold() in ACTION_VERBS)
+
+
+def _contains_action_verb(value: str) -> bool:
+    tokens = {token.casefold() for token in re.findall(r"[A-Za-z]+", value)}
+    return bool(tokens & ACTION_VERBS)
 
 
 def _ats_keywords(match: MatchResult) -> list[AtsKeywordSuggestion]:
@@ -220,9 +310,24 @@ def _next_actions(match: MatchResult) -> list[str]:
     actions = ["Review extracted resume evidence and correct any low-confidence fields."]
     if match.missing_skills:
         actions.append(
-            "Do not add missing skills unless true; use them as a learning or evidence checklist."
+            "Do not add missing skills unless true; use them as a learning checklist or add "
+            "project/work evidence only when the experience is real."
         )
     if match.weak_skills:
-        actions.append("Strengthen weak skills with project/work evidence if accurate.")
+        actions.append(
+            "Strengthen weak skills by moving them from summary or skills lists into truthful "
+            "project/work bullets with outcomes."
+        )
     actions.append("Use tailored bullets as suggestions, then manually review before applying.")
     return actions
+
+
+def _human_list(values: list[str]) -> str:
+    clean_values = [value for value in values if value]
+    if not clean_values:
+        return ""
+    if len(clean_values) == 1:
+        return clean_values[0]
+    if len(clean_values) == 2:
+        return f"{clean_values[0]} and {clean_values[1]}"
+    return f"{', '.join(clean_values[:-1])}, and {clean_values[-1]}"

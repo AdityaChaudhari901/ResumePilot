@@ -8,6 +8,7 @@ WORKSPACE_DIR="$OPENCLAW_DIR/workspace"
 LOCAL_DIR="$OPENCLAW_DIR/.local"
 LOCAL_ENV_FILE="$LOCAL_DIR/openclaw-gateway.env"
 BACKEND_ENV_FILE="$REPO_ROOT/Backend/.env"
+REGISTER_VERTEX_MODEL_SCRIPT="$SCRIPT_DIR/register_vertex_model.py"
 
 RESUMEPILOT_API_BASE_URL="${RESUMEPILOT_API_BASE_URL:-http://127.0.0.1:8002}"
 OPENCLAW_SENDER_ID="${OPENCLAW_SENDER_ID:-openclaw:local}"
@@ -91,6 +92,27 @@ detect_project() {
   fi
 }
 
+set_launchctl_env() {
+  if ! command -v launchctl >/dev/null 2>&1; then
+    return
+  fi
+
+  launchctl setenv RESUMEPILOT_API_BASE_URL "$RESUMEPILOT_API_BASE_URL"
+  launchctl setenv OPENCLAW_WORKSPACE_DIR "$WORKSPACE_DIR"
+  launchctl setenv OPENCLAW_SENDER_ID "$OPENCLAW_SENDER_ID"
+  launchctl setenv OPENCLAW_SESSION_ID "$OPENCLAW_SESSION_ID"
+  launchctl setenv OPENCLAW_GATEWAY_TOKEN "$OPENCLAW_GATEWAY_TOKEN"
+  launchctl setenv JOBCOPILOT_API_TOKEN "$JOBCOPILOT_API_TOKEN"
+  launchctl setenv LLM_PROVIDER "$LLM_PROVIDER"
+  launchctl setenv VERTEX_PROJECT_ID "$GOOGLE_CLOUD_PROJECT"
+  launchctl setenv VERTEX_REGION "$GOOGLE_CLOUD_LOCATION"
+  launchctl setenv LLM_MODEL "$LLM_MODEL"
+  launchctl setenv OPENCLAW_MODEL_REFERENCE "$OPENCLAW_MODEL_REFERENCE"
+  launchctl setenv GOOGLE_CLOUD_PROJECT "$GOOGLE_CLOUD_PROJECT"
+  launchctl setenv GOOGLE_CLOUD_PROJECT_ID "$GOOGLE_CLOUD_PROJECT"
+  launchctl setenv GOOGLE_CLOUD_LOCATION "$GOOGLE_CLOUD_LOCATION"
+}
+
 ensure_path
 load_env_file "$BACKEND_ENV_FILE"
 load_existing_gateway_token
@@ -161,6 +183,9 @@ export VERTEX_PROJECT_ID="$GOOGLE_CLOUD_PROJECT"
 export VERTEX_REGION="$GOOGLE_CLOUD_LOCATION"
 export LLM_PROVIDER
 export LLM_MODEL
+
+python3 "$REGISTER_VERTEX_MODEL_SCRIPT"
+set_launchctl_env
 
 echo "Starting OpenClaw Gateway for ResumePilot..."
 echo "Dashboard: http://127.0.0.1:$OPENCLAW_GATEWAY_PORT/"

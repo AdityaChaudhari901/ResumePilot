@@ -2,7 +2,9 @@ from io import BytesIO
 from zipfile import ZipFile
 
 import pytest
+from sqlalchemy import select
 
+from app.db.models import UserRecord
 from app.schemas.agent import (
     AgentStepName,
     AgentTokenUsage,
@@ -149,7 +151,7 @@ def test_crewai_fallback_trace_is_persisted(
         unavailable_runner,
     )
 
-    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text, plan="premium")
 
     report_response = client.get(f"/reports/{body['report_id']}")
     assert report_response.status_code == 200
@@ -225,7 +227,7 @@ def test_crewai_success_trace_is_persisted(
         lambda _settings: FakeCrewAIRunner(),
     )
 
-    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text, plan="premium")
 
     report_response = client.get(f"/reports/{body['report_id']}")
     assert report_response.status_code == 200
@@ -255,8 +257,24 @@ def test_crewai_success_trace_is_persisted(
     assert trace["runtime_metadata"]["billable_output_tokens"] == 71
     assert "crewai_unavailable" not in trace["validation_warning_codes"]
 
+    usage_response = client.get("/usage/summary")
+    assert usage_response.status_code == 200
+    usage = usage_response.json()
+    assert usage["plan"] == "premium"
+    assert usage["live_crewai_enabled"] is True
+    crewai_limit = next(item for item in usage["limits"] if item["metric"] == "crewai_runs")
+    assert crewai_limit["used"] == 1
+    assert crewai_limit["limit"] == 100
+    assert usage["total_cost_estimate_usd"] == pytest.approx(0.001014)
 
-def _upload_and_analyze(client, resume_text: str, job_text: str) -> dict:
+
+def _upload_and_analyze(
+    client,
+    resume_text: str,
+    job_text: str,
+    *,
+    plan: str = "free",
+) -> dict:
     upload_response = client.post(
         "/resumes/upload",
         files={"file": ("resume.md", resume_text.encode("utf-8"), "text/markdown")},
@@ -264,6 +282,8 @@ def _upload_and_analyze(client, resume_text: str, job_text: str) -> dict:
 
     assert upload_response.status_code == 201
     resume_id = upload_response.json()["resume_id"]
+    if plan != "free":
+        _set_dev_user_plan(client, plan)
 
     analyze_response = client.post(
         "/jobs/analyze",
@@ -272,3 +292,14 @@ def _upload_and_analyze(client, resume_text: str, job_text: str) -> dict:
 
     assert analyze_response.status_code == 200
     return analyze_response.json()
+
+
+def _set_dev_user_plan(client, plan: str) -> None:
+    with client.app.state.session_factory() as db:
+        user = db.scalar(
+            select(UserRecord).where(UserRecord.external_id == "local-dev-user").limit(1)
+        )
+        assert user is not None
+        user.plan = plan
+        user.subscription_status = "active"
+        db.commit()

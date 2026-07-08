@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.models import AnalysisRecord, JobRecord, ResumeRecord, utc_now
+from app.schemas.auth import CurrentUser
 from app.schemas.privacy import ReportDeleteResponse, ResumeDeleteResponse, RetentionPurgeResponse
 from app.services.audit_service import add_audit_event
 
@@ -33,8 +34,9 @@ class DeletionCounts:
 def delete_report(
     db: Session,
     report_id: int,
+    current_user: CurrentUser,
 ) -> ReportDeleteResponse:
-    analysis = db.get(AnalysisRecord, report_id)
+    analysis = _analysis_for_user(db, report_id, current_user.id)
     if not analysis:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
 
@@ -45,6 +47,7 @@ def delete_report(
     audit_event = add_audit_event(
         db,
         event_type="report.deleted",
+        user_id=current_user.id,
         payload={
             "report_id": report_id,
             "analysis_id": analysis_id,
@@ -70,8 +73,9 @@ def delete_resume(
     db: Session,
     resume_id: int,
     settings: Settings,
+    current_user: CurrentUser,
 ) -> ResumeDeleteResponse:
-    resume = db.get(ResumeRecord, resume_id)
+    resume = _resume_for_user(db, resume_id, current_user.id)
     if not resume:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
 
@@ -80,6 +84,7 @@ def delete_resume(
     audit_event = add_audit_event(
         db,
         event_type="resume.deleted",
+        user_id=current_user.id,
         payload={
             "resume_id": resume_id,
             "deleted_resumes": counts.deleted_resumes,
@@ -111,6 +116,7 @@ def delete_resume(
 def purge_expired_records(
     db: Session,
     settings: Settings,
+    current_user: CurrentUser,
 ) -> RetentionPurgeResponse:
     if settings.data_retention_days is None:
         return RetentionPurgeResponse(
@@ -127,27 +133,47 @@ def purge_expired_records(
     counts = DeletionCounts()
     upload_paths: list[Path] = []
 
-    expired_resumes = list(db.scalars(select(ResumeRecord).where(ResumeRecord.created_at < cutoff)))
+    expired_resumes = list(
+        db.scalars(
+            select(ResumeRecord).where(
+                ResumeRecord.user_id == current_user.id,
+                ResumeRecord.created_at < cutoff,
+            )
+        )
+    )
     for resume in expired_resumes:
         upload_paths.append(_upload_path(settings, resume))
         counts += _delete_resume_record(db, resume)
 
     expired_analyses = list(
-        db.scalars(select(AnalysisRecord).where(AnalysisRecord.created_at < cutoff))
+        db.scalars(
+            select(AnalysisRecord).where(
+                AnalysisRecord.user_id == current_user.id,
+                AnalysisRecord.created_at < cutoff,
+            )
+        )
     )
     for analysis in expired_analyses:
         if db.get(AnalysisRecord, analysis.id):
             counts += _delete_analysis_record(db, analysis)
 
-    expired_orphan_jobs = list(db.scalars(select(JobRecord).where(JobRecord.created_at < cutoff)))
+    expired_orphan_jobs = list(
+        db.scalars(
+            select(JobRecord).where(
+                JobRecord.user_id == current_user.id,
+                JobRecord.created_at < cutoff,
+            )
+        )
+    )
     for job in expired_orphan_jobs:
-        if _analysis_count_for_job(db, job.id) == 0:
+        if _analysis_count_for_job(db, job.id, user_id=current_user.id) == 0:
             db.delete(job)
             counts.deleted_orphan_jobs += 1
 
     audit_event = add_audit_event(
         db,
         event_type="retention.purged",
+        user_id=current_user.id,
         payload={
             "retention_days": settings.data_retention_days,
             "cutoff": cutoff.isoformat(),
@@ -192,9 +218,9 @@ def _delete_resume_record(db: Session, resume: ResumeRecord) -> DeletionCounts:
     db.flush()
 
     for job_id in job_ids:
-        if _analysis_count_for_job(db, job_id) == 0:
+        if _analysis_count_for_job(db, job_id, user_id=resume.user_id) == 0:
             job = db.get(JobRecord, job_id)
-            if job:
+            if job and job.user_id == resume.user_id:
                 db.delete(job)
                 counts.deleted_orphan_jobs += 1
     db.flush()
@@ -204,24 +230,55 @@ def _delete_resume_record(db: Session, resume: ResumeRecord) -> DeletionCounts:
 def _delete_analysis_record(db: Session, analysis: AnalysisRecord) -> DeletionCounts:
     counts = DeletionCounts(deleted_reports=1)
     job_id = analysis.job_id
+    user_id = analysis.user_id
     db.delete(analysis)
     db.flush()
-    if _analysis_count_for_job(db, job_id) == 0:
+    if _analysis_count_for_job(db, job_id, user_id=user_id) == 0:
         job = db.get(JobRecord, job_id)
-        if job:
+        if job and job.user_id == user_id:
             db.delete(job)
             counts.deleted_orphan_jobs += 1
     db.flush()
     return counts
 
 
-def _analysis_count_for_job(db: Session, job_id: int) -> int:
+def _analysis_count_for_job(db: Session, job_id: int, *, user_id: int) -> int:
     return int(
-        db.scalar(select(func.count(AnalysisRecord.id)).where(AnalysisRecord.job_id == job_id)) or 0
+        db.scalar(
+            select(func.count(AnalysisRecord.id)).where(
+                AnalysisRecord.job_id == job_id,
+                AnalysisRecord.user_id == user_id,
+            )
+        )
+        or 0
+    )
+
+
+def _resume_for_user(db: Session, resume_id: int, user_id: int) -> ResumeRecord | None:
+    return db.scalar(
+        select(ResumeRecord)
+        .where(ResumeRecord.id == resume_id, ResumeRecord.user_id == user_id)
+        .limit(1)
+    )
+
+
+def _analysis_for_user(db: Session, analysis_id: int, user_id: int) -> AnalysisRecord | None:
+    return db.scalar(
+        select(AnalysisRecord)
+        .where(AnalysisRecord.id == analysis_id, AnalysisRecord.user_id == user_id)
+        .limit(1)
     )
 
 
 def _upload_path(settings: Settings, resume: ResumeRecord) -> Path:
+    tenant_path = (
+        settings.upload_dir
+        / "users"
+        / str(resume.user_id)
+        / f"{resume.file_hash}{resume.file_extension}"
+    )
+    if tenant_path.exists():
+        return tenant_path
     return settings.upload_dir / f"{resume.file_hash}{resume.file_extension}"
 
 

@@ -10,6 +10,9 @@ interface OpenClawStatusCardProps {
 }
 
 export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
+  const readiness = status?.readiness;
+  const isReady = readiness?.status === "ready";
+
   return (
     <Panel as="aside" eyebrow="OpenClaw" title="WebChat / dashboard">
       <div className="space-y-4">
@@ -51,6 +54,9 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
           <Badge tone={status?.gateway.reachable ? "success" : "warning"}>
             gateway {status?.gateway.reachable ? "online" : "offline"}
           </Badge>
+          <Badge tone={isReady ? "success" : "warning"}>
+            control {isReady ? "ready" : "needs setup"}
+          </Badge>
           <Badge tone={status?.auth.projectConfigured ? "success" : "warning"}>
             GCP project {status?.auth.projectConfigured ? "set" : "not set"}
           </Badge>
@@ -61,16 +67,48 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
           <Badge tone="neutral">{status?.llmProvider ?? "vertex"}</Badge>
         </div>
 
-        <ButtonLink
-          className="w-full"
-          href={status?.dashboardUrl ?? "http://127.0.0.1:18789/"}
-          icon={<ExternalLink className="h-4 w-4" aria-hidden="true" />}
-          rel="noreferrer"
-          target="_blank"
-          variant="secondary"
-        >
-          Open Control UI
-        </ButtonLink>
+        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+          <div className="rounded-md border border-border bg-surface p-2">
+            <span className="font-semibold text-foreground">Model registry</span>
+            <p>{readiness?.modelRegistered ? "global ready" : "global missing"}</p>
+          </div>
+          <div className="rounded-md border border-border bg-surface p-2">
+            <span className="font-semibold text-foreground">Agent registry</span>
+            <p>{readiness?.agentModelRegistered ? "agent ready" : "gateway managed"}</p>
+          </div>
+          <div className="rounded-md border border-border bg-surface p-2">
+            <span className="font-semibold text-foreground">Main session</span>
+            <p>{readiness?.mainSessionRegistered ? "registered" : "new chat needed"}</p>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          {readiness?.dashboardLaunch ??
+            "Use Open Fresh Chat to open an authenticated local Control UI tab."}
+        </p>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ButtonLink
+            className="w-full"
+            href={status?.chatUrl ?? "/api/openclaw/control?view=chat"}
+            icon={<ExternalLink className="h-4 w-4" aria-hidden="true" />}
+            rel="noreferrer"
+            target="_blank"
+            variant="secondary"
+          >
+            Open Fresh Chat
+          </ButtonLink>
+          <ButtonLink
+            className="w-full"
+            href={status?.dashboardUrl ?? "/api/openclaw/control?view=overview"}
+            icon={<ExternalLink className="h-4 w-4" aria-hidden="true" />}
+            rel="noreferrer"
+            target="_blank"
+            variant="ghost"
+          >
+            Control Overview
+          </ButtonLink>
+        </div>
       </div>
     </Panel>
   );

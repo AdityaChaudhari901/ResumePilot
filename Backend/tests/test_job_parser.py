@@ -87,3 +87,43 @@ def test_job_parser_marks_required_skill_missing_candidate(sample_job_text):
 
     required = {skill.name for skill in profile.required_skills}
     assert {"Python", "FastAPI", "REST API", "SQL"} <= required
+
+
+def test_job_parser_detects_hyphenated_and_slash_separated_skills():
+    profile = parse_job_profile(
+        """Role: Associate Software Engineer
+Company: Forbes Advisor
+
+Requirements:
+- Required Redis-based job queues with Celery/RQ.
+- Preferred JavaScript/TypeScript and React/Next.js experience.
+""",
+        job_id=1,
+    )
+
+    required = {skill.name for skill in profile.required_skills}
+    preferred = {skill.name for skill in profile.preferred_skills}
+
+    assert {"Redis", "Celery", "RQ"} <= required
+    assert {"JavaScript", "TypeScript", "React", "Next.js"} <= preferred
+
+
+def test_job_parser_does_not_carry_required_context_into_responsibilities():
+    profile = parse_job_profile(
+        """Role: Associate Software Engineer
+Company: Forbes Advisor
+
+Requirements:
+- Required Python experience.
+
+Responsibilities:
+- Build REST APIs for LLM-powered publishing workflows.
+""",
+        job_id=1,
+    )
+
+    required = {skill.name for skill in profile.required_skills}
+    keywords = set(profile.keywords)
+
+    assert required == {"Python"}
+    assert "LLM" in keywords

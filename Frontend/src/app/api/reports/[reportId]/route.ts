@@ -8,7 +8,7 @@ interface ReportRouteContext {
   }>;
 }
 
-export async function GET(_request: Request, context: ReportRouteContext) {
+export async function GET(request: Request, context: ReportRouteContext) {
   const { reportId } = await context.params;
-  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}`);
+  return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}`, undefined, { request });
 }

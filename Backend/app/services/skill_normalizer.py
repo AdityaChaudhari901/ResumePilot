@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib.resources import files
@@ -59,21 +60,17 @@ def category_for_skill(value: str) -> SkillCategory:
 
 
 def find_skills(text: str) -> list[str]:
-    normalized_text = f" {normalize_token(text)} "
+    normalized_text = normalize_token(text)
     found: set[str] = set()
     for variant, definition in variant_to_skill().items():
-        needle = f" {variant} "
-        slash_needle = f" {variant}/"
-        comma_needle = f" {variant},"
-        period_needle = f" {variant}."
-        if (
-            needle in normalized_text
-            or slash_needle in normalized_text
-            or comma_needle in normalized_text
-            or period_needle in normalized_text
-        ):
+        if _contains_skill_variant(normalized_text, variant):
             found.add(definition.canonical)
     return sorted(found)
+
+
+def _contains_skill_variant(normalized_text: str, variant: str) -> bool:
+    pattern = rf"(?<![a-z0-9+#]){re.escape(variant)}(?![a-z0-9+#])"
+    return bool(re.search(pattern, normalized_text))
 
 
 def is_inferred_match(job_skill: str, resume_skills: set[str]) -> bool:

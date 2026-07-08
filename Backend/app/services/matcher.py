@@ -130,14 +130,16 @@ def _match_skill_group(
 
 
 def _missing_skill(job_skill: JobSkill) -> MissingSkill:
+    importance = "required" if job_skill.importance == "required" else "preferred"
     return MissingSkill(
         skill=job_skill.name,
-        importance="required" if job_skill.importance == "required" else "preferred",
+        importance=importance,
         job_evidence_text=job_skill.evidence_text,
-        why_it_matters=f"The job description explicitly lists {job_skill.name}.",
+        why_it_matters=f"The job description explicitly lists {job_skill.name} as {importance}.",
         recommendation=(
             f"Do not add {job_skill.name} to the resume unless it is true; "
-            "learn or add evidence if applicable."
+            "if you have real experience, add project or work evidence that names the tool, "
+            "scope, and outcome. Otherwise use it as a preparation item."
         ),
     )
 

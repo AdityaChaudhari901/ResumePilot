@@ -5,6 +5,8 @@ const frontendPort = Number(process.env.RESUMEPILOT_E2E_FRONTEND_PORT ?? 3040);
 const backendBaseUrl = `http://127.0.0.1:${backendPort}`;
 const frontendBaseUrl = `http://127.0.0.1:${frontendPort}`;
 const reuseExistingServer = process.env.RESUMEPILOT_E2E_REUSE_SERVER === "1";
+const runId = process.env.RESUMEPILOT_E2E_RUN_ID ?? String(Date.now());
+const backendDataDir = `.local/e2e/${runId}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -27,8 +29,8 @@ export default defineConfig({
     {
       command:
         "cd ../Backend && " +
-        "DATABASE_URL=sqlite:///./.local/data/playwright-smoke.db " +
-        "RESUMEPILOT_DATA_DIR=.local/data " +
+        `DATABASE_URL=sqlite:///./${backendDataDir}/playwright-smoke.db ` +
+        `RESUMEPILOT_DATA_DIR=${backendDataDir} ` +
         "JOBCOPILOT_API_TOKEN=test-token " +
         `.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`,
       reuseExistingServer,
