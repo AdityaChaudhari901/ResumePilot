@@ -1,0 +1,16 @@
+Role: Senior Backend Platform Engineer
+Company: ScaleCore
+
+Responsibilities:
+- Own distributed backend systems and production reliability.
+- Lead platform architecture, observability, and deployment standards.
+
+Requirements:
+- Required Python experience.
+- Required Kubernetes experience.
+- Required Docker experience.
+- Required Redis experience.
+- Required CI/CD experience.
+- Preferred PostgreSQL experience.
+
+Experience: 5+ years.

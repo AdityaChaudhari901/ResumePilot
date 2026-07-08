@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApplicationReport",
+  "type": "object",
+  "required": [
+    "analysis_id",
+    "match_score",
+    "matched_skills",
+    "missing_skills",
+    "tailored_bullets",
+    "cover_letter",
+    "interview_questions",
+    "validation_warnings"
+  ],
+  "properties": {
+    "analysis_id": {
+      "type": "integer"
+    },
+    "match_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "matched_skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "skill",
+          "match_type",
+          "resume_evidence_ids",
+          "job_evidence_text"
+        ],
+        "properties": {
+          "skill": {
+            "type": "string"
+          },
+          "match_type": {
+            "enum": [
+              "exact",
+              "synonym",
+              "inferred"
+            ]
+          },
+          "resume_evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "job_evidence_text": {
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          }
+        }
+      }
+    },
+    "missing_skills": {
+      "type": "array"
+    },
+    "tailored_bullets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "bullet",
+          "evidence_ids",
+          "unsupported_claims"
+        ],
+        "properties": {
+          "bullet": {
+            "type": "string"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unsupported_claims": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "cover_letter": {
+      "type": "string"
+    },
+    "interview_questions": {
+      "type": "array"
+    },
+    "validation_warnings": {
+      "type": "array"
+    }
+  }
+}

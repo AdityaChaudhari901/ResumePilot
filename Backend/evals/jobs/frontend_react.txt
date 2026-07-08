@@ -1,0 +1,15 @@
+Role: Frontend Engineer
+Company: PixelCraft
+
+Responsibilities:
+- Build accessible React UI flows for a SaaS dashboard.
+- Maintain responsive layouts and frontend test coverage.
+
+Requirements:
+- Required React experience.
+- Required TypeScript experience.
+- Required Accessibility knowledge.
+- Preferred Playwright experience.
+- Preferred Tailwind CSS experience.
+
+Experience: 0-2 years.

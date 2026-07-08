@@ -1,0 +1,15 @@
+Role: Junior Backend Engineer
+Company: NovaHire AI
+
+Responsibilities:
+- Build REST API services for AI-powered hiring workflows.
+- Improve backend reliability and test coverage.
+
+Requirements:
+- Required Python experience.
+- Required FastAPI or similar API framework experience.
+- Required REST API service development experience.
+- Required SQL database experience.
+- Preferred Docker experience.
+
+Experience: 0-2 years.

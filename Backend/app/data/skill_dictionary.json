@@ -1,0 +1,78 @@
+{
+  "skills": [
+    {"canonical": "Python", "category": "programming_language", "variants": ["python", "py"]},
+    {
+      "canonical": "JavaScript",
+      "category": "programming_language",
+      "variants": ["javascript", "js", "ecmascript"]
+    },
+    {"canonical": "TypeScript", "category": "programming_language", "variants": ["typescript", "ts"]},
+    {"canonical": "SQL", "category": "data_tool", "variants": ["sql"]},
+    {"canonical": "FastAPI", "category": "backend_framework", "variants": ["fastapi", "fast api"]},
+    {"canonical": "Django", "category": "backend_framework", "variants": ["django"]},
+    {"canonical": "Flask", "category": "backend_framework", "variants": ["flask"]},
+    {"canonical": "React", "category": "frontend_framework", "variants": ["react", "react.js", "reactjs"]},
+    {"canonical": "Next.js", "category": "frontend_framework", "variants": ["next.js", "nextjs", "next js"]},
+    {"canonical": "Node.js", "category": "backend_framework", "variants": ["node.js", "nodejs", "node js"]},
+    {
+      "canonical": "REST API",
+      "category": "backend_framework",
+      "variants": ["rest api", "restful api", "rest apis"]
+    },
+    {"canonical": "PostgreSQL", "category": "database", "variants": ["postgresql", "postgres", "psql"]},
+    {"canonical": "SQLite", "category": "database", "variants": ["sqlite", "sqlite3"]},
+    {"canonical": "SQLAlchemy", "category": "database", "variants": ["sqlalchemy", "sql alchemy"]},
+    {"canonical": "Redis", "category": "database", "variants": ["redis"]},
+    {"canonical": "Docker", "category": "cloud_devops", "variants": ["docker", "containerization"]},
+    {"canonical": "Kubernetes", "category": "cloud_devops", "variants": ["kubernetes", "k8s"]},
+    {
+      "canonical": "CI/CD",
+      "category": "cloud_devops",
+      "variants": ["ci/cd", "continuous integration", "continuous deployment"]
+    },
+    {"canonical": "Git", "category": "cloud_devops", "variants": ["git"]},
+    {"canonical": "GitHub Actions", "category": "cloud_devops", "variants": ["github actions"]},
+    {"canonical": "Pytest", "category": "testing", "variants": ["pytest"]},
+    {"canonical": "Playwright", "category": "testing", "variants": ["playwright"]},
+    {"canonical": "Pydantic", "category": "backend_framework", "variants": ["pydantic"]},
+    {"canonical": "CrewAI", "category": "ai_ml", "variants": ["crewai", "crew ai"]},
+    {"canonical": "LangChain", "category": "ai_ml", "variants": ["langchain", "lang chain"]},
+    {
+      "canonical": "LLM",
+      "category": "ai_ml",
+      "variants": ["llm", "large language model", "large language models"]
+    },
+    {"canonical": "Generative AI", "category": "ai_ml", "variants": ["generative ai", "genai", "gen ai"]},
+    {
+      "canonical": "Vector Search",
+      "category": "ai_ml",
+      "variants": ["vector search", "vector db", "vector database"]
+    },
+    {"canonical": "pgvector", "category": "database", "variants": ["pgvector", "pg vector"]},
+    {"canonical": "Chroma", "category": "database", "variants": ["chroma", "chromadb", "chroma db"]},
+    {"canonical": "Celery", "category": "backend_framework", "variants": ["celery"]},
+    {"canonical": "RQ", "category": "backend_framework", "variants": ["rq", "redis queue"]},
+    {"canonical": "Pandas", "category": "data_tool", "variants": ["pandas"]},
+    {"canonical": "NumPy", "category": "data_tool", "variants": ["numpy", "num py"]},
+    {
+      "canonical": "Data Visualization",
+      "category": "data_tool",
+      "variants": ["data visualization", "charts", "dashboards"]
+    },
+    {"canonical": "Machine Learning", "category": "ai_ml", "variants": ["machine learning", "ml"]},
+    {"canonical": "Embeddings", "category": "ai_ml", "variants": ["embeddings", "text embeddings"]},
+    {"canonical": "RAG", "category": "ai_ml", "variants": ["rag", "retrieval augmented generation"]},
+    {"canonical": "Tailwind CSS", "category": "frontend_framework", "variants": ["tailwind", "tailwind css"]},
+    {"canonical": "HTML", "category": "frontend_framework", "variants": ["html", "html5"]},
+    {"canonical": "CSS", "category": "frontend_framework", "variants": ["css", "css3"]},
+    {"canonical": "Accessibility", "category": "frontend_framework", "variants": ["accessibility", "a11y", "wcag"]}
+  ],
+  "implied_by": {
+    "SQL": ["PostgreSQL", "SQLite", "SQLAlchemy"],
+    "REST API": ["FastAPI", "Django", "Flask"],
+    "Generative AI": ["LLM", "CrewAI", "LangChain", "RAG"],
+    "Vector Search": ["pgvector", "Chroma", "Embeddings"],
+    "Machine Learning": ["NumPy", "Pandas"],
+    "Accessibility": ["HTML", "CSS", "React"]
+  }
+}

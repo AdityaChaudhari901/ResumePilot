@@ -1,0 +1,63 @@
+# ResumePilot
+
+ResumePilot is an evidence-backed job application copilot built from the CrewAI Job Application Copilot MVP docs. The first implementation slice is deterministic: resume parsing, job parsing, skill matching, validation, and report generation run before any CrewAI writing layer is added.
+
+## Current MVP Slice
+
+- FastAPI backend.
+- SQLite persistence.
+- Strict Pydantic contracts.
+- Resume upload for PDF, DOCX, TXT, and Markdown.
+- Pasted job description analysis and public URL fetch support.
+- Deterministic skill matching and report generation.
+- API token protection for the OpenClaw endpoint.
+
+## Local Setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+cp .env.example .env
+uvicorn app.main:app --reload
+```
+
+Open Swagger UI at `http://127.0.0.1:8000/docs`.
+
+## Useful Commands
+
+```bash
+pytest
+ruff check .
+python -m compileall app tests
+python scripts/run_golden_evals.py
+alembic upgrade head
+```
+
+## API Surface
+
+- `GET /health`
+- `POST /resumes/upload`
+- `POST /jobs/analyze`
+- `GET /reports/{report_id}`
+- `GET /reports/{report_id}/markdown`
+- `POST /chat/openclaw`
+
+The `/chat/openclaw` endpoint requires:
+
+```http
+Authorization: Bearer <JOBCOPILOT_API_TOKEN>
+```
+
+## Accuracy Rule
+
+The deterministic matcher and validator are the source of truth. Generated output must cite resume evidence IDs. Unsupported claims are blocked or marked as "add only if true"; the system must not invent work history, tools, employers, metrics, certifications, or degrees.
+
+## Project Boundaries
+
+- `app/api` contains HTTP routes and dependencies only.
+- `app/services` contains deterministic parsing, matching, report generation, and validation.
+- `app/repositories` owns persistence operations.
+- `app/data/skill_dictionary.json` owns the deterministic skill dictionary.
+- `migrations` owns database schema migrations.
+- `evals` contains synthetic resumes and job descriptions for deterministic regression checks.

@@ -1,0 +1,15 @@
+Role: Data Analyst
+Company: MetricLoop
+
+Responsibilities:
+- Analyze product usage data and create dashboards.
+- Write SQL queries for reporting and data quality checks.
+
+Requirements:
+- Required SQL experience.
+- Required PostgreSQL or similar database experience.
+- Required Python data analysis experience.
+- Preferred Pandas experience.
+- Preferred data visualization experience.
+
+Experience: 0-2 years.

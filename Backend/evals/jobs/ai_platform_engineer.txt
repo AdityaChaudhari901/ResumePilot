@@ -1,0 +1,16 @@
+Role: Junior AI Platform Engineer
+Company: AgentWorks
+
+Responsibilities:
+- Build APIs for agentic AI workflows.
+- Evaluate RAG and LLM output quality.
+
+Requirements:
+- Required Python experience.
+- Required FastAPI experience.
+- Required LLM application experience.
+- Required RAG or embeddings experience.
+- Preferred CrewAI experience.
+- Preferred Chroma or vector database experience.
+
+Experience: 0-2 years.
