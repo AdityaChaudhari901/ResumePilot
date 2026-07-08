@@ -1,6 +1,5 @@
 from app.schemas.agent import AgentWorkflowMode
 
-
 USER_A_HEADERS = {
     "X-ResumePilot-User": "usage-user-a",
     "X-ResumePilot-Email": "usage-a@example.com",

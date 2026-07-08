@@ -75,9 +75,7 @@ def upgrade() -> None:
     op.drop_index(op.f("ix_resumes_file_hash"), table_name="resumes")
     op.create_index(op.f("ix_resumes_file_hash"), "resumes", ["file_hash"])
     op.create_index(op.f("ix_resumes_user_id"), "resumes", ["user_id"])
-    op.create_index(
-        "uq_resumes_user_file_hash", "resumes", ["user_id", "file_hash"], unique=True
-    )
+    op.create_index("uq_resumes_user_file_hash", "resumes", ["user_id", "file_hash"], unique=True)
     op.create_index(op.f("ix_jobs_user_id"), "jobs", ["user_id"])
     op.create_index("ix_jobs_user_content_hash", "jobs", ["user_id", "content_hash"])
     op.create_index(op.f("ix_analyses_user_id"), "analyses", ["user_id"])

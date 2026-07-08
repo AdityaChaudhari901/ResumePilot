@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
-
 USER_A_HEADERS = {
     "X-ResumePilot-User": "user-a",
     "X-ResumePilot-Email": "a@example.com",
@@ -34,8 +33,7 @@ def test_reports_resumes_and_audit_events_are_tenant_scoped(
         == 404
     )
     assert (
-        client.delete(f"/reports/{user_a['report_id']}", headers=USER_B_HEADERS).status_code
-        == 404
+        client.delete(f"/reports/{user_a['report_id']}", headers=USER_B_HEADERS).status_code == 404
     )
     assert (
         client.post(

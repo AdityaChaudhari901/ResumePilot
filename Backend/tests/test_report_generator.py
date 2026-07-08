@@ -4,24 +4,30 @@ from app.services.matcher import match_resume_to_job
 from app.services.resume_parser import parse_resume_profile
 from app.services.validator import validate_report_against_resume
 
-
-FRAGMENTED_RESUME_TEXT = """Aditya Chaudhari
-aditya@example.com
-
-Summary
-requirements through testing to production. Comfortable across the stack: React, Next.js, and React Native on the frontend; Python.
-(FastAPI, Flask) and Node.js REST APIs on the backend; SQL and NoSQL databases; and containerized cloud deployment. Strong in.
-
-Skills
-Python, FastAPI, Flask, SQL, React, Next.js, Git
-
-Projects
-Built a Python FastAPI REST API for a job application tracker with PostgreSQL and SQLAlchemy.
-Implemented a Next.js dashboard for application matching workflows with React and TypeScript.
-
-Education
-B.Tech Computer Science
-"""
+FRAGMENTED_RESUME_TEXT = "\n".join(
+    [
+        "Aditya Chaudhari",
+        "aditya@example.com",
+        "",
+        "Summary",
+        "requirements through testing to production. Comfortable across the stack: React, "
+        "Next.js, and React Native on the frontend; Python.",
+        "(FastAPI, Flask) and Node.js REST APIs on the backend; SQL and NoSQL databases; "
+        "and containerized cloud deployment. Strong in.",
+        "",
+        "Skills",
+        "Python, FastAPI, Flask, SQL, React, Next.js, Git",
+        "",
+        "Projects",
+        "Built a Python FastAPI REST API for a job application tracker with PostgreSQL "
+        "and SQLAlchemy.",
+        "Implemented a Next.js dashboard for application matching workflows with React "
+        "and TypeScript.",
+        "",
+        "Education",
+        "B.Tech Computer Science",
+    ]
+)
 
 
 FORBES_STYLE_JOB_TEXT = """Role: Associate Software Engineer
@@ -55,10 +61,10 @@ def test_tailored_bullets_prefer_project_evidence_over_parser_fragments():
     report, resume = _build_report(FRAGMENTED_RESUME_TEXT, FORBES_STYLE_JOB_TEXT)
 
     assert report.tailored_bullets
+    assert all(bullet.evidence_ids[0].startswith("projects_") for bullet in report.tailored_bullets)
     assert all(
-        bullet.evidence_ids[0].startswith("projects_") for bullet in report.tailored_bullets
+        not bullet.bullet.startswith(("(", ",", ";", ":")) for bullet in report.tailored_bullets
     )
-    assert all(not bullet.bullet.startswith(("(", ",", ";", ":")) for bullet in report.tailored_bullets)
     assert all("Strong in." not in bullet.bullet for bullet in report.tailored_bullets)
     assert all(bullet.bullet.endswith(".") for bullet in report.tailored_bullets)
     assert not validate_report_against_resume(report, resume)

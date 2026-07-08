@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.schemas.auth import CurrentUser
 from app.schemas.audit import AuditEventListResponse
+from app.schemas.auth import CurrentUser
 from app.services.audit_service import list_audit_events
 
 router = APIRouter(prefix="/audit", tags=["audit"])

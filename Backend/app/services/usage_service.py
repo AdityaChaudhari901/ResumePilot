@@ -17,7 +17,6 @@ from app.schemas.usage import (
     UsageSummaryResponse,
 )
 
-
 EXPORT_EVENT_TYPES = {
     UsageEventType.markdown_exported.value,
     UsageEventType.latex_exported.value,

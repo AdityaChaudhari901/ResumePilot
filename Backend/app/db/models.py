@@ -27,9 +27,7 @@ def default_workflow_trace() -> dict[str, Any]:
 
 class ResumeRecord(Base):
     __tablename__ = "resumes"
-    __table_args__ = (
-        UniqueConstraint("user_id", "file_hash", name="uq_resumes_user_file_hash"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "file_hash", name="uq_resumes_user_file_hash"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)

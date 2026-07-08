@@ -4,7 +4,6 @@ import hashlib
 import hmac
 from datetime import UTC, datetime
 
-
 AUTH_TIMESTAMP_HEADER = "x-resumepilot-auth-timestamp"
 AUTH_SIGNATURE_HEADER = "x-resumepilot-auth-signature"
 

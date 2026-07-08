@@ -9,7 +9,6 @@ from app.services.auth_signature import (
     sign_identity,
 )
 
-
 AUTH_SECRET = "test-auth-proxy-secret"
 
 
@@ -45,7 +44,9 @@ def test_auth_required_rejects_raw_unsigned_identity_headers(settings, sample_re
         )
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "AUTH_TRUSTED_PROXY_SECRET is required when AUTH_REQUIRED=true"
+    assert (
+        response.json()["detail"] == "AUTH_TRUSTED_PROXY_SECRET is required when AUTH_REQUIRED=true"
+    )
 
 
 def test_signed_identity_rejects_tampered_user_headers(settings, sample_resume_text):

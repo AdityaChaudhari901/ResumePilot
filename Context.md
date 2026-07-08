@@ -1,6 +1,6 @@
 # ResumePilot Context
 
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 ## Purpose
 
@@ -413,10 +413,17 @@ Next implementation scope:
 
 ## Verification Evidence
 
-Latest verification run: 2026-07-08
+Latest verification run: 2026-07-09
 
 | Check | Command | Result |
 |---|---|---|
+| GitHub Actions failure inspection | `gh run view 28966835429 --repo AdityaChaudhari901/ResumePilot --log-failed` | Failed before repair: backend `ruff format app tests scripts migrations --check` reported 5 files needing formatting |
+| Backend CI formatting repair | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check` | Passed: 92 files already formatted |
+| Backend CI lint after repair | `cd Backend && .venv/bin/ruff check .` | Passed: all checks passed |
+| Backend CI tests after repair | `cd Backend && .venv/bin/pytest` | Passed: 60 passed, 1 Starlette/httpx deprecation warning |
+| Backend CI compile after repair | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
+| Backend CI golden evals after repair | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: evaluated 20 pairs |
+| Backend CI quality gate after repair | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, schema pass 100%, evidence gaps 0, unsupported warnings 0, required-skill routing gaps 0, avg 8.91 ms, p95 12.48 ms |
 | Python runtime | `cd Backend && .venv/bin/python --version && .venv/bin/python -m pip check` | Passed: Python 3.12.13, no broken requirements |
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
@@ -498,6 +505,11 @@ Latest verification run: 2026-07-08
 | Live CrewAI API smoke | FastAPI on `127.0.0.1:8012` with upload/analyze/report/markdown HTTP flow | Passed: health 200, upload 201, analyze 200, report 200, markdown 200, no fallback warning, three Vertex `generateContent` calls returned HTTP 200 |
 
 ## Change Log
+
+### 2026-07-09
+
+- Repaired the failed GitHub Actions backend quality gate by applying Ruff formatting/import ordering to backend models, migration, and tests, then wrapping long report-generator fixture literals.
+- Verified the CI backend sequence locally after repair: format check, lint, pytest, compileall, golden evals, and deterministic backend quality gate all passed.
 
 ### 2026-07-08
 
