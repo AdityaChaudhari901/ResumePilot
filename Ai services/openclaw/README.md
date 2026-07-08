@@ -55,6 +55,45 @@ openclaw skills info job
 openclaw skills check
 ```
 
+## Google Vertex Provider
+
+ResumePilot can use OpenClaw's Google Vertex model provider for the local Gateway. Current OpenClaw docs identify the provider as `google-vertex` and use Google Cloud Application Default Credentials for auth.
+
+Local prerequisite:
+
+```bash
+gcloud auth application-default login
+gcloud config set project <gcp-project-id>
+export GOOGLE_CLOUD_PROJECT=<gcp-project-id>
+export GOOGLE_CLOUD_LOCATION=us-central1
+```
+
+Enable the included Google plugin and set the default model reference after choosing a Vertex model available in your project and region:
+
+```bash
+openclaw plugins enable google
+openclaw models set google-vertex/<model-id>
+```
+
+Use a stable model ID for demos when possible. Confirm availability in your Google Cloud project and region before relying on it for a recorded demo.
+
+## WebChat / Control UI
+
+Start the Gateway locally and open the browser dashboard:
+
+```bash
+openclaw gateway run --bind loopback
+openclaw dashboard
+```
+
+Default local dashboard:
+
+```text
+http://127.0.0.1:18789/
+```
+
+The Control UI is an admin surface. Keep it on loopback, Tailscale, or an SSH tunnel; do not expose it publicly.
+
 Run from OpenClaw chat:
 
 ```text

@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, CrewAI-ready deterministic agent workflow boundary, and project-local OpenClaw `/job` skill implemented.
+- Current state: four-folder workspace created; backend foundation, CrewAI-ready deterministic agent workflow boundary, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -52,6 +52,11 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
 - OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
 - OpenClaw onboarding/gateway provider setup was intentionally skipped during installation.
+- Google Vertex selected as the current OpenClaw provider path (`google-vertex`) for local Gateway demos.
+- Local Google Cloud ADC file is present, but no active `gcloud` project is configured in the current CLI context.
+- OpenClaw Gateway service is not installed/running yet; `~/.openclaw/openclaw.json` is still missing.
+- Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
+- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`.
 
 ## Product Rule
 
@@ -84,6 +89,10 @@ Before implementing product behavior, architecture changes, AI workflows, backen
 | LLM provider layer | CrewAI config or LiteLLM-compatible wrapper |
 | Reports | JSON and Markdown |
 | Auth | Local API token via `JOBCOPILOT_API_TOKEN` |
+| Frontend | Next.js App Router, React, TypeScript, Tailwind CSS |
+| Frontend API bridge | Next.js route handlers as backend-for-frontend proxy |
+| OpenClaw model provider path | Google Vertex via `google-vertex` and gcloud ADC |
+| Frontend icons | lucide-react |
 | Testing | pytest, httpx, respx |
 | Packaging | Docker Compose later, not required on day one |
 
@@ -148,22 +157,33 @@ Completed OpenClaw local integration:
 - Verified OpenClaw detects the `job` skill as ready, visible to model, and available as a command.
 - Verified helper-to-backend smoke with a sample resume and sample job description.
 
+Completed initial WebChat/dashboard slice:
+
+- Added a production-built Next.js dashboard under `Frontend/`.
+- Added server-side route handlers for `/api/health`, resume upload, job analysis, report JSON, report Markdown, and OpenClaw status.
+- Kept browser traffic same-origin through the Next.js backend-for-frontend layer instead of exposing backend tokens or adding broad CORS.
+- Added resume upload, pasted job analysis, report summary, evidence-backed skill review, Markdown export, and OpenClaw WebChat status panels.
+- Documented Google Vertex provider setup and OpenClaw Control UI/WebChat local commands.
+- Added an npm override for Next's transitive PostCSS version so frontend production audit reports zero vulnerabilities.
+- Verified dashboard proxy flow against FastAPI on `127.0.0.1:8002` and Next.js on `127.0.0.1:3001`.
+
 Next implementation scope:
 
-- Complete OpenClaw onboarding and channel pairing after a model provider/API key is selected.
+- Complete OpenClaw onboarding and channel pairing with Google Vertex after the GCP project, region, and model are selected.
 - Verify current CrewAI package/API docs, then replace or extend the deterministic fallback with live CrewAI structured-output agents.
-- Add dependency lock when finalizing local Python version/tooling.
-- Add frontend dashboard when backend report APIs are stable.
+- Add backend dependency lock when finalizing local Python version/tooling.
+- Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
 
 ## Known Gaps
 
-- No dependency lock exists yet.
+- Backend dependency lock does not exist yet; frontend `package-lock.json` exists.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw local skill exists, but OpenClaw gateway onboarding/channel pairing is not completed.
+- Google Vertex provider path is selected, but the current local `gcloud` config has no active project and OpenClaw has no persisted gateway config yet.
 - CrewAI/OpenClaw APIs should be verified against current docs before live integration.
 - Python 3.14 is installed locally, but Python 3.12 is the safer target for dependency compatibility.
 - Live CrewAI/provider-backed execution is not implemented yet; current workflow uses deterministic fallback contracts.
-- Background queue, caching, metrics, and web UI are not implemented yet.
+- Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
 
 ## Verification Evidence
 
@@ -184,6 +204,13 @@ Latest verification run: 2026-07-08
 | OpenClaw skill check | `OPENCLAW_WORKSPACE_DIR="$PWD/Ai services/openclaw/workspace" JOBCOPILOT_API_TOKEN=test-token openclaw skills check` | Passed: `job` ready, visible, and available as command |
 | OpenClaw helper tests | `python3 -m unittest discover "Ai services/openclaw/tests"` | Passed: 4 tests |
 | OpenClaw helper smoke | Upload sample resume, run `resumepilot_job.py paste:<sample job>` against API on port 8002 | Passed: helper exit 0, Markdown report returned |
+| Frontend audit | `cd Frontend && npm audit --omit=dev` | Passed: 0 vulnerabilities after PostCSS override |
+| Frontend lint | `cd Frontend && npm run lint` | Passed |
+| Frontend typecheck | `cd Frontend && npm run typecheck` | Passed |
+| Frontend build | `cd Frontend && npm run build` | Passed: Next.js production build generated app and API routes |
+| Dashboard proxy smoke | Health, upload sample resume, analyze sample JD, fetch JSON and Markdown through `http://127.0.0.1:3001/api/*` | Passed: health ok, resume parsed, analysis completed, Markdown report returned |
+| OpenClaw Vertex model discovery | `openclaw models list --provider google-vertex --plain` | Passed: listed Google Vertex model refs |
+| OpenClaw gateway status | `openclaw gateway status` | Verified not running: service not installed, loopback probe refused |
 
 ## Change Log
 
@@ -225,6 +252,11 @@ Latest verification run: 2026-07-08
 - Added project-local OpenClaw workspace, `job` skill, and `resumepilot_job.py` helper around `/chat/openclaw`.
 - Added OpenClaw setup docs and helper unit tests.
 - Verified OpenClaw skill discovery/check and helper-to-backend smoke flow.
+- Selected Google Vertex as the current OpenClaw model provider path and documented the gcloud ADC setup boundary.
+- Implemented the initial Next.js WebChat/dashboard workbench in `Frontend/`.
+- Added Next.js backend-for-frontend route handlers that proxy dashboard requests to FastAPI.
+- Added frontend dependency lock, lint/typecheck/build scripts, and a PostCSS audit override for the Next.js dependency tree.
+- Verified frontend audit, lint, typecheck, production build, backend tests, and live dashboard proxy smoke.
 
 ## Maintenance Rule
 

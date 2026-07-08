@@ -10,6 +10,11 @@ __pycache__/
 venv/
 .env
 .local/
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
 Backend/evals/outputs/
 htmlcov/
 dist/
