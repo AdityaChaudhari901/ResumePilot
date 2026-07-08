@@ -2,8 +2,8 @@
 
 ResumePilot is organized into four implementation areas:
 
-- `Frontend/` - Next.js dashboard and backend-for-frontend proxy routes.
-- `Backend/` - FastAPI backend, deterministic parsing, matching, validation, report exports, tests, migrations, and evals.
+- `Frontend/` - Next.js dashboard and backend-for-frontend proxy routes, including report downloads.
+- `Backend/` - FastAPI backend, deterministic parsing, matching, validation, DOCX/LaTeX/PDF report exports, tests, migrations, and evals.
 - `Ai services/` - OpenClaw local skill workspace and AI workflow support.
 - `Docs/` - MVP documentation pack and supporting docs.
 

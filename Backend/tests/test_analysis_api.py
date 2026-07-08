@@ -1,3 +1,6 @@
+from io import BytesIO
+from zipfile import ZipFile
+
 import pytest
 
 from app.schemas.agent import (
@@ -40,6 +43,19 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert r"\section{Evidence-Backed Tailored Highlights}" in latex_response.text
     assert "Python" in latex_response.text
     assert "Docker" not in latex_response.text
+
+    docx_response = client.get(f"/reports/{body['report_id']}/resume/docx")
+    assert docx_response.status_code == 200
+    assert docx_response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert (
+        docx_response.headers["content-disposition"]
+        == f'attachment; filename="resumepilot-report-{body["report_id"]}.docx"'
+    )
+    assert docx_response.content.startswith(b"PK")
+    with ZipFile(BytesIO(docx_response.content)) as archive:
+        assert "word/document.xml" in archive.namelist()
 
     trace_response = client.get(f"/reports/{body['report_id']}/trace")
     assert trace_response.status_code == 200

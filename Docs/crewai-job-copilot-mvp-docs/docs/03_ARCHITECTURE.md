@@ -27,7 +27,7 @@ flowchart TD
     Agents --> Drafts[Draft Outputs]
 
     Drafts --> Validator[Claim Validator + Schema Validator]
-    Validator --> Report[Markdown + JSON + LaTeX/PDF Report]
+    Validator --> Report[Markdown + JSON + DOCX/LaTeX/PDF Report]
     Report --> DB
     Report --> OC
     Report --> WebUI
@@ -139,6 +139,7 @@ GET /reports/{report_id}
 GET /reports/{report_id}/markdown
 GET /reports/{report_id}/trace
 GET /reports/{report_id}/resume/latex
+GET /reports/{report_id}/resume/docx
 GET /reports/{report_id}/resume/pdf
 ```
 

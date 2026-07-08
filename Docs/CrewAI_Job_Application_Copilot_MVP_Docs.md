@@ -169,7 +169,7 @@ Acceptance criteria:
 - Deterministic skill matcher.
 - CrewAI agents for structured analysis and writing.
 - Markdown and JSON reports.
-- Evidence-backed LaTeX and PDF resume export from validated report data.
+- Evidence-backed DOCX, LaTeX, and PDF resume export from validated report data.
 - OpenClaw `/job` command integration.
 - Basic web UI or Swagger UI for resume upload.
 - CLI for local demo.
@@ -227,7 +227,7 @@ Acceptance criteria:
 | Observability | Structured logs + Prometheus metrics; CrewAI tracing if available | Measure latency, cost, failures, and agent behavior. |
 | Packaging | Docker Compose | Local stack: API, DB, Redis, worker. |
 | LLM provider layer | CrewAI LLM config / LiteLLM optional | Keep model provider configurable. |
-| Report exports | Markdown, JSON, generated LaTeX, local `tectonic`/`pdflatex` PDF | Keep report source evidence-backed and compile PDFs behind server-side guards. |
+| Report exports | Markdown, JSON, generated DOCX, generated LaTeX, local `tectonic`/`pdflatex` PDF | Keep report source evidence-backed, provide an editable resume export, and compile PDFs behind server-side guards. |
 | Testing | Pytest + Playwright | Backend unit/integration tests plus dashboard browser smoke. |
 
 ## MVP dependency groups
@@ -522,6 +522,7 @@ GET /reports/{report_id}
 GET /reports/{report_id}/markdown
 GET /reports/{report_id}/trace
 GET /reports/{report_id}/resume/latex
+GET /reports/{report_id}/resume/docx
 GET /reports/{report_id}/resume/pdf
 ```
 
@@ -1640,9 +1641,16 @@ Defenses:
 
 ### Report export safety
 
-LaTeX and PDF exports must be generated only from validated `ResumeProfile`,
-`JobProfile`, and `ApplicationReport` data. Do not accept raw user-supplied
-LaTeX for compilation.
+DOCX, LaTeX, and PDF exports must be generated only from validated
+`ResumeProfile`, `JobProfile`, and `ApplicationReport` data. Do not accept raw
+user-supplied LaTeX, OOXML, or document templates for compilation/rendering.
+
+DOCX generation controls:
+
+- build the document server-side with `python-docx`
+- include only evidence-backed supported skills and tailored bullets
+- avoid embedding local machine/user metadata in document properties
+- return the generated `.docx` as an attachment
 
 PDF compilation controls:
 
@@ -1988,7 +1996,7 @@ Exit criteria:
 | Web dashboard | Upload resume and view reports. |
 | Multiple resumes | Maintain variants: backend, frontend, AI, data. |
 | Skill gap planner | Suggest 7-day or 30-day learning plan. |
-| Report export polish | Add DOCX export and saved export history. |
+| Report export polish | Add saved export history and richer export management. |
 | Job tracker | Track applied/saved/interview status. |
 | Email draft | Draft recruiter email with approval. |
 | Vector search | Semantic matching with embeddings. |
@@ -2082,7 +2090,7 @@ Exit criteria:
 - upload resume -> parse -> store
 - analyze pasted JD -> report
 - analyze job URL -> report
-- export report Markdown, LaTeX, and PDF
+- export report Markdown, DOCX, LaTeX, and PDF
 - OpenClaw endpoint -> report
 - invalid token -> 401
 - report trace includes workflow mode, step statuses, and timing telemetry
@@ -2206,7 +2214,7 @@ npm run test:e2e
 
 The Playwright smoke starts FastAPI and the production Next.js server, uploads a
 sample resume, analyzes the sample job, verifies workflow trace timing,
-Markdown/LaTeX/PDF exports, and captures desktop/mobile screenshots in ignored
+Markdown/DOCX/LaTeX/PDF exports, and captures desktop/mobile screenshots in ignored
 local artifacts.
 
 ## Continuous integration

@@ -21,6 +21,11 @@ test("dashboard demo flow renders report and validates exports", async ({ page }
     contentType: "application/x-tex",
     prefix: "%-------------------------"
   });
+  await expectReportExport(page, `/api/reports/${reportId}/resume/docx`, {
+    contentDisposition: `attachment; filename="resumepilot-report-${reportId}.docx"`,
+    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    prefix: "PK"
+  });
   await expectReportExport(page, `/api/reports/${reportId}/resume/pdf`, {
     contentDisposition: `attachment; filename="resumepilot-report-${reportId}.pdf"`,
     contentType: "application/pdf",
@@ -35,6 +40,7 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   await completeDashboardDemoFlow(page);
 
   await expect(page.getByRole("link", { name: "Markdown" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "DOCX" })).toBeVisible();
   await expect(page.getByRole("link", { name: "LaTeX" })).toBeVisible();
   await expect(page.getByRole("link", { name: "PDF" })).toBeVisible();
 

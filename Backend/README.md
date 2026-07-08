@@ -17,6 +17,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
 - Evidence-backed LaTeX resume export using the uploaded resume facts and supported tailored bullets.
+- Editable DOCX resume export generated from the same validated report, resume, and job data.
 - Guarded PDF resume export compiled from the same evidence-backed LaTeX source.
 - API token protection for the OpenClaw endpoint.
 
@@ -119,6 +120,7 @@ provider credentials and networked model calls.
 - `GET /reports/{report_id}/markdown`
 - `GET /reports/{report_id}/trace`
 - `GET /reports/{report_id}/resume/latex`
+- `GET /reports/{report_id}/resume/docx`
 - `GET /reports/{report_id}/resume/pdf`
 - `POST /chat/openclaw`
 

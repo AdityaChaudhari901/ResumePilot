@@ -9,6 +9,7 @@ import {
   Download,
   FileCode2,
   FileDown,
+  FileText,
   GitBranch,
   ShieldCheck
 } from "lucide-react";
@@ -54,6 +55,9 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
   const latexDownloadHref = `/api/reports/${encodeURIComponent(
     String(analysis.report_id)
   )}/resume/latex`;
+  const docxDownloadHref = `/api/reports/${encodeURIComponent(
+    String(analysis.report_id)
+  )}/resume/docx`;
   const pdfDownloadHref = `/api/reports/${encodeURIComponent(
     String(analysis.report_id)
   )}/resume/pdf`;
@@ -69,6 +73,14 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
             variant="secondary"
           >
             Markdown
+          </ButtonLink>
+          <ButtonLink
+            download={`resumepilot-report-${analysis.report_id}.docx`}
+            href={docxDownloadHref}
+            icon={<FileText className="h-4 w-4" aria-hidden="true" />}
+            variant="secondary"
+          >
+            DOCX
           </ButtonLink>
           <ButtonLink
             download={`resumepilot-report-${analysis.report_id}.tex`}

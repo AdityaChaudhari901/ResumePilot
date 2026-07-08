@@ -18,7 +18,7 @@
 | Observability | Structured logs + Prometheus metrics; CrewAI tracing if available | Measure latency, cost, failures, and agent behavior. |
 | Packaging | Docker Compose | Local stack: API, DB, Redis, worker. |
 | LLM provider layer | CrewAI LLM config / LiteLLM optional | Keep model provider configurable. |
-| Report exports | Markdown, JSON, generated LaTeX, local `tectonic`/`pdflatex` PDF | Keep report source evidence-backed and compile PDFs behind server-side guards. |
+| Report exports | Markdown, JSON, generated DOCX, generated LaTeX, local `tectonic`/`pdflatex` PDF | Keep report source evidence-backed, provide an editable resume export, and compile PDFs behind server-side guards. |
 | Testing | Pytest + Playwright | Backend unit/integration tests plus dashboard browser smoke. |
 
 ## MVP dependency groups

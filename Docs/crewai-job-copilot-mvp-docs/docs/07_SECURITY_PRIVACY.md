@@ -63,9 +63,16 @@ Defenses:
 
 ### Report export safety
 
-LaTeX and PDF exports must be generated only from validated `ResumeProfile`,
-`JobProfile`, and `ApplicationReport` data. Do not accept raw user-supplied
-LaTeX for compilation.
+DOCX, LaTeX, and PDF exports must be generated only from validated
+`ResumeProfile`, `JobProfile`, and `ApplicationReport` data. Do not accept raw
+user-supplied LaTeX, OOXML, or document templates for compilation/rendering.
+
+DOCX generation controls:
+
+- build the document server-side with `python-docx`
+- include only evidence-backed supported skills and tailored bullets
+- avoid embedding local machine/user metadata in document properties
+- return the generated `.docx` as an attachment
 
 PDF compilation controls:
 

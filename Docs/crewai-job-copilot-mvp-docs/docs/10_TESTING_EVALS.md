@@ -18,7 +18,7 @@
 - upload resume -> parse -> store
 - analyze pasted JD -> report
 - analyze job URL -> report
-- export report Markdown, LaTeX, and PDF
+- export report Markdown, DOCX, LaTeX, and PDF
 - OpenClaw endpoint -> report
 - invalid token -> 401
 - report trace includes workflow mode, step statuses, and timing telemetry
@@ -142,7 +142,7 @@ npm run test:e2e
 
 The Playwright smoke starts FastAPI and the production Next.js server, uploads a
 sample resume, analyzes the sample job, verifies workflow trace timing,
-Markdown/LaTeX/PDF exports, and captures desktop/mobile screenshots in ignored
+Markdown/DOCX/LaTeX/PDF exports, and captures desktop/mobile screenshots in ignored
 local artifacts.
 
 ## Continuous integration

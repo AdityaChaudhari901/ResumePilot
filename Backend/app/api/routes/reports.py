@@ -10,11 +10,13 @@ from app.services.analysis_service import (
     get_report,
     get_report_markdown,
     get_report_trace,
+    get_tailored_resume_docx,
     get_tailored_resume_latex,
     get_tailored_resume_pdf,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 @router.get("/{report_id}", response_model=ApplicationReport)
@@ -40,6 +42,18 @@ def read_tailored_resume_latex(report_id: int, db: Session = Depends(get_db)) ->
         media_type="application/x-tex",
         headers={
             "Content-Disposition": f'attachment; filename="resumepilot-report-{report_id}.tex"'
+        },
+    )
+
+
+@router.get("/{report_id}/resume/docx")
+def read_tailored_resume_docx(report_id: int, db: Session = Depends(get_db)) -> Response:
+    docx = get_tailored_resume_docx(db, report_id)
+    return Response(
+        content=docx,
+        media_type=DOCX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": f'attachment; filename="resumepilot-report-{report_id}.docx"'
         },
     )
 

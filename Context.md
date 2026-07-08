@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, evidence-backed DOCX, LaTeX, and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -36,6 +36,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/services/agent_workflow.py`
   - `Backend/app/services/crewai_workflow.py`
   - `Backend/app/services/provider_pricing.py`
+  - `Backend/app/services/docx_resume_renderer.py`
   - `Backend/app/services/latex_resume_renderer.py`
   - `Backend/app/services/pdf_resume_compiler.py`
   - `Backend/app/data/provider_pricing.json`
@@ -44,6 +45,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/tests/test_backend_quality_gate.py`
+  - `Backend/tests/test_docx_resume_renderer.py`
   - `Backend/tests/test_latex_resume_renderer.py`
   - `Backend/tests/test_pdf_resume_compiler.py`
   - `Backend/scripts/run_golden_evals.py`
@@ -78,7 +80,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
 - OpenClaw Gateway service is not installed as a daemon; foreground local startup is handled by `Ai services/openclaw/scripts/start_local_gateway.sh`.
 - Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
-- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, expose PDF report download through `/api/reports/[reportId]/resume/pdf`, and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
+- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, expose DOCX report download through `/api/reports/[reportId]/resume/docx`, expose PDF report download through `/api/reports/[reportId]/resume/pdf`, and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
 
 ## Product Rule
 
@@ -113,7 +115,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Browser fallback | Playwright, only when needed |
 | Agent orchestration | CrewAI |
 | LLM provider layer | CrewAI config or LiteLLM-compatible wrapper |
-| Reports | JSON, Markdown, LaTeX `.tex`, and compiled PDF resume export |
+| Reports | JSON, Markdown, editable DOCX, LaTeX `.tex`, and compiled PDF resume export |
 | Auth | Local API token via `JOBCOPILOT_API_TOKEN` |
 | Frontend | Next.js App Router, React, TypeScript, Tailwind CSS |
 | Frontend API bridge | Next.js route handlers as backend-for-frontend proxy |
@@ -267,6 +269,17 @@ Completed GitHub Actions CI quality gate slice:
 - Kept live CrewAI/Vertex smokes and Playwright browser screenshots out of default CI until provider secrets and browser artifact policy are configured.
 - Updated root, backend, frontend, MVP testing docs, and this context file with the CI scope and command contract.
 
+Completed evidence-backed DOCX resume export slice:
+
+- Added `Backend/app/services/docx_resume_renderer.py` to generate an editable `.docx` resume from validated `ResumeProfile`, `JobProfile`, and `ApplicationReport` data.
+- Added `GET /reports/{report_id}/resume/docx`, returning a downloadable Office Open XML attachment with a stable filename.
+- The DOCX export renders candidate/contact data, professional summary, evidence-backed skills, supported tailored highlights, experience, projects, education, and certifications.
+- The renderer excludes missing skills and unsupported tailored bullets, uses compact resume styling, and sets document properties to ResumePilot instead of local machine/user metadata.
+- Added a Next.js backend-for-frontend proxy route at `Frontend/src/app/api/reports/[reportId]/resume/docx/route.ts`.
+- Added a dashboard `DOCX` download action beside Markdown, DOCX, LaTeX, and PDF exports.
+- Added focused renderer/API tests and Playwright export assertions for DOCX package/content-type/attachment behavior.
+- Updated README files, MVP docs, security notes, testing docs, and this context file for the new editable export behavior.
+
 Completed backend Python 3.12 runtime and dependency lock slice:
 
 - Added root `.python-version` with Python `3.12.13`.
@@ -316,13 +329,13 @@ Completed dashboard Playwright browser smoke slice:
 
 - Added Playwright to the frontend dev toolchain with `npm run test:e2e:install` and `npm run test:e2e`.
 - Added `Frontend/playwright.config.ts` to build the frontend, start FastAPI on `127.0.0.1:8040`, start production Next.js on `127.0.0.1:3040`, and run Chromium tests with ignored local artifacts.
-- Added `Frontend/e2e/dashboard.spec.ts` covering resume upload, sample job analysis, report rendering, workflow trace visibility, Markdown/LaTeX/PDF export response checks, and desktop/mobile screenshots.
+- Added `Frontend/e2e/dashboard.spec.ts` covering resume upload, sample job analysis, report rendering, workflow trace visibility, Markdown/DOCX/LaTeX/PDF export response checks, and desktop/mobile screenshots.
 - Updated root/frontend README files and testing docs with the browser smoke command and artifact locations.
 - Verified Playwright Chromium setup and the dashboard e2e smoke with 2 passing browser tests.
 
 Next implementation scope:
 
-- Add report export polish, saved export history or DOCX export, live-provider latency/cost aggregation in the backend quality gate, and screenshot baseline or accessibility checks for the dashboard.
+- Add saved export history, richer export management, live-provider latency/cost aggregation in the backend quality gate, and screenshot baseline or accessibility checks for the dashboard.
 
 ## Known Gaps
 
@@ -331,8 +344,8 @@ Next implementation scope:
 - Backend lock is a pinned pip constraints file, not a hash-locked artifact; add hash locking or container builds before remote production deployment.
 - The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency and token usage are visible in per-report traces but not included in the deterministic quality gate yet.
 - PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
-- DOCX export is not implemented yet.
 - Workflow trace cost estimates currently cover only the configured Vertex global standard `google/gemini-3.5-flash` path; additional provider/model/region rates must be added before other traces can emit cost.
+- DOCX export has structural package and browser download coverage; pixel-level DOCX render QA requires installing `pdf2image` plus LibreOffice/`soffice` on this machine.
 - Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
 - Playwright browser smoke is implemented locally; CI browser execution, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
@@ -346,19 +359,22 @@ Latest verification run: 2026-07-08
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
 | TeX compiler | `tectonic --version` | Passed: `Tectonic 0.16.9` |
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 34 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `Backend/.venv/bin/pytest Backend` | Passed: 35 passed, 1 Starlette/httpx deprecation warning |
+| DOCX export focused tests | `Backend/.venv/bin/pytest Backend/tests/test_docx_resume_renderer.py Backend/tests/test_analysis_api.py` | Passed: 6 passed, 1 Starlette/httpx deprecation warning |
 | Report export focused tests | `cd Backend && .venv/bin/pytest tests/test_pdf_resume_compiler.py tests/test_analysis_api.py tests/test_settings.py` | Passed: 10 passed, 1 Starlette/httpx deprecation warning |
-| Backend trace timing coverage | `cd Backend && .venv/bin/pytest` | Passed: workflow trace timing assertions covered in full backend run, 34 passed |
+| Backend trace timing coverage | `Backend/.venv/bin/pytest Backend` | Passed: workflow trace timing assertions covered in full backend run, 35 passed |
 | Backend runtime pricing focused tests | `cd Backend && .venv/bin/pytest tests/test_provider_pricing.py tests/test_agent_workflow.py tests/test_analysis_api.py` | Passed: 14 passed, 1 Starlette/httpx deprecation warning |
-| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 68 files already formatted, all checks passed |
-| Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
+| Lint | `Backend/.venv/bin/ruff format Backend/app Backend/tests Backend/scripts Backend/migrations --check` and `Backend/.venv/bin/ruff check Backend` | Passed: 70 files already formatted, all checks passed |
+| Compile | `Backend/.venv/bin/python -m compileall Backend/app Backend/tests Backend/scripts` | Passed |
 | CI workflow YAML parse | `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml"); puts "yaml ok"'` | Passed: `yaml ok` |
 | CI-style backend dev install | `cd Backend && VENV_DIR=.local/venvs/ci-dev-check INSTALL_EXTRAS=dev scripts/bootstrap_py312.sh --recreate` | Passed: Python 3.12.13, constrained `.[dev]` install, `pip check` passed |
 | CI-style backend tests | `cd Backend && .local/venvs/ci-dev-check/bin/pytest` | Passed: 34 passed, 1 Starlette/httpx deprecation warning |
 | CI-style backend quality gate | `cd Backend && .local/venvs/ci-dev-check/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, avg 2.27 ms, p95 2.78 ms |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.08 ms, p95 2.48 ms |
+| Backend quality gate | `Backend/.venv/bin/python Backend/scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, avg 3.54 ms, p95 9.29 ms |
+| DOCX package generation | `Backend/.venv/bin/python - <<'PY' ... render_tailored_resume_docx(...) ... PY` | Passed: generated `/tmp/resumepilot-docx-sample.docx`, 37266 bytes, ZIP package prefix |
+| DOCX visual render QA | `Backend/.venv/bin/python /Users/adityachaudhari/.codex/plugins/cache/openai-primary-runtime/documents/26.630.12135/skills/documents/render_docx.py /tmp/resumepilot-docx-sample.docx --output_dir /tmp/resumepilot-docx-render --emit_pdf` | Blocked: `pdf2image` missing from the backend venv and LibreOffice/`soffice` is not installed |
 | Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
 | Generated ResumePilot PDF smoke | `cd Backend && .venv/bin/python - <<'PY' ... render_tailored_resume_latex(...) ... compile_latex_to_pdf(...) ... PY` | Passed: generated 19397-byte PDF with `%PDF-` prefix |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
@@ -373,9 +389,9 @@ Latest verification run: 2026-07-08
 | Frontend CI install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm ci` | Passed: 362 packages installed/audited, 0 vulnerabilities |
 | Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
-| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: Next.js production build generated the dashboard and API routes including `/api/reports/[reportId]/trace`, `/api/reports/[reportId]/resume/latex`, and `/api/reports/[reportId]/resume/pdf` |
+| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: Next.js production build generated the dashboard and API routes including `/api/reports/[reportId]/trace`, `/api/reports/[reportId]/resume/docx`, `/api/reports/[reportId]/resume/latex`, and `/api/reports/[reportId]/resume/pdf` |
 | Playwright Chromium install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e:install` | Passed: Chromium already available for Playwright |
-| Dashboard Playwright browser smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build, FastAPI on `127.0.0.1:8040`, Next.js on `127.0.0.1:3040`, 2 Chromium tests passed, workflow trace timing and Markdown/LaTeX/PDF exports verified |
+| Dashboard Playwright browser smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build, FastAPI on `127.0.0.1:8040`, Next.js on `127.0.0.1:3040`, 2 Chromium tests passed, workflow trace timing and Markdown/DOCX/LaTeX/PDF exports verified |
 | E2E port cleanup | `lsof -nP -iTCP:8040 -sTCP:LISTEN` and `lsof -nP -iTCP:3040 -sTCP:LISTEN` | Passed: no listeners after Playwright completed |
 | Diff whitespace | `git diff --check` | Passed |
 | Dashboard screenshots | `Frontend/.local/playwright-results/**/dashboard-desktop.png` and `Frontend/.local/playwright-results/**/dashboard-mobile.png` | Passed: desktop and mobile screenshots captured in ignored local artifacts |
@@ -499,6 +515,11 @@ Latest verification run: 2026-07-08
 - Configured frontend CI with Node.js 24, npm cache, `npm ci`, ESLint, and TypeScript typecheck.
 - Updated root/backend/frontend README files, MVP testing docs, and this context file with the CI scope and live/browser manual-gate boundary.
 - Verified the CI command set locally, including a fresh backend `.[dev]` venv and frontend `npm ci`.
+- Added evidence-backed DOCX resume generation from validated report, resume, and job data.
+- Added `GET /reports/{report_id}/resume/docx` in FastAPI and the matching Next.js `/api/reports/[reportId]/resume/docx` proxy route.
+- Added a dashboard DOCX download action beside Markdown, DOCX, LaTeX, and PDF exports.
+- Added renderer, API, and Playwright coverage for DOCX export package, headers, and link visibility.
+- Updated README files, MVP docs, security notes, testing docs, and this context file for editable DOCX export behavior.
 
 ## Maintenance Rule
 
