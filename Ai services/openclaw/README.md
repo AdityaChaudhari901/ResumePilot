@@ -115,6 +115,15 @@ openclaw dashboard
 
 If OpenClaw reports `scope upgrade pending approval` for the local CLI, approve the pending device request from the Control UI or run the `openclaw devices approve <request-id>` command printed by OpenClaw with the local gateway token loaded in the shell. Do not disable gateway token auth to work around pairing.
 
+If the CLI is stuck in a read-only scope-upgrade loop and cannot approve its own request, inspect and repair the local device state:
+
+```bash
+./Ai\ services/openclaw/scripts/repair_cli_device_pairing.sh --dry-run
+./Ai\ services/openclaw/scripts/repair_cli_device_pairing.sh --yes
+```
+
+The repair script creates backups under `~/.openclaw/devices/`, updates only the local CLI operator device scopes, clears matching pending requests, and does not print the stored device token. Restart the Gateway after repair.
+
 Run from OpenClaw chat:
 
 ```text

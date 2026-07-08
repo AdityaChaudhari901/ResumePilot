@@ -181,11 +181,10 @@ Completed OpenClaw Gateway and Vertex onboarding slice:
 - Added backend settings support for the canonical Vertex env names so live CrewAI/provider integration can read the same configuration.
 - Extended the dashboard OpenClaw status API and card to report live Gateway reachability, provider, model reference, token presence, project readiness, and local commands.
 - Verified Vertex ADC and the selected model with a direct Google Vertex REST generation smoke.
-- Verified the Gateway starts on loopback and serves the Control UI; full OpenClaw agent CLI execution is still blocked by a local device scope upgrade pending approval.
+- Verified the Gateway starts on loopback, serves the Control UI, and executes the `/job` skill through `openclaw agent` after repairing the local CLI device pairing scope.
 
 Next implementation scope:
 
-- Repair/approve OpenClaw local device scope pairing so `openclaw agent` can execute the `/job` command through the running Gateway instead of falling back to embedded mode.
 - Verify current CrewAI package/API docs, then replace or extend the deterministic fallback with live CrewAI structured-output agents.
 - Add backend dependency lock when finalizing local Python version/tooling.
 - Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
@@ -194,7 +193,6 @@ Next implementation scope:
 
 - Backend dependency lock does not exist yet; frontend `package-lock.json` exists.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
-- OpenClaw local skill and Gateway config exist, but `openclaw agent` currently needs local device scope pairing repaired or approved before full Gateway agent turns work from the CLI.
 - CrewAI APIs should be verified against current official docs at `https://docs.crewai.com/` before live integration.
 - OpenClaw APIs should be verified against current official docs before live integration.
 - Python 3.14 is installed locally, but Python 3.12 is the safer target for dependency compatibility.
@@ -232,7 +230,8 @@ Latest verification run: 2026-07-08
 | Frontend OpenClaw status | `curl -sS http://127.0.0.1:3003/api/openclaw/status` | Passed: provider `google-vertex`, model `google-vertex/gemini-3.5-flash`, gateway reachable true |
 | Vertex ADC model smoke | Direct Vertex REST `generateContent` for `global` / `gemini-3.5-flash` | Passed: model returned `ok` without exposing the access token |
 | Backend Vertex settings | `cd Backend && .venv/bin/pytest tests/test_settings.py` | Passed through full backend pytest run |
-| OpenClaw agent CLI smoke | `openclaw agent --message "/job paste:..."` | Blocked: local device scope upgrade pending approval |
+| OpenClaw device pairing repair | `./Ai services/openclaw/scripts/repair_cli_device_pairing.sh --yes` | Passed: local CLI device approved scopes include `operator.write` and `operator.pairing`; pending requests cleared |
+| OpenClaw agent CLI smoke | `openclaw agent --message "/job paste:..." --json` | Passed: Gateway RPC accepted the request and returned a ResumePilot job fit report |
 
 ## Change Log
 
@@ -287,6 +286,8 @@ Latest verification run: 2026-07-08
 - Ignored local OpenClaw workspace bootstrap/state files generated during Gateway startup.
 - Extended the dashboard OpenClaw status route/card with live Gateway reachability and updated local commands.
 - Verified Vertex ADC direct model access and documented the remaining OpenClaw local device pairing blocker.
+- Added a guarded OpenClaw CLI device pairing repair script and used it to resolve the local scope-upgrade loop.
+- Verified `openclaw agent` can execute `/job paste:...` through the running Gateway with Vertex `gemini-3.5-flash`.
 
 ## Maintenance Rule
 
