@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, signed BFF-to-FastAPI user identity boundary with Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with account/session visibility plus usage visibility and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -30,12 +30,16 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/core/*.py`
   - `Backend/app/db/*.py`
   - `Backend/app/repositories/*.py`
+  - `Backend/app/repositories/usage_events.py`
   - `Backend/app/schemas/*.py`
   - `Backend/app/schemas/agent.py`
+  - `Backend/app/schemas/usage.py`
   - `Backend/app/services/*.py`
   - `Backend/app/services/agent_workflow.py`
+  - `Backend/app/services/auth_signature.py`
   - `Backend/app/services/audit_service.py`
   - `Backend/app/services/crewai_workflow.py`
+  - `Backend/app/services/usage_service.py`
   - `Backend/app/services/provider_pricing.py`
   - `Backend/app/services/privacy_service.py`
   - `Backend/app/services/docx_resume_renderer.py`
@@ -59,10 +63,20 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/evals/jobs/*.txt`
   - `Frontend/e2e/*.ts`
   - `Frontend/playwright.config.ts`
+  - `Frontend/src/proxy.ts`
+  - `Frontend/src/app/api/auth/session/route.ts`
+  - `Frontend/src/app/api/openclaw/control/route.ts`
+  - `Frontend/src/app/api/usage/summary/route.ts`
+  - `Frontend/src/app/sign-in/[[...sign-in]]/page.tsx`
+  - `Frontend/src/app/sign-up/[[...sign-up]]/page.tsx`
+  - `Frontend/src/lib/auth.ts`
+  - `Frontend/src/lib/openclaw.ts`
   - `.github/workflows/ci.yml`
   - `Ai services/openclaw/workspace/skills/job/SKILL.md`
   - `Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py`
+  - `Ai services/openclaw/scripts/register_vertex_model.py`
   - `Ai services/openclaw/tests/test_resumepilot_job.py`
+  - `Ai services/openclaw/tests/test_register_vertex_model.py`
 - Verified: both JSON schema files are valid JSON.
 - System Python observed: Python 3.14.3.
 - Backend runtime standard: Python 3.12.13 via `.python-version` and `Backend/scripts/bootstrap_py312.sh`.
@@ -77,13 +91,18 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
 - OpenClaw local config exists at `~/.openclaw/openclaw.json`; the included Google plugin is enabled.
 - Google Vertex selected as the current OpenClaw provider path (`google-vertex`) with default model `google-vertex/gemini-3.5-flash`.
+- OpenClaw Google Vertex setup now uses `Ai services/openclaw/scripts/register_vertex_model.py` from both configure/start scripts so the durable global model registry includes `models.providers.google-vertex.models[]` for `gemini-3.5-flash`.
 - Canonical local LLM env names are `LLM_PROVIDER=vertex`, `VERTEX_PROJECT_ID=alien-slice-499511-f8`, `VERTEX_REGION=global`, and `LLM_MODEL=gemini-3.5-flash`.
 - Backend workflow mode is controlled by `AGENT_WORKFLOW_MODE`, defaulting to `deterministic_fallback`; `crewai` enables live CrewAI structured-output sections when the runtime is available.
 - Live CrewAI mode uses `CREWAI_LLM_MODEL`, `CREWAI_MAX_ITER`, `CREWAI_TIMEOUT_SECONDS`, and `CREWAI_TEMPERATURE`.
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
-- OpenClaw Gateway service is not installed as a daemon; foreground local startup is handled by `Ai services/openclaw/scripts/start_local_gateway.sh`.
-- Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
-- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, expose DOCX report download through `/api/reports/[reportId]/resume/docx`, expose PDF report download through `/api/reports/[reportId]/resume/pdf`, and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
+- OpenClaw Gateway service is installed as a local LaunchAgent on `127.0.0.1:18789`; project-local foreground startup remains available through `Ai services/openclaw/scripts/start_local_gateway.sh`.
+- Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, lucide-react, and optional Clerk App Router auth support.
+- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, expose DOCX report download through `/api/reports/[reportId]/resume/docx`, expose PDF report download through `/api/reports/[reportId]/resume/pdf`, probe OpenClaw Gateway/model/session readiness through `/api/openclaw/status`, and open authenticated local OpenClaw Control UI tabs through `/api/openclaw/control`.
+- Frontend auth provider mode is controlled by `RESUMEPILOT_AUTH_PROVIDER`: `local` for deterministic local dev, `clerk` for Clerk App Router sessions, and `trusted_headers` for identity-aware reverse proxies.
+- FastAPI production auth mode requires `AUTH_REQUIRED=true` and `AUTH_TRUSTED_PROXY_SECRET` so tenant identity headers must be signed by the trusted Next.js BFF instead of accepted directly from browsers.
+- Usage limits are currently enforced in-process from plan definitions: `free` allows 3 monthly analyses, 5 exports, and no live CrewAI; `pro` allows 100 monthly analyses, 100 exports, and no live CrewAI; `premium` allows 500 monthly analyses, 500 exports, and 100 live CrewAI runs.
+- Live CrewAI execution is plan-gated. Free and Pro users are downgraded to deterministic fallback before any live CrewAI runner is called; only premium users consume `crewai_run` usage and billable cost estimates.
 
 ## Product Rule
 
@@ -111,6 +130,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Language | Python 3.12 target runtime |
 | Validation | Pydantic v2 |
 | Database | SQLite for MVP |
+| Production database path | PostgreSQL-ready SQLAlchemy ownership model |
 | ORM | SQLAlchemy 2.x |
 | Migrations | Alembic |
 | Resume parsing | pypdf, python-docx, TXT, Markdown |
@@ -119,7 +139,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Agent orchestration | CrewAI |
 | LLM provider layer | CrewAI config or LiteLLM-compatible wrapper |
 | Reports | JSON, Markdown, editable DOCX, LaTeX `.tex`, and compiled PDF resume export |
-| Auth | Local API token via `JOBCOPILOT_API_TOKEN` |
+| Auth | OpenClaw token via `JOBCOPILOT_API_TOKEN`; dashboard user sessions via signed BFF identity headers with optional Clerk |
 | Frontend | Next.js App Router, React, TypeScript, Tailwind CSS |
 | Frontend API bridge | Next.js route handlers as backend-for-frontend proxy |
 | OpenClaw model provider path | Google Vertex via `google-vertex` and gcloud ADC |
@@ -207,8 +227,31 @@ Completed OpenClaw Gateway and Vertex onboarding slice:
 - Switched the demo Vertex model default to `google-vertex/gemini-3.5-flash` with `VERTEX_REGION=global` after direct Vertex validation confirmed the model works in the selected project.
 - Added backend settings support for the canonical Vertex env names so live CrewAI/provider integration can read the same configuration.
 - Extended the dashboard OpenClaw status API and card to report live Gateway reachability, provider, model reference, token presence, project readiness, and local commands.
+- Added a repeatable OpenClaw Vertex model registration helper and wired it into configure/start scripts so `google-vertex/gemini-3.5-flash` is registered under `models.providers.google-vertex.models[]`.
+- Hardened the OpenClaw status API/card to report durable model registry readiness, main session availability, and fresh `/chat` links so stale Control UI session errors are visible as local dashboard state instead of silent failure.
 - Verified Vertex ADC and the selected model with a direct Google Vertex REST generation smoke.
 - Verified the Gateway starts on loopback, serves the Control UI, and executes the `/job` skill through `openclaw agent` after repairing the local CLI device pairing scope.
+
+Completed SaaS usage-metering foundation:
+
+- Added `usage_events` persistence with Alembic migration `20260708_0004_add_usage_events.py`.
+- Added `/usage/summary` to expose tenant-scoped monthly plan limits, remaining usage, subscription status, live CrewAI eligibility, and billable cost estimate.
+- Enforced analysis, export, and live CrewAI limits before expensive or downloadable work runs.
+- Kept billable provider cost on live CrewAI usage events only so the monthly cost estimate is not double-counted.
+- Updated the dashboard with a Plan usage panel that reads the same backend summary through the Next.js BFF.
+- Changed Markdown export to use the backend export endpoint on demand instead of prefetching report Markdown during analysis display.
+- Updated Playwright configuration to use a fresh per-run SQLite database so schema changes do not inherit stale local smoke state.
+- Verified usage behavior with backend tests and dashboard desktop/mobile browser smoke.
+
+Completed production auth boundary foundation:
+
+- Added backend HMAC verification for trusted dashboard identity headers with timestamp replay protection.
+- Added `AUTH_TRUSTED_PROXY_SECRET` and `AUTH_SIGNATURE_TTL_SECONDS` settings.
+- Kept raw identity headers available only for local/dev mode; when `AUTH_REQUIRED=true`, unsigned user headers are rejected unless the trusted proxy secret is configured.
+- Added frontend server-side auth session adapter with `local`, `clerk`, and `trusted_headers` provider modes.
+- Added Clerk dependency, Clerk `src/proxy.ts`, `ClerkProvider` wiring, and `/sign-in` plus `/sign-up` App Router pages for future hosted auth.
+- Updated all tenant data BFF routes and OpenClaw control/status routes to require an app session and forward signed identity headers to FastAPI.
+- Added `/api/auth/session` and a dashboard account/session card.
 
 Completed optional live CrewAI workflow adapter slice:
 
@@ -363,6 +406,8 @@ Next implementation scope:
 - Workflow trace cost estimates currently cover only the configured Vertex global standard `google/gemini-3.5-flash` path; additional provider/model/region rates must be added before other traces can emit cost.
 - DOCX export has structural package and browser download coverage; pixel-level DOCX render QA requires installing `pdf2image` plus LibreOffice/`soffice` on this machine.
 - Python Playwright fallback requires `python -m playwright install chromium` on environments that need JavaScript-rendered public job page fetches.
+- Uploaded PDF resume parsing can still surface fragment-like tailored bullets from summary evidence; harden resume sentence extraction and tailored bullet generation before calling report quality production-ready.
+- OpenClaw configure/start scripts now set LaunchAgent environment variables for the active login session and register the durable global Vertex model provider; reboot persistence for launchd environment still needs a plist/env-file strategy before broader handoff.
 - Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
 - Playwright browser smoke is implemented locally; CI browser execution, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
@@ -409,6 +454,7 @@ Latest verification run: 2026-07-08
 | Frontend CI install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm ci` | Passed: 362 packages installed/audited, 0 vulnerabilities |
 | Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Frontend production build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: Next.js compiled and generated the dashboard/API route map |
 | Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: Next.js production build generated the dashboard and API routes including `/api/reports/[reportId]/trace`, `/api/reports/[reportId]/resume/docx`, `/api/reports/[reportId]/resume/latex`, and `/api/reports/[reportId]/resume/pdf` |
 | Playwright Chromium install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e:install` | Passed: Chromium already available for Playwright |
 | Dashboard Playwright browser smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build, FastAPI on `127.0.0.1:8040`, Next.js on `127.0.0.1:3040`, 2 Chromium tests passed, workflow trace timing and Markdown/DOCX/LaTeX/PDF exports verified |
@@ -423,6 +469,19 @@ Latest verification run: 2026-07-08
 | OpenClaw Vertex config | `LLM_PROVIDER=vertex VERTEX_PROJECT_ID=alien-slice-499511-f8 VERTEX_REGION=global LLM_MODEL=gemini-3.5-flash ./Ai services/openclaw/scripts/configure_vertex_gateway.sh` | Passed: Google plugin enabled, default model set to `google-vertex/gemini-3.5-flash`, config valid |
 | OpenClaw Gateway startup | `JOBCOPILOT_API_TOKEN=test-token ./Ai services/openclaw/scripts/start_local_gateway.sh` | Passed: Gateway ready on `127.0.0.1:18789`, Control UI served HTTP 200 |
 | Frontend OpenClaw status | `curl -sS http://127.0.0.1:3003/api/openclaw/status` | Passed: provider `google-vertex`, model `google-vertex/gemini-3.5-flash`, gateway reachable true |
+| OpenClaw Vertex model registration helper | `LLM_PROVIDER=vertex VERTEX_PROJECT_ID=alien-slice-499511-f8 VERTEX_REGION=global LLM_MODEL=gemini-3.5-flash OPENCLAW_MODEL_REFERENCE=google-vertex/gemini-3.5-flash python3 'Ai services/openclaw/scripts/register_vertex_model.py'` | Passed: global config now includes `google-vertex/gemini-3.5-flash` provider/model registration |
+| Local OpenClaw LaunchAgent status | `openclaw gateway restart && openclaw gateway status --json` | Passed: LaunchAgent running, Gateway reachable on `127.0.0.1:18789`, capability write-capable |
+| Live dashboard OpenClaw status | `curl -sS http://127.0.0.1:3002/api/openclaw/status` | Passed: gateway reachable true, GCP project configured true, gateway token present, location `global`, model registered true, readiness `ready` |
+| Live OpenClaw helper smoke | `python3 Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py 'paste:...'` with local env | Passed: helper returned a Markdown job fit report through `/chat/openclaw` |
+| OpenClaw helper tests | `python3 -m unittest discover 'Ai services/openclaw/tests'` | Passed: 7 tests, including `/job` prefix normalization and Vertex model registration helper coverage |
+| OpenClaw script compile | `python3 -m compileall 'Ai services/openclaw/workspace/skills/job/scripts' 'Ai services/openclaw/scripts'` | Passed |
+| OpenClaw live agent `/job` smoke | `openclaw agent --agent main --message "/job paste:..." --json` | Passed: status `ok`, summary `completed`, report returned, Vertex/Gemini present in payload |
+| Dashboard OpenClaw readiness browser smoke | Node Playwright against `http://127.0.0.1:3002` | Passed: `control ready`, `global ready`, `gateway managed`, main session registered, fresh chat link targets `http://127.0.0.1:18789/chat`, no stale OpenClaw errors |
+| OpenClaw Control UI clean chat smoke | Node Playwright against `http://127.0.0.1:18789/chat` without token | Passed: expected auth page shown, no `unknown parent session` and no `Unknown model` error |
+| OpenClaw Main Session reset | Archive stale `agent:main:main`, restart Gateway, create fresh `agent:main:main`, then test authenticated `http://127.0.0.1:18789/chat?session=agent%3Amain%3Amain` | Passed: new session `e51d395b-1a7e-4e08-88ab-7578481b7d65`, no `unknown parent session`, no `Unknown model`, READY response visible |
+| OpenClaw fresh Main Session `/job` smoke | `openclaw agent --agent main --session-key agent:main:main --message "/job paste:..." --json` | Passed: status `ok`, summary `completed`, report returned, no stale OpenClaw errors |
+| OpenClaw authenticated redirect | `GET http://127.0.0.1:3002/api/openclaw/control?view=chat` with redirects disabled | Passed: 307 to `http://127.0.0.1:18789/chat` with `session` and `token` query keys; token value not printed |
+| OpenClaw authenticated browser smoke | Node Playwright against `http://127.0.0.1:3002/api/openclaw/control?view=chat` | Passed: OpenClaw Chat loaded authenticated, no `Auth required`, no `Auth did not match`, no `unknown parent session`, and no `Unknown model` |
 | Vertex ADC model smoke | Direct Vertex REST `generateContent` for `global` / `gemini-3.5-flash` | Passed: model returned `ok` without exposing the access token |
 | Backend Vertex settings | `cd Backend && .venv/bin/pytest tests/test_settings.py` | Passed through full backend pytest run |
 | OpenClaw device pairing repair | `./Ai services/openclaw/scripts/repair_cli_device_pairing.sh --yes` | Passed: local CLI device approved scopes include `operator.write` and `operator.pairing`; pending requests cleared |
@@ -545,6 +604,28 @@ Latest verification run: 2026-07-08
 - Added `DATA_RETENTION_DAYS`, `ENABLE_JOB_BROWSER_FALLBACK`, and `JOB_BROWSER_TIMEOUT_MS` settings.
 - Added optional Python Playwright Chromium fallback for public JavaScript-rendered job URLs while preserving paste fallback for blocked/private/rate-limited pages.
 - Updated backend dependency constraints, README files, MVP docs, security/testing docs, and this context file for the audit/privacy/browser fallback slice.
+- Re-ran local OpenClaw Vertex configuration from the repo root, restarted the LaunchAgent Gateway, verified dashboard status with GCP project/token present, and confirmed the `/job` helper calls `/chat/openclaw` successfully.
+- Fixed OpenClaw `/job` helper normalization so raw `/job ...` and `/skill job ...` invocations strip command prefixes before calling `/chat/openclaw`.
+- Verified the full OpenClaw agent command path with Google Vertex, the project-local `job` skill, and the running FastAPI backend.
+- Added `register_vertex_model.py` so OpenClaw setup scripts repeatedly register `google-vertex/gemini-3.5-flash` under the durable global provider registry.
+- Updated OpenClaw configure/start scripts to call the registry helper and seed LaunchAgent environment variables for the active login session.
+- Updated the dashboard OpenClaw status API/card with model registry readiness, main session visibility, and a fresh `/chat` link that avoids stale `session=agent:main:main` URLs.
+- Verified OpenClaw helper tests, script compile, frontend lint/typecheck/build, live dashboard readiness, clean Control UI auth behavior, and the live `/job` agent smoke after Gateway restart.
+- Archived the stale OpenClaw `agent:main:main` session that contained historical provider/auth failures, restarted the Gateway, and recreated a clean Main Session for Control UI chat.
+- Added a local-only `/api/openclaw/control` redirect that reads the active OpenClaw Gateway token server-side and opens authenticated Control UI chat/overview tabs from the ResumePilot dashboard.
+- Updated OpenClaw status links so `Open Fresh Chat` and `Control Overview` route through the authenticated ResumePilot redirect instead of unauthenticated raw `127.0.0.1:18789` links.
+- Fixed report-quality generation so tailored resume bullets are sourced from project/work evidence instead of summary or skills-list parser fragments.
+- Improved skill detection boundaries for hyphenated and slash-separated job text such as `Redis-based`, `Celery/RQ`, `JavaScript/TypeScript`, and `React/Next.js`.
+- Fixed job parser section context so skills mentioned under responsibilities or benefits do not inherit the previous required/preferred requirement bucket.
+- Strengthened missing-skill recommendations to keep Redis/Celery/RQ and similar gaps as "add only if true" preparation items unless real project/work evidence exists.
+- Expanded the frontend report viewer in `Frontend/` to show weak evidence, ATS keyword status, next actions, validation warnings, and evidence IDs from the full `ApplicationReport`.
+- Added regression coverage for fragment-free tailored bullets, honest queue-skill gaps, skills-only weak evidence, job parser skill boundaries, and dashboard ATS/next-action visibility.
+- Verified full backend pytest, Python compileall, frontend lint/typecheck/build, OpenClaw helper tests, `git diff --check`, and Playwright desktop/mobile dashboard smoke on fresh local ports `8013` and `3003`.
+- Added the first SaaS foundation slice: `users` table, owner-scoped resumes/jobs/analyses/audit events, tenant-scoped upload storage, default local development user fallback, and `AUTH_REQUIRED` support for hosted auth boundaries.
+- Added Alembic migration `20260708_0003_add_tenant_foundation.py` to backfill existing records to `local-dev-user`, move resume dedupe from global file hash to per-user hash, and add plan/subscription fields needed before Stripe.
+- Scoped resume upload/reuse, job analysis, report reads/exports/traces, OpenClaw latest-resume lookup, report/resume deletion, retention purge, and audit event listing by current user.
+- Added tenant isolation tests proving cross-user report access/deletes/analyze attempts return 404, same resume files can be uploaded by different users without storage collision, audit events are user-scoped, and `AUTH_REQUIRED=true` rejects missing user context.
+- Verified Alembic upgrade on a fresh SQLite database, full backend pytest, Python compileall, frontend lint/typecheck/build, OpenClaw helper tests, health checks, and Playwright desktop/mobile dashboard smoke on fresh local ports `8014` and `3004`.
 
 ## Maintenance Rule
 
