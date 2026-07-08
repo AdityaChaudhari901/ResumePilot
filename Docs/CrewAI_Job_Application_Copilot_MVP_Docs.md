@@ -526,10 +526,13 @@ GET /reports/{report_id}/resume/pdf
 ```
 
 The trace endpoint returns the workflow mode, step statuses, step summaries,
-validation warning codes, and optional `duration_ms` telemetry for the full
-workflow plus each step. Timing fields are additive observability metadata; they
-must not change the evidence-first report content and older persisted traces
-without timings remain valid.
+validation warning codes, optional `duration_ms` telemetry for the full workflow
+plus each step, and optional live-runtime metadata. Live CrewAI traces include
+provider/model fields, token usage when CrewAI exposes it, `cost_estimate_usd`
+when available, and runtime metadata describing whether token/cost data was
+reported. These fields are additive observability metadata; they must not
+change the evidence-first report content and older persisted traces without the
+optional fields remain valid.
 
 ## Data model
 
@@ -1412,6 +1415,8 @@ Reject generated claims if they include:
 - p95 latency
 - workflow total latency
 - per-step workflow latency
+- provider/model captured per live analysis
+- token usage when provider runtime exposes it
 - rate-limit retry count
 - failed scrape rate
 - validation failure rate
@@ -1519,9 +1524,15 @@ Log for every analysis:
 - LLM latency
 - workflow trace total latency
 - per-step workflow trace latency
+- workflow provider/model
+- workflow token usage when available
 - validation status
 - token usage/cost if available
 - errors
+
+Cost telemetry must not be guessed. Store `cost_estimate_usd` only when a
+configured provider pricing source is available; otherwise store `null` and
+record an unavailable source in runtime metadata.
 
 ## Quality gates
 
@@ -2166,6 +2177,7 @@ Every time prompts, models, or scoring rules change:
 - compare unsupported-claim count
 - compare JSON validity
 - compare workflow trace timing shape
+- compare workflow provider/token metadata shape
 - compare latency and cost
 
 Current frontend browser smoke command:

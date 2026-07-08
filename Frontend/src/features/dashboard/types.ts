@@ -32,11 +32,26 @@ export interface AgentStepTrace {
   duration_ms?: number | null;
 }
 
+export interface AgentTokenUsage {
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_prompt_tokens: number;
+  reasoning_tokens: number;
+  cache_creation_tokens: number;
+  successful_requests: number;
+}
+
 export interface AgentWorkflowTrace {
   mode: AgentWorkflowMode;
   steps: AgentStepTrace[];
   validation_warning_codes: string[];
   duration_ms?: number | null;
+  provider?: string | null;
+  model?: string | null;
+  token_usage?: AgentTokenUsage | null;
+  cost_estimate_usd?: number | null;
+  runtime_metadata?: Record<string, string | number | boolean | null>;
 }
 
 export interface ReportWorkflowTraceResponse {

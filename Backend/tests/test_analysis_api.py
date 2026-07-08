@@ -1,5 +1,6 @@
 from app.schemas.agent import (
     AgentStepName,
+    AgentTokenUsage,
     AgentWorkflowMode,
     CoverLetterAgentOutput,
     InterviewCoachAgentOutput,
@@ -54,6 +55,11 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     ]
     assert isinstance(trace_body["trace"]["duration_ms"], int)
     assert all(isinstance(step["duration_ms"], int) for step in trace_body["trace"]["steps"])
+    assert trace_body["trace"]["provider"] is None
+    assert trace_body["trace"]["model"] is None
+    assert trace_body["trace"]["token_usage"] is None
+    assert trace_body["trace"]["cost_estimate_usd"] is None
+    assert trace_body["trace"]["runtime_metadata"] == {}
 
 
 def test_read_tailored_resume_pdf_download(
@@ -140,6 +146,11 @@ def test_crewai_fallback_trace_is_persisted(
     assert trace["steps"][0]["status"] == "failed"
     assert isinstance(trace["steps"][0]["duration_ms"], int)
     assert isinstance(trace["duration_ms"], int)
+    assert trace["provider"] == "vertex"
+    assert trace["model"] == "google/gemini-3.5-flash"
+    assert trace["token_usage"] is None
+    assert trace["cost_estimate_usd"] is None
+    assert trace["runtime_metadata"]["runtime_status"] == "failed"
     assert "crewai_unavailable" in trace["validation_warning_codes"]
 
 
@@ -183,6 +194,12 @@ def test_crewai_success_trace_is_persisted(
                         )
                     ]
                 ),
+                token_usage=AgentTokenUsage(
+                    total_tokens=321,
+                    prompt_tokens=250,
+                    completion_tokens=71,
+                    successful_requests=3,
+                ),
             )
 
     monkeypatch.setattr(
@@ -206,6 +223,14 @@ def test_crewai_success_trace_is_persisted(
     assert runtime_step["status"] == "completed"
     assert isinstance(runtime_step["duration_ms"], int)
     assert isinstance(trace["duration_ms"], int)
+    assert trace["provider"] == "vertex"
+    assert trace["model"] == "google/gemini-3.5-flash"
+    assert trace["token_usage"]["total_tokens"] == 321
+    assert trace["token_usage"]["prompt_tokens"] == 250
+    assert trace["token_usage"]["completion_tokens"] == 71
+    assert trace["token_usage"]["successful_requests"] == 3
+    assert trace["cost_estimate_usd"] is None
+    assert trace["runtime_metadata"]["runtime_status"] == "completed"
     assert "crewai_unavailable" not in trace["validation_warning_codes"]
 
 

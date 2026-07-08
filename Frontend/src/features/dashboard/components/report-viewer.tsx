@@ -225,6 +225,12 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
 
   const completedSteps = trace.steps.filter((step) => step.status === "completed").length;
   const totalDuration = formatDuration(trace.duration_ms);
+  const hasRuntimeMetadata = Boolean(
+    trace.provider ??
+      trace.model ??
+      trace.token_usage ??
+      (trace.cost_estimate_usd !== null && trace.cost_estimate_usd !== undefined)
+  );
 
   return (
     <section
@@ -253,6 +259,20 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
         </div>
         <Badge tone={workflowModeTone(trace.mode)}>{workflowModeLabel(trace.mode)}</Badge>
       </div>
+
+      {hasRuntimeMetadata ? (
+        <div className="mt-4 border-t border-border pt-4">
+          <h4 className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+            Runtime
+          </h4>
+          <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <TraceRuntimeMetric label="Provider" value={trace.provider ?? "Not reported"} />
+            <TraceRuntimeMetric label="Model" value={trace.model ?? "Not reported"} />
+            <TraceRuntimeMetric label="Tokens" value={formatTokenUsage(trace.token_usage)} />
+            <TraceRuntimeMetric label="Cost" value={formatCost(trace.cost_estimate_usd)} />
+          </dl>
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-2">
         {trace.steps.map((step, index) => {
@@ -293,6 +313,15 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
         </div>
       )}
     </section>
+  );
+}
+
+function TraceRuntimeMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-xs text-foreground">{value}</dd>
+    </div>
   );
 }
 
@@ -347,4 +376,20 @@ function formatDuration(durationMs: number | null | undefined): string | null {
   }
   const seconds = durationMs / 1000;
   return `${seconds >= 10 ? seconds.toFixed(0) : seconds.toFixed(1)} s`;
+}
+
+function formatTokenUsage(tokenUsage: AgentWorkflowTrace["token_usage"]): string {
+  if (!tokenUsage || tokenUsage.total_tokens <= 0) {
+    return "Not available";
+  }
+  const requests =
+    tokenUsage.successful_requests > 0 ? ` · ${tokenUsage.successful_requests} req` : "";
+  return `${tokenUsage.total_tokens.toLocaleString()} total${requests}`;
+}
+
+function formatCost(costEstimateUsd: number | null | undefined): string {
+  if (costEstimateUsd === null || costEstimateUsd === undefined) {
+    return "Not available";
+  }
+  return `$${costEstimateUsd.toFixed(6)}`;
 }

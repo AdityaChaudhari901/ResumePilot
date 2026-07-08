@@ -115,6 +115,7 @@ Every time prompts, models, or scoring rules change:
 - compare unsupported-claim count
 - compare JSON validity
 - compare workflow trace timing shape
+- compare workflow provider/token metadata shape
 - compare latency and cost
 
 Current backend command:

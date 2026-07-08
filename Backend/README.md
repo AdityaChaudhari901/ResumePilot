@@ -12,7 +12,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Deterministic skill matching and report generation.
 - CrewAI-ready agent workflow boundary with deterministic fallback.
 - Optional live CrewAI structured-output agents for fit explanation, cover letter drafting, and interview coaching.
-- Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution, including total and per-step latency timings.
+- Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution, including latency, provider/model, token usage when exposed by CrewAI, and cost placeholders.
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
@@ -109,8 +109,10 @@ Authorization: Bearer <JOBCOPILOT_API_TOKEN>
 
 `GET /reports/{report_id}/trace` returns the workflow mode, step statuses,
 step summaries, validation warning codes, and optional `duration_ms` timings for
-the full workflow and each step. Older persisted traces without timing fields
-remain valid.
+the full workflow and each step. Live CrewAI traces also include provider/model
+metadata, optional token usage from CrewAI's LLM summary, `cost_estimate_usd`
+when available, and runtime metadata describing whether token/cost data was
+reported. Older persisted traces without these optional fields remain valid.
 
 ## Accuracy Rule
 

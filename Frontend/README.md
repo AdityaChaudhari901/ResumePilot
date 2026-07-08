@@ -14,7 +14,7 @@ Next.js dashboard for the local ResumePilot MVP.
 
 - Resume upload through the same-origin `/api/resumes/upload` proxy.
 - Job analysis through `/api/jobs/analyze`.
-- Report viewing with JSON, Markdown, workflow trace timings, LaTeX `.tex`, and PDF downloads.
+- Report viewing with JSON, Markdown, workflow trace timings/runtime metadata, LaTeX `.tex`, and PDF downloads.
 - OpenClaw Gateway/provider readiness status.
 
 ## Local setup

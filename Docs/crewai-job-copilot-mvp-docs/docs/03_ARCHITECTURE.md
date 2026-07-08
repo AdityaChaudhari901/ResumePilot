@@ -143,10 +143,13 @@ GET /reports/{report_id}/resume/pdf
 ```
 
 The trace endpoint returns the workflow mode, step statuses, step summaries,
-validation warning codes, and optional `duration_ms` telemetry for the full
-workflow plus each step. Timing fields are additive observability metadata; they
-must not change the evidence-first report content and older persisted traces
-without timings remain valid.
+validation warning codes, optional `duration_ms` telemetry for the full workflow
+plus each step, and optional live-runtime metadata. Live CrewAI traces include
+provider/model fields, token usage when CrewAI exposes it, `cost_estimate_usd`
+when available, and runtime metadata describing whether token/cost data was
+reported. These fields are additive observability metadata; they must not
+change the evidence-first report content and older persisted traces without the
+optional fields remain valid.
 
 ## Data model
 

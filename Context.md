@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with total/per-step latency timings, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -237,6 +237,15 @@ Completed workflow trace timing telemetry slice:
 - Added backend and Playwright assertions for timing telemetry shape and visibility.
 - Updated backend/frontend README files and MVP docs with the trace timing contract.
 
+Completed live runtime provider observability slice:
+
+- Added backward-compatible trace fields for live provider, model, token usage, cost estimate, and runtime metadata.
+- Extracted token usage from CrewAI's LLM summary when the live runtime exposes it.
+- Persisted provider/model/token metadata through existing `workflow_trace_json` without a database migration.
+- Rendered a compact dashboard runtime section for traces that include provider metadata.
+- Kept `cost_estimate_usd` null until a configured provider pricing source exists, and recorded the unavailable source in runtime metadata.
+- Added backend/API tests for legacy traces, deterministic traces, CrewAI fallback metadata, and CrewAI success token usage.
+
 Completed backend Python 3.12 runtime and dependency lock slice:
 
 - Added root `.python-version` with Python `3.12.13`.
@@ -292,17 +301,17 @@ Completed dashboard Playwright browser smoke slice:
 
 Next implementation scope:
 
-- Add report export polish, saved export history or DOCX export, token/cost telemetry, and CI artifact upload or screenshot baseline comparisons.
+- Add report export polish, saved export history or DOCX export, provider pricing configuration for cost estimates, and CI artifact upload or screenshot baseline comparisons.
 
 ## Known Gaps
 
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw APIs should be verified against current official docs before live integration.
 - Backend lock is a pinned pip constraints file, not a hash-locked artifact; add hash locking or container builds before remote production deployment.
-- The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency, token usage, and cost are not included yet.
+- The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency and token usage are visible in per-report traces but not included in the deterministic quality gate yet.
 - PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
 - DOCX export is not implemented yet.
-- Workflow trace stores mode, step summaries, validation warning codes, total latency, and per-step latency; token and cost telemetry are not persisted yet.
+- Workflow trace stores mode, step summaries, validation warning codes, total latency, per-step latency, provider/model metadata, and token usage when CrewAI exposes it; cost estimates remain null until provider pricing is configured.
 - Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
 - Playwright browser smoke is implemented; CI artifact upload, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
@@ -319,11 +328,12 @@ Latest verification run: 2026-07-08
 | Tests | `cd Backend && .venv/bin/pytest` | Passed: 29 passed, 1 Starlette/httpx deprecation warning |
 | Report export focused tests | `cd Backend && .venv/bin/pytest tests/test_pdf_resume_compiler.py tests/test_analysis_api.py tests/test_settings.py` | Passed: 10 passed, 1 Starlette/httpx deprecation warning |
 | Backend trace timing coverage | `cd Backend && .venv/bin/pytest` | Passed: workflow trace timing assertions covered in full backend run, 29 passed |
+| Backend runtime observability focused tests | `cd Backend && .venv/bin/pytest tests/test_agent_workflow.py tests/test_analysis_api.py` | Passed: 9 passed, 1 Starlette/httpx deprecation warning |
 | Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 66 files already formatted, all checks passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.97 ms, p95 4.71 ms |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.21 ms, p95 2.69 ms |
 | Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
 | Generated ResumePilot PDF smoke | `cd Backend && .venv/bin/python - <<'PY' ... render_tailored_resume_latex(...) ... compile_latex_to_pdf(...) ... PY` | Passed: generated 19397-byte PDF with `%PDF-` prefix |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
@@ -337,7 +347,7 @@ Latest verification run: 2026-07-08
 | Frontend audit | `cd Frontend && npm audit --omit=dev` | Passed: 0 vulnerabilities after PostCSS override |
 | Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
-| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: Next.js production build generated app and API routes including `/api/reports/[reportId]/trace`, `/api/reports/[reportId]/resume/latex`, and `/api/reports/[reportId]/resume/pdf` |
+| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: Next.js production build generated the dashboard and API routes including `/api/reports/[reportId]/trace`, `/api/reports/[reportId]/resume/latex`, and `/api/reports/[reportId]/resume/pdf` |
 | Playwright Chromium install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e:install` | Passed: Chromium already available for Playwright |
 | Dashboard Playwright browser smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build, FastAPI on `127.0.0.1:8040`, Next.js on `127.0.0.1:3040`, 2 Chromium tests passed, workflow trace timing and Markdown/LaTeX/PDF exports verified |
 | E2E port cleanup | `lsof -nP -iTCP:8040 -sTCP:LISTEN` and `lsof -nP -iTCP:3040 -sTCP:LISTEN` | Passed: no listeners after Playwright completed |
@@ -363,6 +373,7 @@ Latest verification run: 2026-07-08
 | Python 3.12 compile | `cd Backend && .local/venvs/py312/bin/python -m compileall app tests scripts` | Passed |
 | CrewAI Google provider init | `LLM(model="google/gemini-3.5-flash")` under Python 3.12 with Vertex env | Passed: initialized as `GeminiCompletion` |
 | Live CrewAI workflow smoke | `AGENT_WORKFLOW_MODE=crewai ... run_application_agent_workflow(...)` | Passed: trace mode `crewai`, live agent steps completed, no `crewai_unavailable` warning |
+| Live CrewAI runtime observability smoke | `AGENT_WORKFLOW_MODE=crewai LLM_PROVIDER=vertex VERTEX_PROJECT_ID=alien-slice-499511-f8 VERTEX_REGION=global LLM_MODEL=gemini-3.5-flash CREWAI_LLM_MODEL=google/gemini-3.5-flash .local/venvs/py312/bin/python - <<'PY' ... PY` | Passed: provider `vertex`, model `google/gemini-3.5-flash`, token usage captured with 9997 total tokens and 3 successful requests, cost estimate remained null |
 | Live CrewAI API smoke | FastAPI on `127.0.0.1:8012` with upload/analyze/report/markdown HTTP flow | Passed: health 200, upload 201, analyze 200, report 200, markdown 200, no fallback warning, three Vertex `generateContent` calls returned HTTP 200 |
 
 ## Change Log
@@ -448,6 +459,10 @@ Latest verification run: 2026-07-08
 - Added backward-compatible workflow trace `duration_ms` telemetry for total and per-step latency across deterministic fallback, live CrewAI success, and CrewAI fallback paths.
 - Rendered workflow trace timing in the dashboard and added backend/API/Playwright assertions for timing presence.
 - Updated backend/frontend README files, MVP architecture/reliability/testing docs, and this context file for trace timing telemetry.
+- Added live runtime provider observability fields to workflow traces for provider, model, token usage, cost estimate, and runtime metadata.
+- Extracted CrewAI token usage from the live LLM summary when available and persisted it through the existing report trace JSON.
+- Rendered runtime provider/model/token/cost metadata in the dashboard workflow trace panel.
+- Updated backend/frontend README files, MVP architecture/reliability/testing docs, and this context file for runtime observability.
 
 ## Maintenance Rule
 

@@ -5,6 +5,7 @@ from app.core.config import Settings, get_cached_settings
 from app.schemas.agent import (
     AgentStepName,
     AgentStepTrace,
+    AgentTokenUsage,
     AgentWorkflowMode,
     AgentWorkflowResult,
     AgentWorkflowTrace,
@@ -187,6 +188,7 @@ def _run_crewai_application_agent_workflow(
         return _with_crewai_fallback_warning(
             deterministic_result,
             exc,
+            settings=settings,
             crewai_duration_ms=_elapsed_ms(crewai_step_start),
         )
 
@@ -287,6 +289,15 @@ def _run_crewai_application_agent_workflow(
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
             duration_ms=_elapsed_ms(workflow_start) + (deterministic_result.trace.duration_ms or 0),
+            provider=_runtime_provider(settings),
+            model=_runtime_model(settings),
+            token_usage=sections.token_usage,
+            cost_estimate_usd=None,
+            runtime_metadata=_runtime_metadata(
+                settings=settings,
+                status="completed",
+                token_usage=sections.token_usage,
+            ),
         ),
     )
 
@@ -295,6 +306,7 @@ def _with_crewai_fallback_warning(
     deterministic_result: AgentWorkflowResult,
     exc: Exception,
     *,
+    settings: Settings,
     crewai_duration_ms: int | None = None,
 ) -> AgentWorkflowResult:
     report = deterministic_result.report.model_copy(deep=True)
@@ -326,6 +338,16 @@ def _with_crewai_fallback_warning(
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
             duration_ms=(deterministic_result.trace.duration_ms or 0) + (crewai_duration_ms or 0),
+            provider=_runtime_provider(settings),
+            model=_runtime_model(settings),
+            token_usage=None,
+            cost_estimate_usd=None,
+            runtime_metadata=_runtime_metadata(
+                settings=settings,
+                status="failed",
+                token_usage=None,
+                fallback_reason=_public_error_summary(exc),
+            ),
         ),
     )
 
@@ -587,6 +609,39 @@ def _step_duration(steps: list[AgentStepTrace], name: AgentStepName) -> int | No
         if step.name == name:
             return step.duration_ms
     return None
+
+
+def _runtime_provider(settings: Settings) -> str:
+    provider = settings.llm_provider.strip().lower()
+    return provider or "unknown"
+
+
+def _runtime_model(settings: Settings) -> str:
+    if settings.crewai_llm_model:
+        return settings.crewai_llm_model
+    if _runtime_provider(settings) == "vertex":
+        return f"google/{settings.llm_model}"
+    return settings.llm_model
+
+
+def _runtime_metadata(
+    *,
+    settings: Settings,
+    status: str,
+    token_usage: AgentTokenUsage | None,
+    fallback_reason: str | None = None,
+) -> dict[str, str | int | float | bool | None]:
+    metadata: dict[str, str | int | float | bool | None] = {
+        "workflow_runtime": "crewai",
+        "runtime_status": status,
+        "provider": _runtime_provider(settings),
+        "model": _runtime_model(settings),
+        "token_usage_source": "crewai_llm_summary" if token_usage else "unavailable",
+        "cost_estimate_source": "unavailable",
+    }
+    if fallback_reason:
+        metadata["fallback_reason"] = fallback_reason
+    return metadata
 
 
 def _public_error_summary(exc: Exception) -> str:

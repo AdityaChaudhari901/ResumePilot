@@ -1,5 +1,6 @@
 from app.schemas.agent import (
     AgentStepName,
+    AgentTokenUsage,
     AgentWorkflowMode,
     AgentWorkflowTrace,
     CoverLetterAgentOutput,
@@ -44,6 +45,11 @@ def test_agent_workflow_generates_validated_report_sections(sample_resume_text, 
     assert result.trace.duration_ms >= 0
     assert all(isinstance(step.duration_ms, int) for step in result.trace.steps)
     assert all(step.duration_ms >= 0 for step in result.trace.steps if step.duration_ms is not None)
+    assert result.trace.provider is None
+    assert result.trace.model is None
+    assert result.trace.token_usage is None
+    assert result.trace.cost_estimate_usd is None
+    assert result.trace.runtime_metadata == {}
 
 
 def test_agent_workflow_trace_accepts_legacy_payload_without_timings():
@@ -63,6 +69,11 @@ def test_agent_workflow_trace_accepts_legacy_payload_without_timings():
 
     assert trace.duration_ms is None
     assert trace.steps[0].duration_ms is None
+    assert trace.provider is None
+    assert trace.model is None
+    assert trace.token_usage is None
+    assert trace.cost_estimate_usd is None
+    assert trace.runtime_metadata == {}
 
 
 def test_crewai_mode_falls_back_when_runtime_is_unavailable(
@@ -97,6 +108,12 @@ def test_crewai_mode_falls_back_when_runtime_is_unavailable(
     assert result.trace.steps[0].status == "failed"
     assert isinstance(result.trace.steps[0].duration_ms, int)
     assert isinstance(result.trace.duration_ms, int)
+    assert result.trace.provider == "vertex"
+    assert result.trace.model == "google/gemini-3.5-flash"
+    assert result.trace.token_usage is None
+    assert result.trace.runtime_metadata["runtime_status"] == "failed"
+    assert result.trace.runtime_metadata["token_usage_source"] == "unavailable"
+    assert result.trace.runtime_metadata["cost_estimate_source"] == "unavailable"
     assert "crewai_unavailable" in result.trace.validation_warning_codes
 
 
@@ -158,6 +175,12 @@ def test_crewai_mode_uses_live_sections_then_validates(
                     AgentStepName.cover_letter.value: 22,
                     AgentStepName.interview_coach.value: 33,
                 },
+                token_usage=AgentTokenUsage(
+                    total_tokens=123,
+                    prompt_tokens=90,
+                    completion_tokens=33,
+                    successful_requests=3,
+                ),
             )
 
     monkeypatch.setattr(
@@ -178,6 +201,15 @@ def test_crewai_mode_uses_live_sections_then_validates(
     assert result.trace.steps[1].status == "completed"
     assert isinstance(result.trace.duration_ms, int)
     assert all(step.duration_ms is not None for step in result.trace.steps)
+    assert result.trace.provider == "vertex"
+    assert result.trace.model == "google/gemini-3.5-flash"
+    assert result.trace.token_usage is not None
+    assert result.trace.token_usage.total_tokens == 123
+    assert result.trace.token_usage.successful_requests == 3
+    assert result.trace.cost_estimate_usd is None
+    assert result.trace.runtime_metadata["runtime_status"] == "completed"
+    assert result.trace.runtime_metadata["token_usage_source"] == "crewai_llm_summary"
+    assert result.trace.runtime_metadata["cost_estimate_source"] == "unavailable"
     assert result.report.executive_summary.startswith("CrewAI-reviewed fit")
     assert "validated resume evidence" in result.report.cover_letter
     assert "crewai_unavailable" not in result.trace.validation_warning_codes

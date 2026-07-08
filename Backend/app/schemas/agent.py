@@ -33,6 +33,16 @@ class AgentStepTrace(StrictBaseModel):
     duration_ms: int | None = Field(default=None, ge=0)
 
 
+class AgentTokenUsage(StrictBaseModel):
+    total_tokens: int = Field(default=0, ge=0)
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    cached_prompt_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+    cache_creation_tokens: int = Field(default=0, ge=0)
+    successful_requests: int = Field(default=0, ge=0)
+
+
 class ResumeMatchAgentOutput(StrictBaseModel):
     summary: str = Field(min_length=1)
     strongest_matches: list[str] = Field(default_factory=list)
@@ -63,6 +73,11 @@ class AgentWorkflowTrace(StrictBaseModel):
     steps: list[AgentStepTrace] = Field(min_length=1)
     validation_warning_codes: list[str] = Field(default_factory=list)
     duration_ms: int | None = Field(default=None, ge=0)
+    provider: str | None = Field(default=None, min_length=1)
+    model: str | None = Field(default=None, min_length=1)
+    token_usage: AgentTokenUsage | None = None
+    cost_estimate_usd: float | None = Field(default=None, ge=0)
+    runtime_metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
 class AgentWorkflowResult(StrictBaseModel):

@@ -9,6 +9,7 @@ from pydantic import Field
 from app.core.config import Settings
 from app.schemas.agent import (
     AgentStepName,
+    AgentTokenUsage,
     CoverLetterAgentOutput,
     InterviewCoachAgentOutput,
     ResumeMatchAgentOutput,
@@ -29,6 +30,7 @@ class CrewAIWorkflowSections(StrictBaseModel):
     cover_letter: CoverLetterAgentOutput
     interview_coach: InterviewCoachAgentOutput
     step_durations_ms: dict[str, int] = Field(default_factory=dict)
+    token_usage: AgentTokenUsage | None = None
 
 
 class CrewAIWorkflowRunner:
@@ -127,6 +129,7 @@ class CrewAIWorkflowRunner:
             cover_letter=cover_letter,
             interview_coach=interview_coach,
             step_durations_ms=step_durations_ms,
+            token_usage=_extract_token_usage(self._llm),
         )
 
     def _prepare_runtime(self) -> None:
@@ -247,6 +250,29 @@ def _coerce_pydantic_output[OutputModelT: StrictBaseModel](
     raise CrewAIWorkflowUnavailable(
         f"CrewAI returned no typed output for {response_format.__name__}."
     )
+
+
+def _extract_token_usage(llm: Any | None) -> AgentTokenUsage | None:
+    if llm is None or not hasattr(llm, "get_token_usage_summary"):
+        return None
+
+    usage = llm.get_token_usage_summary()
+    if usage is None:
+        return None
+
+    if hasattr(usage, "model_dump"):
+        usage_data = usage.model_dump()
+    elif isinstance(usage, dict):
+        usage_data = usage
+    else:
+        return None
+
+    token_usage = AgentTokenUsage.model_validate(
+        {field: usage_data.get(field, 0) for field in AgentTokenUsage.model_fields}
+    )
+    if token_usage.total_tokens == 0 and token_usage.successful_requests == 0:
+        return None
+    return token_usage
 
 
 def _elapsed_ms(started_at: float) -> int:
