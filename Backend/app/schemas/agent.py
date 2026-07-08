@@ -66,3 +66,9 @@ class AgentWorkflowTrace(StrictBaseModel):
 class AgentWorkflowResult(StrictBaseModel):
     report: ApplicationReport
     trace: AgentWorkflowTrace
+
+
+class ReportWorkflowTraceResponse(StrictBaseModel):
+    analysis_id: int
+    report_id: int
+    trace: AgentWorkflowTrace

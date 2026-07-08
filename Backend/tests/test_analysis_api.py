@@ -1,19 +1,16 @@
+from app.schemas.agent import (
+    AgentStepName,
+    AgentWorkflowMode,
+    CoverLetterAgentOutput,
+    InterviewCoachAgentOutput,
+    ResumeMatchAgentOutput,
+)
+from app.schemas.report import InterviewQuestionGroup
+from app.services.crewai_workflow import CrewAIWorkflowSections, CrewAIWorkflowUnavailable
+
+
 def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_text):
-    upload_response = client.post(
-        "/resumes/upload",
-        files={"file": ("resume.md", sample_resume_text.encode("utf-8"), "text/markdown")},
-    )
-
-    assert upload_response.status_code == 201
-    resume_id = upload_response.json()["resume_id"]
-
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={"resume_id": resume_id, "job_text": sample_job_text},
-    )
-
-    assert analyze_response.status_code == 200
-    body = analyze_response.json()
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
     assert body["status"] == "completed"
     assert body["match_score"] >= 70
 
@@ -27,3 +24,129 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     markdown_response = client.get(f"/reports/{body['report_id']}/markdown")
     assert markdown_response.status_code == 200
     assert "# Job Fit Report" in markdown_response.text
+
+    trace_response = client.get(f"/reports/{body['report_id']}/trace")
+    assert trace_response.status_code == 200
+    trace_body = trace_response.json()
+    assert trace_body["analysis_id"] == body["analysis_id"]
+    assert trace_body["report_id"] == body["report_id"]
+    assert trace_body["trace"]["mode"] == AgentWorkflowMode.deterministic_fallback
+    assert [step["name"] for step in trace_body["trace"]["steps"]] == [
+        AgentStepName.jd_parser,
+        AgentStepName.resume_match,
+        AgentStepName.ats_optimizer,
+        AgentStepName.cover_letter,
+        AgentStepName.interview_coach,
+        AgentStepName.validation_gate,
+    ]
+
+
+def test_crewai_fallback_trace_is_persisted(
+    client, monkeypatch, sample_resume_text, sample_job_text, settings
+):
+    settings.agent_workflow_mode = AgentWorkflowMode.crewai
+
+    def unavailable_runner(_settings):
+        raise CrewAIWorkflowUnavailable("CrewAI runtime unavailable in API test")
+
+    monkeypatch.setattr(
+        "app.services.agent_workflow.build_crewai_workflow_runner",
+        unavailable_runner,
+    )
+
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
+
+    report_response = client.get(f"/reports/{body['report_id']}")
+    assert report_response.status_code == 200
+    warning_codes = [warning["code"] for warning in report_response.json()["validation_warnings"]]
+    assert "crewai_unavailable" in warning_codes
+
+    trace_response = client.get(f"/reports/{body['report_id']}/trace")
+    assert trace_response.status_code == 200
+    trace = trace_response.json()["trace"]
+    assert trace["mode"] == AgentWorkflowMode.deterministic_fallback
+    assert trace["steps"][0]["name"] == AgentStepName.crewai_runtime
+    assert trace["steps"][0]["status"] == "failed"
+    assert "crewai_unavailable" in trace["validation_warning_codes"]
+
+
+def test_crewai_success_trace_is_persisted(
+    client, monkeypatch, sample_resume_text, sample_job_text, settings
+):
+    settings.agent_workflow_mode = AgentWorkflowMode.crewai
+
+    class FakeCrewAIRunner:
+        def run(self, **kwargs):
+            match = kwargs["match"]
+            evidence_ids = match.matched_skills[0].resume_evidence_ids
+            return CrewAIWorkflowSections(
+                resume_match=ResumeMatchAgentOutput(
+                    summary="CrewAI-reviewed fit persisted through the API.",
+                    strongest_matches=["Python", "FastAPI"],
+                    weak_areas=[],
+                    recommended_positioning="Lead with backend API evidence.",
+                    evidence_ids=evidence_ids,
+                    confidence=match.confidence,
+                ),
+                cover_letter=CoverLetterAgentOutput(
+                    draft=(
+                        "Dear Hiring Team,\n\n"
+                        "I am interested in this backend role and would lead with validated "
+                        "Python and FastAPI evidence.\n\n"
+                        "Confidence note: this draft uses only validated resume evidence.\n\n"
+                        "Sincerely,\nAarav Sharma"
+                    ),
+                    confidence_note=(
+                        "Confidence note: this draft uses only validated resume evidence."
+                    ),
+                    evidence_ids=evidence_ids,
+                ),
+                interview_coach=InterviewCoachAgentOutput(
+                    question_groups=[
+                        InterviewQuestionGroup(
+                            category="Technical",
+                            questions=["How did you structure the FastAPI backend?"],
+                            suggested_answer_evidence_ids=evidence_ids,
+                        )
+                    ]
+                ),
+            )
+
+    monkeypatch.setattr(
+        "app.services.agent_workflow.build_crewai_workflow_runner",
+        lambda _settings: FakeCrewAIRunner(),
+    )
+
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
+
+    report_response = client.get(f"/reports/{body['report_id']}")
+    assert report_response.status_code == 200
+    assert report_response.json()["executive_summary"].startswith("CrewAI-reviewed fit")
+
+    trace_response = client.get(f"/reports/{body['report_id']}/trace")
+    assert trace_response.status_code == 200
+    trace = trace_response.json()["trace"]
+    assert trace["mode"] == AgentWorkflowMode.crewai
+    runtime_step = next(
+        step for step in trace["steps"] if step["name"] == AgentStepName.crewai_runtime
+    )
+    assert runtime_step["status"] == "completed"
+    assert "crewai_unavailable" not in trace["validation_warning_codes"]
+
+
+def _upload_and_analyze(client, resume_text: str, job_text: str) -> dict:
+    upload_response = client.post(
+        "/resumes/upload",
+        files={"file": ("resume.md", resume_text.encode("utf-8"), "text/markdown")},
+    )
+
+    assert upload_response.status_code == 201
+    resume_id = upload_response.json()["resume_id"]
+
+    analyze_response = client.post(
+        "/jobs/analyze",
+        json={"resume_id": resume_id, "job_text": job_text},
+    )
+
+    assert analyze_response.status_code == 200
+    return analyze_response.json()

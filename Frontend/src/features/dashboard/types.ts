@@ -12,6 +12,37 @@ export interface JobAnalysisResponse {
   status: string;
 }
 
+export type AgentWorkflowMode = "deterministic_fallback" | "crewai";
+
+export type AgentStepName =
+  | "jd_parser"
+  | "crewai_runtime"
+  | "resume_match"
+  | "ats_optimizer"
+  | "cover_letter"
+  | "interview_coach"
+  | "validation_gate";
+
+export type AgentStepStatus = "completed" | "degraded" | "failed";
+
+export interface AgentStepTrace {
+  name: AgentStepName;
+  status: AgentStepStatus;
+  summary: string;
+}
+
+export interface AgentWorkflowTrace {
+  mode: AgentWorkflowMode;
+  steps: AgentStepTrace[];
+  validation_warning_codes: string[];
+}
+
+export interface ReportWorkflowTraceResponse {
+  analysis_id: number;
+  report_id: number;
+  trace: AgentWorkflowTrace;
+}
+
 export interface MatchedSkill {
   skill: string;
   match_type: "exact" | "synonym" | "inferred";

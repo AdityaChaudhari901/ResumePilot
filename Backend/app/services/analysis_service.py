@@ -1,11 +1,13 @@
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_cached_settings
-from app.db.models import AnalysisRecord, JobRecord, ResumeRecord
+from app.db.models import AnalysisRecord, JobRecord, ResumeRecord, default_workflow_trace
 from app.repositories.analyses import AnalysisRepository
 from app.repositories.jobs import JobRepository
 from app.repositories.resumes import ResumeRepository
+from app.schemas.agent import AgentWorkflowTrace, ReportWorkflowTraceResponse
 from app.schemas.job import JobAnalysisRequest, JobAnalysisResponse, JobProfile
 from app.schemas.report import ApplicationReport
 from app.schemas.resume import ResumeProfile
@@ -91,6 +93,8 @@ def analyze_job(
     analysis_record.validation_warnings_json = [
         warning.model_dump(mode="json") for warning in report.validation_warnings
     ]
+    analysis_record.workflow_mode = workflow_result.trace.mode.value
+    analysis_record.workflow_trace_json = workflow_result.trace.model_dump(mode="json")
     analyses.save(analysis_record)
 
     return JobAnalysisResponse(
@@ -117,6 +121,17 @@ def get_report_markdown(db: Session, report_id: int) -> str:
     if not analysis:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
     return analysis.report_markdown
+
+
+def get_report_trace(db: Session, report_id: int) -> ReportWorkflowTraceResponse:
+    analysis = AnalysisRepository(db).get(report_id)
+    if not analysis:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return ReportWorkflowTraceResponse(
+        analysis_id=analysis.id,
+        report_id=analysis.id,
+        trace=_workflow_trace_from_record(analysis),
+    )
 
 
 def _job_text_from_request(request: JobAnalysisRequest) -> str:
@@ -157,3 +172,11 @@ def _create_job_record(
     profile.job_id = record.id
     record.profile_json = profile.model_dump(mode="json")
     return jobs.save(record)
+
+
+def _workflow_trace_from_record(analysis: AnalysisRecord) -> AgentWorkflowTrace:
+    trace_json = analysis.workflow_trace_json or default_workflow_trace()
+    try:
+        return AgentWorkflowTrace.model_validate(trace_json)
+    except ValidationError:
+        return AgentWorkflowTrace.model_validate(default_workflow_trace())

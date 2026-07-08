@@ -137,6 +137,7 @@ Request:
 ```http
 GET /reports/{report_id}
 GET /reports/{report_id}/markdown
+GET /reports/{report_id}/trace
 ```
 
 ## Data model

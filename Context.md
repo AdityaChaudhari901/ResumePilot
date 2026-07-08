@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
+- Current state: four-folder workspace created; backend foundation, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -61,7 +61,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
 - OpenClaw Gateway service is not installed as a daemon; foreground local startup is handled by `Ai services/openclaw/scripts/start_local_gateway.sh`.
 - Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
-- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL` and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
+- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
 
 ## Product Rule
 
@@ -206,9 +206,17 @@ Completed live CrewAI + Vertex smoke:
 - Ran the ResumePilot workflow in `AGENT_WORKFLOW_MODE=crewai`; trace mode returned `crewai` and completed resume match, cover letter, and interview coach agent steps.
 - Ran the real FastAPI HTTP path on `127.0.0.1:8012`; upload, analyze, report JSON, and report Markdown all passed, and three Vertex `generateContent` calls returned HTTP 200.
 
+Completed workflow trace persistence and dashboard visibility slice:
+
+- Added `workflow_mode` and `workflow_trace_json` to persisted analyses with an Alembic migration and backward-compatible defaults for existing rows.
+- Stored the deterministic fallback, CrewAI success, or CrewAI unavailable fallback trace after every analysis.
+- Added `GET /reports/{report_id}/trace` and the matching Next.js `/api/reports/[reportId]/trace` proxy.
+- Added a dashboard workflow trace panel that shows live CrewAI versus deterministic fallback mode, step status, summaries, and validation warning codes.
+- Added API tests for deterministic trace persistence, CrewAI fallback persistence, and mocked CrewAI success persistence.
+- Updated backend/docs API references to include the trace endpoint.
+
 Next implementation scope:
 
-- Persist and expose workflow trace metadata so API responses and the dashboard can show `crewai` versus deterministic fallback execution.
 - Add backend dependency lock when finalizing local Python version/tooling.
 - Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
 
@@ -218,8 +226,9 @@ Next implementation scope:
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw APIs should be verified against current official docs before live integration.
 - Default `Backend/.venv` still uses Python 3.14; live CrewAI verification uses the ignored Python 3.12 environment at `Backend/.local/venvs/py312`.
-- Workflow trace metadata is not yet persisted or exposed through report APIs/dashboard.
+- Workflow trace currently stores mode, step summaries, and validation warning codes; per-step latency/cost telemetry is not persisted yet.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
+- Playwright browser smoke is blocked until Playwright tooling is installed; current dashboard verification uses lint/typecheck/build plus same-origin HTTP proxy smoke.
 
 ## Verification Evidence
 
@@ -227,10 +236,11 @@ Latest verification run: 2026-07-08
 
 | Check | Command | Result |
 |---|---|---|
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 17 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 19 passed, 1 Starlette/httpx deprecation warning |
+| Backend trace focused tests | `cd Backend && .venv/bin/pytest tests/test_analysis_api.py tests/test_agent_workflow.py` | Passed: 6 passed, 1 Starlette/httpx deprecation warning |
 | Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations && .venv/bin/ruff check .` | Passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
-| Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed |
+| Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/trace-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
 | Live API smoke | Upload sample resume, analyze sample JD, fetch JSON and Markdown reports | Passed: health 200, upload 201, analyze 200, report 200, markdown 200 |
@@ -241,10 +251,10 @@ Latest verification run: 2026-07-08
 | OpenClaw helper tests | `python3 -m unittest discover "Ai services/openclaw/tests"` | Passed: 4 tests |
 | OpenClaw helper smoke | Upload sample resume, run `resumepilot_job.py paste:<sample job>` against API on port 8002 | Passed: helper exit 0, Markdown report returned |
 | Frontend audit | `cd Frontend && npm audit --omit=dev` | Passed: 0 vulnerabilities after PostCSS override |
-| Frontend lint | `cd Frontend && npm run lint` | Passed |
-| Frontend typecheck | `cd Frontend && npm run typecheck` | Passed |
-| Frontend build | `cd Frontend && npm run build` | Passed: Next.js production build generated app and API routes |
-| Dashboard proxy smoke | Health, upload sample resume, analyze sample JD, fetch JSON and Markdown through `http://127.0.0.1:3001/api/*` | Passed: health ok, resume parsed, analysis completed, Markdown report returned |
+| Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
+| Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: Next.js production build generated app and API routes including `/api/reports/[reportId]/trace` |
+| Dashboard trace proxy smoke | Backend on `127.0.0.1:8020`, Next.js on `127.0.0.1:3020`, upload/analyze/fetch trace through `/api/*` | Passed: report `2`, trace mode `deterministic_fallback`, 6 trace steps |
 | OpenClaw Vertex model discovery | `openclaw models list --provider google-vertex --plain` | Passed: listed Google Vertex model refs |
 | OpenClaw gateway status | `openclaw gateway status` | Verified not running: service not installed, loopback probe refused |
 | OpenClaw Vertex config | `LLM_PROVIDER=vertex VERTEX_PROJECT_ID=alien-slice-499511-f8 VERTEX_REGION=global LLM_MODEL=gemini-3.5-flash ./Ai services/openclaw/scripts/configure_vertex_gateway.sh` | Passed: Google plugin enabled, default model set to `google-vertex/gemini-3.5-flash`, config valid |
@@ -326,6 +336,11 @@ Latest verification run: 2026-07-08
 - Corrected the CrewAI optional dependency to `crewai[google-genai]` for the native Google Gen AI provider.
 - Created the ignored Python 3.12 verification environment at `Backend/.local/venvs/py312` and installed `.[dev,ai]`.
 - Verified live CrewAI + Vertex execution with trace mode `crewai`, no fallback warning, and successful FastAPI upload/analyze/report HTTP flow.
+- Added persisted analysis workflow trace metadata with an Alembic migration and report trace response schema.
+- Exposed `GET /reports/{report_id}/trace` in FastAPI and the matching Next.js dashboard proxy route.
+- Added a dashboard workflow trace panel for deterministic fallback versus live CrewAI execution status.
+- Added backend API tests for deterministic trace persistence, CrewAI unavailable fallback persistence, and mocked CrewAI success persistence.
+- Verified backend tests, lint, compile, migration, golden evals, frontend lint/typecheck/build, and the same-origin dashboard trace proxy smoke.
 
 ## Maintenance Rule
 

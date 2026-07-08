@@ -12,6 +12,20 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def default_workflow_trace() -> dict[str, Any]:
+    return {
+        "mode": "deterministic_fallback",
+        "steps": [
+            {
+                "name": "validation_gate",
+                "status": "degraded",
+                "summary": "Workflow trace was not captured for this analysis.",
+            }
+        ],
+        "validation_warning_codes": [],
+    }
+
+
 class ResumeRecord(Base):
     __tablename__ = "resumes"
 
@@ -57,6 +71,10 @@ class AnalysisRecord(Base):
     report_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     report_markdown: Mapped[str] = mapped_column(Text)
     validation_warnings_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    workflow_mode: Mapped[str] = mapped_column(String(64), default="deterministic_fallback")
+    workflow_trace_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=default_workflow_trace
+    )
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
     resume: Mapped[ResumeRecord] = relationship(back_populates="analyses")

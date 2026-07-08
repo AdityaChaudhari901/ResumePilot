@@ -14,10 +14,12 @@ import { ReportViewer } from "@/features/dashboard/components/report-viewer";
 import { ResumeUploadCard } from "@/features/dashboard/components/resume-upload-card";
 import { SAMPLE_JOB_TEXT } from "@/features/dashboard/constants";
 import type {
+  AgentWorkflowTrace,
   ApplicationReport,
   HealthStatus,
   JobAnalysisResponse,
   OpenClawStatus,
+  ReportWorkflowTraceResponse,
   ResumeUploadResponse
 } from "@/features/dashboard/types";
 import { readApiError } from "@/features/dashboard/utils/api-error";
@@ -54,6 +56,7 @@ export function DashboardShell() {
   const [report, setReport] = useState<ApplicationReport | null>(null);
   const [resume, setResume] = useState<ResumeUploadResponse | null>(null);
   const [role, setRole] = useState("");
+  const [workflowTrace, setWorkflowTrace] = useState<AgentWorkflowTrace | null>(null);
 
   const loadStatus = useCallback(async () => {
     setIsLoadingStatus(true);
@@ -116,6 +119,7 @@ export function DashboardShell() {
       setAnalysis(null);
       setReport(null);
       setMarkdown("");
+      setWorkflowTrace(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Resume upload failed");
     } finally {
@@ -132,6 +136,7 @@ export function DashboardShell() {
 
     setErrorMessage(null);
     setIsAnalyzing(true);
+    setWorkflowTrace(null);
 
     try {
       const response = await fetch("/api/jobs/analyze", {
@@ -162,9 +167,10 @@ export function DashboardShell() {
   }
 
   async function loadReport(reportId: number) {
-    const [reportResponse, markdownResponse] = await Promise.all([
+    const [reportResponse, markdownResponse, traceResponse] = await Promise.all([
       fetch(`/api/reports/${reportId}`, { cache: "no-store" }),
-      fetch(`/api/reports/${reportId}/markdown`, { cache: "no-store" })
+      fetch(`/api/reports/${reportId}/markdown`, { cache: "no-store" }),
+      fetch(`/api/reports/${reportId}/trace`, { cache: "no-store" })
     ]);
 
     if (!reportResponse.ok) {
@@ -177,6 +183,13 @@ export function DashboardShell() {
 
     setReport((await reportResponse.json()) as ApplicationReport);
     setMarkdown(await markdownResponse.text());
+
+    if (traceResponse.ok) {
+      const tracePayload = (await traceResponse.json()) as ReportWorkflowTraceResponse;
+      setWorkflowTrace(tracePayload.trace);
+    } else {
+      setWorkflowTrace(null);
+    }
   }
 
   return (
@@ -253,7 +266,12 @@ export function DashboardShell() {
               resumeReady={Boolean(resume)}
               role={role}
             />
-            <ReportViewer analysis={analysis} markdown={markdown} report={report} />
+            <ReportViewer
+              analysis={analysis}
+              markdown={markdown}
+              report={report}
+              workflowTrace={workflowTrace}
+            />
           </div>
         </div>
       </div>
