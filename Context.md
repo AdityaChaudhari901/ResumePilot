@@ -51,6 +51,14 @@ The product must be evidence-first. Deterministic parsing, normalization, matchi
 
 Every generated resume bullet or matched skill must trace back to resume evidence. Unsupported additions must be rejected or clearly marked as "add only if true".
 
+## Source Of Truth Rule
+
+Before implementing product behavior, architecture changes, AI workflows, backend APIs, frontend UI, tests, or documentation, refer to these project docs so the implementation stays aligned with the ResumePilot use case:
+
+- `Docs/CrewAI_Job_Application_Copilot_MVP_Docs.md`
+- `Docs/crewai-job-copilot-mvp-docs/README.md`
+- `Docs/crewai-job-copilot-mvp-docs/docs/`
+
 ## Selected MVP Tech Stack
 
 | Layer | Choice |
@@ -172,6 +180,7 @@ Latest verification run: 2026-07-08
 - Verified tests, lint, compile, migration, golden evals, and live API smoke pass from the new structure.
 - Started the local FastAPI server on `127.0.0.1:8002` because ports 8000 and 8001 were occupied by `ssh` listeners.
 - Initialized git, renamed the branch to `main`, and configured GitHub remote `origin`.
+- Added the source-of-truth rule requiring future work to refer to the MVP documentation pack before implementation.
 
 ## Maintenance Rule
 
