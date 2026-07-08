@@ -25,7 +25,7 @@
 | Web dashboard | Upload resume and view reports. |
 | Multiple resumes | Maintain variants: backend, frontend, AI, data. |
 | Skill gap planner | Suggest 7-day or 30-day learning plan. |
-| Report export | Export Markdown, PDF, DOCX. |
+| Report export polish | Add DOCX export and saved export history. |
 | Job tracker | Track applied/saved/interview status. |
 | Email draft | Draft recruiter email with approval. |
 | Vector search | Semantic matching with embeddings. |

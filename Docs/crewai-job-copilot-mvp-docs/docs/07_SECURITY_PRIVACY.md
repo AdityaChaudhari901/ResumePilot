@@ -61,6 +61,22 @@ Defenses:
 - Never let job page text trigger tool calls.
 - Validate agent outputs before use.
 
+### Report export safety
+
+LaTeX and PDF exports must be generated only from validated `ResumeProfile`,
+`JobProfile`, and `ApplicationReport` data. Do not accept raw user-supplied
+LaTeX for compilation.
+
+PDF compilation controls:
+
+- escape resume and job text before rendering LaTeX
+- run the compiler without a shell
+- prefer `tectonic --untrusted`
+- use `pdflatex -no-shell-escape` only as a fallback
+- compile in a temporary server-created directory
+- enforce timeout and output-size limits
+- do not return compiler logs to users because logs may contain private resume data
+
 ### Data retention
 
 MVP settings:
@@ -117,6 +133,7 @@ Requires explicit confirmation:
 | Fake generated claims | evidence IDs, validator, deterministic checks |
 | OpenClaw unauthorized command | token auth, sender allowlist |
 | Malicious uploaded file | file type/size limits, no execution |
+| Unsafe PDF compilation | generated-only LaTeX, text escaping, no shell, no shell escape, timeout and size limits |
 | Scraping blocked site | paste fallback; do not bypass auth/paywalls |
 | Rate-limit abuse | request limits, queue, quotas |
 | Multi-user data mixing | avoid multi-tenant MVP; add auth before V1 |

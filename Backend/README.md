@@ -17,6 +17,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
 - Evidence-backed LaTeX resume export using the uploaded resume facts and supported tailored bullets.
+- Guarded PDF resume export compiled from the same evidence-backed LaTeX source.
 - API token protection for the OpenClaw endpoint.
 
 ## Local Setup
@@ -33,6 +34,16 @@ Open Swagger UI at `http://127.0.0.1:8000/docs`.
 The backend runtime is pinned to Python `>=3.12,<3.14`. The bootstrap script uses
 `requirements/py312-dev-ai.constraints.txt` so the local dev and live CrewAI
 dependency graph stays reproducible.
+
+PDF export requires a local LaTeX compiler. `tectonic` is preferred because the
+backend can run it with `--untrusted`; `pdflatex` is supported as a fallback with
+`-no-shell-escape`. The default compiler timeout is 20 seconds and the default
+PDF size limit is 5 MB:
+
+```env
+LATEX_COMPILE_TIMEOUT_SECONDS=20
+LATEX_PDF_MAX_BYTES=5242880
+```
 
 ## Optional Live CrewAI Mode
 
@@ -87,6 +98,7 @@ unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits,
 - `GET /reports/{report_id}/markdown`
 - `GET /reports/{report_id}/trace`
 - `GET /reports/{report_id}/resume/latex`
+- `GET /reports/{report_id}/resume/pdf`
 - `POST /chat/openclaw`
 
 The `/chat/openclaw` endpoint requires:

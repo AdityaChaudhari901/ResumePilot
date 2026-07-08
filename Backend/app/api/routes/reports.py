@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_settings
+from app.core.config import Settings
 from app.schemas.agent import ReportWorkflowTraceResponse
 from app.schemas.report import ApplicationReport
 from app.services.analysis_service import (
@@ -10,6 +11,7 @@ from app.services.analysis_service import (
     get_report_markdown,
     get_report_trace,
     get_tailored_resume_latex,
+    get_tailored_resume_pdf,
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -38,5 +40,21 @@ def read_tailored_resume_latex(report_id: int, db: Session = Depends(get_db)) ->
         media_type="application/x-tex",
         headers={
             "Content-Disposition": f'attachment; filename="resumepilot-report-{report_id}.tex"'
+        },
+    )
+
+
+@router.get("/{report_id}/resume/pdf")
+def read_tailored_resume_pdf(
+    report_id: int,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    pdf = get_tailored_resume_pdf(db, report_id, settings)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="resumepilot-report-{report_id}.pdf"'
         },
     )

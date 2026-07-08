@@ -7,6 +7,7 @@ from app.schemas.agent import (
 )
 from app.schemas.report import InterviewQuestionGroup
 from app.services.crewai_workflow import CrewAIWorkflowSections, CrewAIWorkflowUnavailable
+from app.services.pdf_resume_compiler import PdfCompilerUnavailable
 
 
 def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_text):
@@ -51,6 +52,62 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
         AgentStepName.interview_coach,
         AgentStepName.validation_gate,
     ]
+
+
+def test_read_tailored_resume_pdf_download(
+    client, monkeypatch, sample_resume_text, sample_job_text, settings
+):
+    def fake_compile_latex_to_pdf(
+        latex_source: str,
+        *,
+        timeout_seconds: int,
+        max_output_bytes: int,
+    ) -> bytes:
+        assert r"\documentclass[letterpaper,10pt]{article}" in latex_source
+        assert timeout_seconds == settings.latex_compile_timeout_seconds
+        assert max_output_bytes == settings.latex_pdf_max_bytes
+        return b"%PDF-1.7\n% ResumePilot test PDF\n"
+
+    monkeypatch.setattr(
+        "app.services.analysis_service.compile_latex_to_pdf",
+        fake_compile_latex_to_pdf,
+    )
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
+
+    pdf_response = client.get(f"/reports/{body['report_id']}/resume/pdf")
+
+    assert pdf_response.status_code == 200
+    assert pdf_response.headers["content-type"].startswith("application/pdf")
+    assert (
+        pdf_response.headers["content-disposition"]
+        == f'attachment; filename="resumepilot-report-{body["report_id"]}.pdf"'
+    )
+    assert pdf_response.content.startswith(b"%PDF-1.7")
+
+
+def test_read_tailored_resume_pdf_reports_missing_compiler(
+    client, monkeypatch, sample_resume_text, sample_job_text
+):
+    def fake_compile_latex_to_pdf(
+        _latex_source: str,
+        *,
+        timeout_seconds: int,
+        max_output_bytes: int,
+    ) -> bytes:
+        raise PdfCompilerUnavailable("No compiler installed.")
+
+    monkeypatch.setattr(
+        "app.services.analysis_service.compile_latex_to_pdf",
+        fake_compile_latex_to_pdf,
+    )
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
+
+    pdf_response = client.get(f"/reports/{body['report_id']}/resume/pdf")
+
+    assert pdf_response.status_code == 503
+    assert (
+        pdf_response.json()["detail"] == "PDF export requires tectonic or pdflatex on the server."
+    )
 
 
 def test_crewai_fallback_trace_is_persisted(

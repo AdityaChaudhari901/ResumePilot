@@ -18,6 +18,7 @@
 - upload resume -> parse -> store
 - analyze pasted JD -> report
 - analyze job URL -> report
+- export report Markdown, LaTeX, and PDF
 - OpenClaw endpoint -> report
 - invalid token -> 401
 - blocked scrape -> paste fallback message
@@ -164,6 +165,7 @@ Do not invent these metrics. Measure them first.
 - run ruff/formatting if configured
 - run type checks if configured
 - run sample analysis
+- verify report export endpoints
 - run backend quality gate
 - validate generated report JSON
 - fail build if unsupported claim detector fails

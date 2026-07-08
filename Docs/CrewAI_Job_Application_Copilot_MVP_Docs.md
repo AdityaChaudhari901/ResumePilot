@@ -169,7 +169,7 @@ Acceptance criteria:
 - Deterministic skill matcher.
 - CrewAI agents for structured analysis and writing.
 - Markdown and JSON reports.
-- Evidence-backed LaTeX resume export from validated report data.
+- Evidence-backed LaTeX and PDF resume export from validated report data.
 - OpenClaw `/job` command integration.
 - Basic web UI or Swagger UI for resume upload.
 - CLI for local demo.
@@ -227,6 +227,7 @@ Acceptance criteria:
 | Observability | Structured logs + Prometheus metrics; CrewAI tracing if available | Measure latency, cost, failures, and agent behavior. |
 | Packaging | Docker Compose | Local stack: API, DB, Redis, worker. |
 | LLM provider layer | CrewAI LLM config / LiteLLM optional | Keep model provider configurable. |
+| Report exports | Markdown, JSON, generated LaTeX, local `tectonic`/`pdflatex` PDF | Keep report source evidence-backed and compile PDFs behind server-side guards. |
 | Testing | Pytest | Unit and integration tests. |
 
 ## MVP dependency groups
@@ -521,6 +522,7 @@ GET /reports/{report_id}
 GET /reports/{report_id}/markdown
 GET /reports/{report_id}/trace
 GET /reports/{report_id}/resume/latex
+GET /reports/{report_id}/resume/pdf
 ```
 
 ## Data model
@@ -1613,6 +1615,22 @@ Defenses:
 - Never let job page text trigger tool calls.
 - Validate agent outputs before use.
 
+### Report export safety
+
+LaTeX and PDF exports must be generated only from validated `ResumeProfile`,
+`JobProfile`, and `ApplicationReport` data. Do not accept raw user-supplied
+LaTeX for compilation.
+
+PDF compilation controls:
+
+- escape resume and job text before rendering LaTeX
+- run the compiler without a shell
+- prefer `tectonic --untrusted`
+- use `pdflatex -no-shell-escape` only as a fallback
+- compile in a temporary server-created directory
+- enforce timeout and output-size limits
+- do not return compiler logs to users because logs may contain private resume data
+
 ### Data retention
 
 MVP settings:
@@ -1669,6 +1687,7 @@ Requires explicit confirmation:
 | Fake generated claims | evidence IDs, validator, deterministic checks |
 | OpenClaw unauthorized command | token auth, sender allowlist |
 | Malicious uploaded file | file type/size limits, no execution |
+| Unsafe PDF compilation | generated-only LaTeX, text escaping, no shell, no shell escape, timeout and size limits |
 | Scraping blocked site | paste fallback; do not bypass auth/paywalls |
 | Rate-limit abuse | request limits, queue, quotas |
 | Multi-user data mixing | avoid multi-tenant MVP; add auth before V1 |
@@ -1946,7 +1965,7 @@ Exit criteria:
 | Web dashboard | Upload resume and view reports. |
 | Multiple resumes | Maintain variants: backend, frontend, AI, data. |
 | Skill gap planner | Suggest 7-day or 30-day learning plan. |
-| Report export | Export Markdown, PDF, DOCX. |
+| Report export polish | Add DOCX export and saved export history. |
 | Job tracker | Track applied/saved/interview status. |
 | Email draft | Draft recruiter email with approval. |
 | Vector search | Semantic matching with embeddings. |
@@ -2040,6 +2059,7 @@ Exit criteria:
 - upload resume -> parse -> store
 - analyze pasted JD -> report
 - analyze job URL -> report
+- export report Markdown, LaTeX, and PDF
 - OpenClaw endpoint -> report
 - invalid token -> 401
 - blocked scrape -> paste fallback message
@@ -2172,6 +2192,7 @@ Do not invent these metrics. Measure them first.
 - run ruff/formatting if configured
 - run type checks if configured
 - run sample analysis
+- verify report export endpoints
 - validate generated report JSON
 - fail build if unsupported claim detector fails
 

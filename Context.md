@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and Next.js WebChat/dashboard workbench with Markdown and LaTeX report downloads implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -35,12 +35,14 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/services/agent_workflow.py`
   - `Backend/app/services/crewai_workflow.py`
   - `Backend/app/services/latex_resume_renderer.py`
+  - `Backend/app/services/pdf_resume_compiler.py`
   - `Backend/app/data/skill_dictionary.json`
   - `Backend/migrations/*.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/tests/test_backend_quality_gate.py`
   - `Backend/tests/test_latex_resume_renderer.py`
+  - `Backend/tests/test_pdf_resume_compiler.py`
   - `Backend/scripts/run_golden_evals.py`
   - `Backend/scripts/run_backend_quality_gate.py`
   - `Backend/scripts/bootstrap_py312.sh`
@@ -55,6 +57,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Backend runtime standard: Python 3.12.13 via `.python-version` and `Backend/scripts/bootstrap_py312.sh`.
 - `uv` is not currently available in the outer shell PATH; the backend Python 3.12 environment installs pinned `uv==0.11.28` as a CrewAI CLI dependency.
 - Local virtual environment at `Backend/.venv` recreated with Python 3.12.13 and pinned backend dev+AI constraints.
+- Local TeX compiler observed: `tectonic 0.16.9`.
 - Python 3.12 live CrewAI verification environment created under ignored path `Backend/.local/venvs/py312`.
 - Project dependencies are declared in `Backend/pyproject.toml`.
 - Backend dependency constraints are pinned in `Backend/requirements/py312-dev-ai.constraints.txt` and used as pip constraints with editable installs.
@@ -69,7 +72,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
 - OpenClaw Gateway service is not installed as a daemon; foreground local startup is handled by `Ai services/openclaw/scripts/start_local_gateway.sh`.
 - Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
-- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
+- Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report trace metadata through `/api/reports/[reportId]/trace`, expose LaTeX report download through `/api/reports/[reportId]/resume/latex`, expose PDF report download through `/api/reports/[reportId]/resume/pdf`, and probe OpenClaw Gateway readiness through `/api/openclaw/status`.
 
 ## Product Rule
 
@@ -104,7 +107,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Browser fallback | Playwright, only when needed |
 | Agent orchestration | CrewAI |
 | LLM provider layer | CrewAI config or LiteLLM-compatible wrapper |
-| Reports | JSON, Markdown, and LaTeX `.tex` resume export |
+| Reports | JSON, Markdown, LaTeX `.tex`, and compiled PDF resume export |
 | Auth | Local API token via `JOBCOPILOT_API_TOKEN` |
 | Frontend | Next.js App Router, React, TypeScript, Tailwind CSS |
 | Frontend API bridge | Next.js route handlers as backend-for-frontend proxy |
@@ -257,9 +260,20 @@ Completed dashboard LaTeX download slice:
 - Updated the frontend README to include JSON, Markdown, workflow trace, and LaTeX report download capabilities.
 - Verified frontend lint, typecheck, production build, and a live upload/analyze/download smoke through the Next.js LaTeX proxy route.
 
+Completed evidence-backed PDF resume export slice:
+
+- Added `Backend/app/services/pdf_resume_compiler.py` to compile generated LaTeX with a guarded local compiler boundary.
+- Preferred `tectonic --untrusted`, added `pdflatex -no-shell-escape` fallback, and enforced no shell invocation, temporary workspaces, timeout limits, and output-size limits.
+- Added `GET /reports/{report_id}/resume/pdf`, returning a downloadable `application/pdf` attachment from the same persisted report data as the LaTeX export.
+- Added a Next.js backend-for-frontend proxy route at `Frontend/src/app/api/reports/[reportId]/resume/pdf/route.ts`.
+- Added a dashboard `PDF` download button beside Markdown and LaTeX exports.
+- Updated backend/frontend/root README files and source-of-truth docs with the PDF endpoint, compiler requirements, and report export safety controls.
+- Added focused compiler and API tests for successful PDF downloads, missing compiler handling, compiler command safety, and output-size enforcement.
+- Verified local `tectonic 0.16.9` compiles both a minimal document and the generated ResumePilot LaTeX template.
+
 Next implementation scope:
 
-- Add PDF export after verifying local TeX tooling, then add report export polish and visual regression/browser automation when the UI flow stabilizes.
+- Add report export polish, saved export history or DOCX export, and visual regression/browser automation when the UI flow stabilizes.
 
 ## Known Gaps
 
@@ -267,7 +281,8 @@ Next implementation scope:
 - OpenClaw APIs should be verified against current official docs before live integration.
 - Backend lock is a pinned pip constraints file, not a hash-locked artifact; add hash locking or container builds before remote production deployment.
 - The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency, token usage, and cost are not included yet.
-- LaTeX `.tex` export is implemented; local PDF compilation is not implemented yet and should wait until TeX tooling and sandboxing behavior are verified.
+- PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
+- DOCX export is not implemented yet.
 - Workflow trace currently stores mode, step summaries, and validation warning codes; per-step latency/cost telemetry is not persisted yet.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
 - Playwright browser smoke is blocked until Playwright tooling is installed; current dashboard verification uses lint/typecheck/build plus same-origin HTTP proxy smoke.
@@ -281,14 +296,17 @@ Latest verification run: 2026-07-08
 | Python runtime | `cd Backend && .venv/bin/python --version && .venv/bin/python -m pip check` | Passed: Python 3.12.13, no broken requirements |
 | Backend bootstrap | `VENV_DIR=.local/venvs/bootstrap-check Backend/scripts/bootstrap_py312.sh --recreate` | Passed: fresh Python 3.12.13 constrained install, `pip check` passed |
 | Backend default venv bootstrap | `Backend/scripts/bootstrap_py312.sh --recreate` | Passed: recreated `Backend/.venv` as Python 3.12.13 with pinned dev+AI constraints |
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 22 passed, 1 Starlette/httpx deprecation warning |
-| LaTeX export focused tests | `cd Backend && .venv/bin/pytest tests/test_latex_resume_renderer.py tests/test_analysis_api.py` | Passed: 4 passed, 1 Starlette/httpx deprecation warning |
+| TeX compiler | `tectonic --version` | Passed: `Tectonic 0.16.9` |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 28 passed, 1 Starlette/httpx deprecation warning |
+| Report export focused tests | `cd Backend && .venv/bin/pytest tests/test_pdf_resume_compiler.py tests/test_analysis_api.py tests/test_settings.py` | Passed: 10 passed, 1 Starlette/httpx deprecation warning |
 | Backend trace focused tests | `cd Backend && .venv/bin/pytest tests/test_analysis_api.py tests/test_agent_workflow.py` | Passed: 6 passed, 1 Starlette/httpx deprecation warning |
-| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 64 files already formatted, all checks passed |
+| Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check .` | Passed: 66 files already formatted, all checks passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.06 ms, p95 2.47 ms |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.15 ms, p95 2.68 ms |
+| Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
+| Generated ResumePilot PDF smoke | `cd Backend && .venv/bin/python - <<'PY' ... render_tailored_resume_latex(...) ... compile_latex_to_pdf(...) ... PY` | Passed: generated 19397-byte PDF with `%PDF-` prefix |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
 | Live API smoke | Upload sample resume, analyze sample JD, fetch JSON and Markdown reports | Passed: health 200, upload 201, analyze 200, report 200, markdown 200 |
 | Live OpenClaw smoke | `POST /chat/openclaw` with `paste:` job text and allowlisted sender | Passed: 200, status `completed`, Markdown report returned |
@@ -300,8 +318,9 @@ Latest verification run: 2026-07-08
 | Frontend audit | `cd Frontend && npm audit --omit=dev` | Passed: 0 vulnerabilities after PostCSS override |
 | Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
-| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: Next.js production build generated app and API routes including `/api/reports/[reportId]/resume/latex` |
+| Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: Next.js production build generated app and API routes including `/api/reports/[reportId]/resume/latex` and `/api/reports/[reportId]/resume/pdf` |
 | Dashboard LaTeX proxy smoke | Backend on `127.0.0.1:8033`, Next.js on `127.0.0.1:3033`, upload/analyze/fetch LaTeX through `/api/*` | Passed: health 200, upload 201, analyze 200, LaTeX 200, `content-type: application/x-tex`, attachment filename preserved |
+| Dashboard PDF proxy smoke | Backend on `127.0.0.1:8034`, Next.js on `127.0.0.1:3034`, upload/analyze/fetch PDF through `/api/*` | Passed: health 200, upload 201, analyze 200, PDF 200, `content-type: application/pdf`, attachment filename preserved, 19397-byte `%PDF-` payload |
 | Dashboard trace proxy smoke | Backend on `127.0.0.1:8020`, Next.js on `127.0.0.1:3020`, upload/analyze/fetch trace through `/api/*` | Passed: report `2`, trace mode `deterministic_fallback`, 6 trace steps |
 | OpenClaw Vertex model discovery | `openclaw models list --provider google-vertex --plain` | Passed: listed Google Vertex model refs |
 | OpenClaw gateway status | `openclaw gateway status` | Verified not running: service not installed, loopback probe refused |
@@ -392,6 +411,12 @@ Latest verification run: 2026-07-08
 - Added `.python-version` and constrained backend package support to Python `>=3.12,<3.14`.
 - Added Python 3.12 dev+AI dependency constraints and the `bootstrap_py312.sh` setup script.
 - Recreated `Backend/.venv` with Python 3.12.13 and verified tests, lint, compile, migration, golden evals, and `pip check`.
+- Added guarded local PDF compilation from generated LaTeX with `tectonic --untrusted` preference, `pdflatex -no-shell-escape` fallback, timeout limits, output-size limits, and no shell invocation.
+- Added `GET /reports/{report_id}/resume/pdf` in FastAPI and the matching Next.js `/api/reports/[reportId]/resume/pdf` proxy route.
+- Added a dashboard PDF download action beside Markdown and LaTeX exports.
+- Added compiler, API, and settings tests for PDF export success, missing compiler handling, command safety, and output-size enforcement.
+- Updated README files, MVP docs, security notes, testing docs, and this context file for the new PDF export behavior.
+- Verified backend tests/lint/compile/golden evals/quality gate, frontend lint/typecheck/build, real `tectonic` compilation, and same-origin dashboard PDF proxy smoke.
 
 ## Maintenance Rule
 

@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Download,
   FileCode2,
+  FileDown,
   GitBranch,
   ShieldCheck
 } from "lucide-react";
@@ -53,6 +54,9 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
   const latexDownloadHref = `/api/reports/${encodeURIComponent(
     String(analysis.report_id)
   )}/resume/latex`;
+  const pdfDownloadHref = `/api/reports/${encodeURIComponent(
+    String(analysis.report_id)
+  )}/resume/pdf`;
 
   return (
     <Panel
@@ -73,6 +77,14 @@ export function ReportViewer({ analysis, markdown, report, workflowTrace }: Repo
             variant="secondary"
           >
             LaTeX
+          </ButtonLink>
+          <ButtonLink
+            download={`resumepilot-report-${analysis.report_id}.pdf`}
+            href={pdfDownloadHref}
+            icon={<FileDown className="h-4 w-4" aria-hidden="true" />}
+            variant="primary"
+          >
+            PDF
           </ButtonLink>
         </div>
       }

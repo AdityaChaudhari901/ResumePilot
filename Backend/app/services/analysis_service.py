@@ -16,6 +16,13 @@ from app.services.file_storage import StoredUpload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
 from app.services.latex_resume_renderer import render_tailored_resume_latex
 from app.services.matcher import match_resume_to_job
+from app.services.pdf_resume_compiler import (
+    PdfCompilationFailed,
+    PdfCompilationTimedOut,
+    PdfCompilerUnavailable,
+    PdfOutputTooLarge,
+    compile_latex_to_pdf,
+)
 from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import extract_resume_text, parse_resume_profile
 
@@ -143,6 +150,36 @@ def get_tailored_resume_latex(db: Session, report_id: int) -> str:
     resume = ResumeProfile.model_validate(analysis.resume.profile_json)
     job = JobProfile.model_validate(analysis.job.profile_json)
     return render_tailored_resume_latex(report=report, resume=resume, job=job)
+
+
+def get_tailored_resume_pdf(db: Session, report_id: int, settings: Settings) -> bytes:
+    latex = get_tailored_resume_latex(db, report_id)
+    try:
+        return compile_latex_to_pdf(
+            latex,
+            timeout_seconds=settings.latex_compile_timeout_seconds,
+            max_output_bytes=settings.latex_pdf_max_bytes,
+        )
+    except PdfCompilerUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF export requires tectonic or pdflatex on the server.",
+        ) from exc
+    except PdfCompilationTimedOut as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="PDF export timed out while compiling the generated resume.",
+        ) from exc
+    except PdfOutputTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Generated PDF exceeds the configured export size limit.",
+        ) from exc
+    except PdfCompilationFailed as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Generated LaTeX could not be compiled into PDF.",
+        ) from exc
 
 
 def _job_text_from_request(request: JobAnalysisRequest) -> str:

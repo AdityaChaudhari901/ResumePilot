@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     crewai_max_iter: int = Field(default=2, ge=1, le=10, alias="CREWAI_MAX_ITER")
     crewai_timeout_seconds: int = Field(default=60, ge=10, le=300, alias="CREWAI_TIMEOUT_SECONDS")
     crewai_temperature: float = Field(default=0.2, ge=0, le=1, alias="CREWAI_TEMPERATURE")
+    latex_compile_timeout_seconds: int = Field(
+        default=20,
+        ge=5,
+        le=120,
+        alias="LATEX_COMPILE_TIMEOUT_SECONDS",
+    )
+    latex_pdf_max_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        ge=1024,
+        le=50 * 1024 * 1024,
+        alias="LATEX_PDF_MAX_BYTES",
+    )
 
     allowed_resume_extensions: frozenset[str] = frozenset(
         {".pdf", ".docx", ".txt", ".md", ".markdown"}
