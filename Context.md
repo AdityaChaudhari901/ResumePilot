@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, and Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, deterministic backend speed/accuracy quality gate, evidence-backed LaTeX and PDF resume export, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with Markdown, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -49,6 +49,8 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/requirements/py312-dev-ai.constraints.txt`
   - `Backend/evals/resumes/*.md`
   - `Backend/evals/jobs/*.txt`
+  - `Frontend/e2e/*.ts`
+  - `Frontend/playwright.config.ts`
   - `Ai services/openclaw/workspace/skills/job/SKILL.md`
   - `Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py`
   - `Ai services/openclaw/tests/test_resumepilot_job.py`
@@ -113,7 +115,7 @@ Before implementing or changing live CrewAI behavior, also verify the current of
 | Frontend API bridge | Next.js route handlers as backend-for-frontend proxy |
 | OpenClaw model provider path | Google Vertex via `google-vertex` and gcloud ADC |
 | Frontend icons | lucide-react |
-| Testing | pytest, httpx, respx |
+| Testing | pytest, httpx, respx, Playwright |
 | Packaging | Docker Compose later, not required on day one |
 
 ## Build Order
@@ -271,9 +273,17 @@ Completed evidence-backed PDF resume export slice:
 - Added focused compiler and API tests for successful PDF downloads, missing compiler handling, compiler command safety, and output-size enforcement.
 - Verified local `tectonic 0.16.9` compiles both a minimal document and the generated ResumePilot LaTeX template.
 
+Completed dashboard Playwright browser smoke slice:
+
+- Added Playwright to the frontend dev toolchain with `npm run test:e2e:install` and `npm run test:e2e`.
+- Added `Frontend/playwright.config.ts` to build the frontend, start FastAPI on `127.0.0.1:8040`, start production Next.js on `127.0.0.1:3040`, and run Chromium tests with ignored local artifacts.
+- Added `Frontend/e2e/dashboard.spec.ts` covering resume upload, sample job analysis, report rendering, workflow trace visibility, Markdown/LaTeX/PDF export response checks, and desktop/mobile screenshots.
+- Updated root/frontend README files and testing docs with the browser smoke command and artifact locations.
+- Verified Playwright Chromium setup and the dashboard e2e smoke with 2 passing browser tests.
+
 Next implementation scope:
 
-- Add report export polish, saved export history or DOCX export, and visual regression/browser automation when the UI flow stabilizes.
+- Add report export polish, saved export history or DOCX export, per-step latency/cost telemetry, and CI artifact upload or screenshot baseline comparisons.
 
 ## Known Gaps
 
@@ -284,8 +294,8 @@ Next implementation scope:
 - PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
 - DOCX export is not implemented yet.
 - Workflow trace currently stores mode, step summaries, and validation warning codes; per-step latency/cost telemetry is not persisted yet.
-- Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
-- Playwright browser smoke is blocked until Playwright tooling is installed; current dashboard verification uses lint/typecheck/build plus same-origin HTTP proxy smoke.
+- Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
+- Playwright browser smoke is implemented; CI artifact upload, screenshot baseline diffing, and accessibility audits are not implemented yet.
 
 ## Verification Evidence
 
@@ -304,7 +314,7 @@ Latest verification run: 2026-07-08
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/py312-lock-migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260708_0002` |
 | Golden evals | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
-| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.15 ms, p95 2.68 ms |
+| Backend quality gate | `cd Backend && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 20 pairs, 100% schema pass, 0 evidence gaps, 0 unsupported warnings, 0 required-skill routing gaps, 0 sensitive-output hits, avg 2.37 ms, p95 3.06 ms |
 | Minimal PDF compiler smoke | `cd Backend && .venv/bin/python -c '... compile_latex_to_pdf(...) ...'` | Passed: generated 3617-byte PDF with `%PDF-` prefix |
 | Generated ResumePilot PDF smoke | `cd Backend && .venv/bin/python - <<'PY' ... render_tailored_resume_latex(...) ... compile_latex_to_pdf(...) ... PY` | Passed: generated 19397-byte PDF with `%PDF-` prefix |
 | Live health | `curl -sS http://127.0.0.1:8002/health` | Passed: `{"status":"ok","app":"ResumePilot","environment":"development"}` |
@@ -319,6 +329,9 @@ Latest verification run: 2026-07-08
 | Frontend lint | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
 | Frontend build | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: Next.js production build generated app and API routes including `/api/reports/[reportId]/resume/latex` and `/api/reports/[reportId]/resume/pdf` |
+| Playwright Chromium install | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e:install` | Passed: Chromium already available for Playwright |
+| Dashboard Playwright browser smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build, FastAPI on `127.0.0.1:8040`, Next.js on `127.0.0.1:3040`, 2 Chromium tests passed, Markdown/LaTeX/PDF exports verified |
+| Dashboard screenshots | `Frontend/.local/playwright-results/**/dashboard-desktop.png` and `Frontend/.local/playwright-results/**/dashboard-mobile.png` | Passed: desktop and mobile screenshots captured in ignored local artifacts |
 | Dashboard LaTeX proxy smoke | Backend on `127.0.0.1:8033`, Next.js on `127.0.0.1:3033`, upload/analyze/fetch LaTeX through `/api/*` | Passed: health 200, upload 201, analyze 200, LaTeX 200, `content-type: application/x-tex`, attachment filename preserved |
 | Dashboard PDF proxy smoke | Backend on `127.0.0.1:8034`, Next.js on `127.0.0.1:3034`, upload/analyze/fetch PDF through `/api/*` | Passed: health 200, upload 201, analyze 200, PDF 200, `content-type: application/pdf`, attachment filename preserved, 19397-byte `%PDF-` payload |
 | Dashboard trace proxy smoke | Backend on `127.0.0.1:8020`, Next.js on `127.0.0.1:3020`, upload/analyze/fetch trace through `/api/*` | Passed: report `2`, trace mode `deterministic_fallback`, 6 trace steps |
@@ -417,6 +430,10 @@ Latest verification run: 2026-07-08
 - Added compiler, API, and settings tests for PDF export success, missing compiler handling, command safety, and output-size enforcement.
 - Updated README files, MVP docs, security notes, testing docs, and this context file for the new PDF export behavior.
 - Verified backend tests/lint/compile/golden evals/quality gate, frontend lint/typecheck/build, real `tectonic` compilation, and same-origin dashboard PDF proxy smoke.
+- Added Playwright browser smoke testing for the dashboard upload/analyze/report/export flow.
+- Added frontend e2e scripts, Playwright config, desktop/mobile screenshot capture, and ignored local browser test artifacts.
+- Updated root/frontend README files, testing docs, tech-stack docs, and this context file with the Playwright browser smoke workflow.
+- Verified Playwright Chromium install, frontend lint/typecheck, dashboard e2e smoke, backend tests, backend quality gate, and clean e2e smoke ports.
 
 ## Maintenance Rule
 

@@ -21,5 +21,13 @@ pytest
 python scripts/run_backend_quality_gate.py
 ```
 
+Frontend browser smoke:
+
+```bash
+cd Frontend
+npm run test:e2e:install
+npm run test:e2e
+```
+
 The backend runtime is standardized on Python 3.12 because live CrewAI execution
 does not currently support Python 3.14.

@@ -19,7 +19,7 @@
 | Packaging | Docker Compose | Local stack: API, DB, Redis, worker. |
 | LLM provider layer | CrewAI LLM config / LiteLLM optional | Keep model provider configurable. |
 | Report exports | Markdown, JSON, generated LaTeX, local `tectonic`/`pdflatex` PDF | Keep report source evidence-backed and compile PDFs behind server-side guards. |
-| Testing | Pytest | Unit and integration tests. |
+| Testing | Pytest + Playwright | Backend unit/integration tests plus dashboard browser smoke. |
 
 ## MVP dependency groups
 

@@ -228,7 +228,7 @@ Acceptance criteria:
 | Packaging | Docker Compose | Local stack: API, DB, Redis, worker. |
 | LLM provider layer | CrewAI LLM config / LiteLLM optional | Keep model provider configurable. |
 | Report exports | Markdown, JSON, generated LaTeX, local `tectonic`/`pdflatex` PDF | Keep report source evidence-backed and compile PDFs behind server-side guards. |
-| Testing | Pytest | Unit and integration tests. |
+| Testing | Pytest + Playwright | Backend unit/integration tests plus dashboard browser smoke. |
 
 ## MVP dependency groups
 
@@ -2077,6 +2077,7 @@ Exit criteria:
 - sample resume + sample JD
 - fresher resume + senior JD
 - backend resume + frontend JD
+- dashboard upload -> analyze -> export flow through Playwright
 - AI resume + data analyst JD
 - missing critical skill scenario
 
@@ -2149,10 +2150,23 @@ All reports must validate against `ApplicationReportSchema`.
 Every time prompts, models, or scoring rules change:
 
 - run golden eval set
+- run backend quality gate
 - compare match scores
 - compare unsupported-claim count
 - compare JSON validity
 - compare latency and cost
+
+Current frontend browser smoke command:
+
+```bash
+cd Frontend
+npm run test:e2e:install
+npm run test:e2e
+```
+
+The Playwright smoke starts FastAPI and the production Next.js server, uploads a
+sample resume, analyzes the sample job, verifies Markdown/LaTeX/PDF exports, and
+captures desktop/mobile screenshots in ignored local artifacts.
 
 ## Demo dataset plan
 
@@ -2193,6 +2207,7 @@ Do not invent these metrics. Measure them first.
 - run type checks if configured
 - run sample analysis
 - verify report export endpoints
+- run Playwright dashboard smoke
 - validate generated report JSON
 - fail build if unsupported claim detector fails
 

@@ -36,6 +36,7 @@
 - sample resume + sample JD
 - fresher resume + senior JD
 - backend resume + frontend JD
+- dashboard upload -> analyze -> export flow through Playwright
 - AI resume + data analyst JD
 - missing critical skill scenario
 
@@ -127,6 +128,18 @@ sensitive-output hits, average latency, and p95 latency. The generated JSON
 report is written to `Backend/evals/outputs/backend_quality_gate.json`, which is
 ignored by git.
 
+Current frontend browser smoke command:
+
+```bash
+cd Frontend
+npm run test:e2e:install
+npm run test:e2e
+```
+
+The Playwright smoke starts FastAPI and the production Next.js server, uploads a
+sample resume, analyzes the sample job, verifies Markdown/LaTeX/PDF exports, and
+captures desktop/mobile screenshots in ignored local artifacts.
+
 ## Demo dataset plan
 
 Minimum useful demo dataset:
@@ -166,6 +179,7 @@ Do not invent these metrics. Measure them first.
 - run type checks if configured
 - run sample analysis
 - verify report export endpoints
+- run Playwright dashboard smoke
 - run backend quality gate
 - validate generated report JSON
 - fail build if unsupported claim detector fails
