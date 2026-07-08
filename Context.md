@@ -211,3 +211,11 @@ Update this file after every meaningful project change. Keep entries concise and
 - Update `Build Order` or `Near-Term Implementation Scope` when sequencing changes.
 - Update `Known Gaps` when a gap is resolved or a new blocker appears.
 - Add one dated `Change Log` bullet for every implementation, documentation, dependency, test, or configuration change.
+
+## Commit Message Rule
+
+Use a concise subject plus a short body for implementation commits:
+
+- Subject: clear action summary, usually under 72 characters.
+- Body: 2-3 bullets explaining the important changes and why they matter.
+- Keep commit bodies factual and compact; avoid generic messages such as "update files" or overly tiny summaries.
