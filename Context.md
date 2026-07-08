@@ -72,6 +72,10 @@ Before implementing product behavior, architecture changes, AI workflows, backen
 - `Docs/crewai-job-copilot-mvp-docs/README.md`
 - `Docs/crewai-job-copilot-mvp-docs/docs/`
 
+Before implementing or changing live CrewAI behavior, also verify the current official CrewAI documentation:
+
+- `https://docs.crewai.com/`
+
 ## Selected MVP Tech Stack
 
 | Layer | Choice |
@@ -180,7 +184,8 @@ Next implementation scope:
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw local skill exists, but OpenClaw gateway onboarding/channel pairing is not completed.
 - Google Vertex provider path is selected, but the current local `gcloud` config has no active project and OpenClaw has no persisted gateway config yet.
-- CrewAI/OpenClaw APIs should be verified against current docs before live integration.
+- CrewAI APIs should be verified against current official docs at `https://docs.crewai.com/` before live integration.
+- OpenClaw APIs should be verified against current official docs before live integration.
 - Python 3.14 is installed locally, but Python 3.12 is the safer target for dependency compatibility.
 - Live CrewAI/provider-backed execution is not implemented yet; current workflow uses deterministic fallback contracts.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
@@ -257,6 +262,7 @@ Latest verification run: 2026-07-08
 - Added Next.js backend-for-frontend route handlers that proxy dashboard requests to FastAPI.
 - Added frontend dependency lock, lint/typecheck/build scripts, and a PostCSS audit override for the Next.js dependency tree.
 - Verified frontend audit, lint, typecheck, production build, backend tests, and live dashboard proxy smoke.
+- Added the official CrewAI documentation URL as the required reference before live CrewAI implementation.
 
 ## Maintenance Rule
 
