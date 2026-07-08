@@ -1,3 +1,4 @@
+from app.core.config import Settings, get_cached_settings
 from app.schemas.agent import (
     AgentStepName,
     AgentStepTrace,
@@ -14,6 +15,7 @@ from app.schemas.job import JobProfile
 from app.schemas.match import MatchResult
 from app.schemas.report import ApplicationReport, InterviewQuestionGroup
 from app.schemas.resume import ResumeFact, ResumeProfile
+from app.services.crewai_workflow import build_crewai_workflow_runner
 from app.services.report_generator import generate_report
 from app.services.validator import validate_report_against_resume
 
@@ -24,8 +26,37 @@ def run_application_agent_workflow(
     resume: ResumeProfile,
     job: JobProfile,
     match: MatchResult,
+    settings: Settings | None = None,
 ) -> AgentWorkflowResult:
-    """Run the bounded application-writing workflow.
+    """Run the bounded application-writing workflow with safe CrewAI fallback."""
+
+    resolved_settings = settings or get_cached_settings()
+    deterministic_result = _run_deterministic_application_agent_workflow(
+        analysis_id=analysis_id,
+        resume=resume,
+        job=job,
+        match=match,
+    )
+    if resolved_settings.agent_workflow_mode != AgentWorkflowMode.crewai:
+        return deterministic_result
+
+    return _run_crewai_application_agent_workflow(
+        resume=resume,
+        job=job,
+        match=match,
+        deterministic_result=deterministic_result,
+        settings=resolved_settings,
+    )
+
+
+def _run_deterministic_application_agent_workflow(
+    *,
+    analysis_id: int,
+    resume: ResumeProfile,
+    job: JobProfile,
+    match: MatchResult,
+) -> AgentWorkflowResult:
+    """Run the deterministic fallback workflow.
 
     This deterministic fallback mirrors the planned CrewAI agent sequence while keeping
     deterministic parsing, matching, and validation as the source of truth.
@@ -112,6 +143,145 @@ def run_application_agent_workflow(
         )
     )
 
+    return AgentWorkflowResult(
+        report=report,
+        trace=AgentWorkflowTrace(
+            mode=AgentWorkflowMode.deterministic_fallback,
+            steps=traces,
+            validation_warning_codes=[warning.code for warning in validation_warnings],
+        ),
+    )
+
+
+def _run_crewai_application_agent_workflow(
+    *,
+    resume: ResumeProfile,
+    job: JobProfile,
+    match: MatchResult,
+    deterministic_result: AgentWorkflowResult,
+    settings: Settings,
+) -> AgentWorkflowResult:
+    try:
+        sections = build_crewai_workflow_runner(settings).run(
+            resume=resume,
+            job=job,
+            match=match,
+            deterministic_report=deterministic_result.report,
+        )
+    except Exception as exc:
+        return _with_crewai_fallback_warning(deterministic_result, exc)
+
+    ats = _ats_optimizer_agent(deterministic_result.report, match)
+    report = deterministic_result.report.model_copy(
+        deep=True,
+        update={
+            "executive_summary": _build_executive_summary(sections.resume_match),
+            "tailored_bullets": ats.tailored_bullets,
+            "ats_keywords": ats.keyword_suggestions,
+            "cover_letter": sections.cover_letter.draft,
+            "interview_questions": sections.interview_coach.question_groups,
+            "next_actions": _next_actions(deterministic_result.report, sections.resume_match, ats),
+        },
+    )
+    validation_warnings = _dedupe_warnings(
+        [*report.validation_warnings, *validate_report_against_resume(report, resume)]
+    )
+    report.validation_warnings = validation_warnings
+
+    traces = [
+        AgentStepTrace(
+            name=AgentStepName.jd_parser,
+            status="completed",
+            summary=(
+                "Used structured JobProfile produced by deterministic job parsing; "
+                "no hidden requirements inferred."
+            ),
+        ),
+        AgentStepTrace(
+            name=AgentStepName.crewai_runtime,
+            status="completed",
+            summary=(
+                "Executed live CrewAI structured-output agents with model "
+                f"{settings.crewai_llm_model or settings.llm_model}."
+            ),
+        ),
+        AgentStepTrace(
+            name=AgentStepName.resume_match,
+            status="completed",
+            summary=(
+                "CrewAI explained deterministic fit with "
+                f"{len(sections.resume_match.evidence_ids)} resume evidence references."
+            ),
+        ),
+        AgentStepTrace(
+            name=AgentStepName.ats_optimizer,
+            status="completed",
+            summary=(
+                "Kept ATS keyword and bullet suggestions deterministic so evidence IDs remain "
+                "source-of-truth controlled."
+            ),
+        ),
+        AgentStepTrace(
+            name=AgentStepName.cover_letter,
+            status="completed",
+            summary=(
+                "CrewAI drafted cover letter from validated evidence; "
+                f"{len(sections.cover_letter.evidence_ids)} evidence references used."
+            ),
+        ),
+        AgentStepTrace(
+            name=AgentStepName.interview_coach,
+            status="completed",
+            summary=(
+                "CrewAI prepared "
+                f"{len(sections.interview_coach.question_groups)} interview question groups."
+            ),
+        ),
+        AgentStepTrace(
+            name=AgentStepName.validation_gate,
+            status="completed" if not validation_warnings else "degraded",
+            summary=(
+                "Validation passed without warnings."
+                if not validation_warnings
+                else f"Validation returned {len(validation_warnings)} warning(s)."
+            ),
+        ),
+    ]
+    return AgentWorkflowResult(
+        report=report,
+        trace=AgentWorkflowTrace(
+            mode=AgentWorkflowMode.crewai,
+            steps=traces,
+            validation_warning_codes=[warning.code for warning in validation_warnings],
+        ),
+    )
+
+
+def _with_crewai_fallback_warning(
+    deterministic_result: AgentWorkflowResult,
+    exc: Exception,
+) -> AgentWorkflowResult:
+    report = deterministic_result.report.model_copy(deep=True)
+    warning = ValidationWarning(
+        code="crewai_unavailable",
+        message=(
+            "CrewAI workflow mode was requested, but live execution was unavailable; "
+            f"returned deterministic fallback. Reason: {_public_error_summary(exc)}"
+        ),
+    )
+    validation_warnings = _dedupe_warnings([*report.validation_warnings, warning])
+    report.validation_warnings = validation_warnings
+    traces = [
+        AgentStepTrace(
+            name=AgentStepName.crewai_runtime,
+            status="failed",
+            summary=(
+                "CrewAI live execution unavailable; deterministic fallback returned. "
+                f"Reason: {_public_error_summary(exc)}"
+            ),
+        ),
+        *deterministic_result.trace.steps,
+    ]
     return AgentWorkflowResult(
         report=report,
         trace=AgentWorkflowTrace(
@@ -347,3 +517,8 @@ def _human_list(values: list[str]) -> str:
 
 def _unique(values) -> list:
     return list(dict.fromkeys(values))
+
+
+def _public_error_summary(exc: Exception) -> str:
+    message = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
+    return message[:220]

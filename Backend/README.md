@@ -1,6 +1,6 @@
 # ResumePilot
 
-ResumePilot is an evidence-backed job application copilot built from the CrewAI Job Application Copilot MVP docs. The backend keeps deterministic resume parsing, job parsing, skill matching, and validation as the source of truth. The current agent workflow is a structured deterministic fallback that mirrors the planned CrewAI sequence until live CrewAI/provider configuration is added.
+ResumePilot is an evidence-backed job application copilot built from the CrewAI Job Application Copilot MVP docs. The backend keeps deterministic resume parsing, job parsing, skill matching, and validation as the source of truth. The agent workflow supports the default deterministic fallback plus an optional live CrewAI mode for bounded, schema-driven explanation and drafting.
 
 ## Current MVP Slice
 
@@ -11,6 +11,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Pasted job description analysis and public URL fetch support.
 - Deterministic skill matching and report generation.
 - CrewAI-ready agent workflow boundary with deterministic fallback.
+- Optional live CrewAI structured-output agents for fit explanation, cover letter drafting, and interview coaching.
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - API token protection for the OpenClaw endpoint.
@@ -26,6 +27,29 @@ uvicorn app.main:app --reload
 ```
 
 Open Swagger UI at `http://127.0.0.1:8000/docs`.
+
+## Optional Live CrewAI Mode
+
+CrewAI currently requires Python `>=3.10,<3.14`, so use Python 3.12 or 3.13 for live agent execution:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev,ai]"
+```
+
+Then set:
+
+```env
+AGENT_WORKFLOW_MODE=crewai
+LLM_PROVIDER=vertex
+VERTEX_PROJECT_ID=alien-slice-499511-f8
+VERTEX_REGION=global
+LLM_MODEL=gemini-3.5-flash
+CREWAI_LLM_MODEL=google/gemini-3.5-flash
+```
+
+If CrewAI or the provider runtime is unavailable, the API returns the deterministic fallback report and adds a `crewai_unavailable` validation warning instead of failing the analysis request.
 
 ## Useful Commands
 
@@ -59,7 +83,7 @@ The deterministic matcher and validator are the source of truth. Generated outpu
 ## Project Boundaries
 
 - `app/api` contains HTTP routes and dependencies only.
-- `app/services` contains deterministic parsing, matching, agent workflow fallback, report generation, and validation.
+- `app/services` contains deterministic parsing, matching, optional CrewAI execution, report generation, and validation.
 - `app/schemas/agent.py` defines structured agent workflow output contracts.
 - `app/repositories` owns persistence operations.
 - `app/data/skill_dictionary.json` owns the deterministic skill dictionary.

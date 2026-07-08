@@ -31,7 +31,7 @@ def openclaw_command(
         )
 
     analysis_request = _analysis_request_from_args(resume.id, request.args)
-    response = analyze_job(db, analysis_request)
+    response = analyze_job(db, analysis_request, settings)
     markdown = get_report_markdown(db, response.report_id)
     return OpenClawCommandResponse(
         status=response.status,

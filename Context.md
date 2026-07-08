@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, CrewAI-ready deterministic agent workflow boundary, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
+- Current state: four-folder workspace created; backend foundation, optional live CrewAI structured-output workflow adapter with deterministic fallback, project-local OpenClaw `/job` skill, and initial Next.js WebChat/dashboard workbench implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -33,6 +33,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/schemas/agent.py`
   - `Backend/app/services/*.py`
   - `Backend/app/services/agent_workflow.py`
+  - `Backend/app/services/crewai_workflow.py`
   - `Backend/app/data/skill_dictionary.json`
   - `Backend/migrations/*.py`
   - `Backend/tests/*.py`
@@ -54,6 +55,8 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - OpenClaw local config exists at `~/.openclaw/openclaw.json`; the included Google plugin is enabled.
 - Google Vertex selected as the current OpenClaw provider path (`google-vertex`) with default model `google-vertex/gemini-3.5-flash`.
 - Canonical local LLM env names are `LLM_PROVIDER=vertex`, `VERTEX_PROJECT_ID=alien-slice-499511-f8`, `VERTEX_REGION=global`, and `LLM_MODEL=gemini-3.5-flash`.
+- Backend workflow mode is controlled by `AGENT_WORKFLOW_MODE`, defaulting to `deterministic_fallback`; `crewai` enables live CrewAI structured-output sections when the runtime is available.
+- Live CrewAI mode uses `CREWAI_LLM_MODEL`, `CREWAI_MAX_ITER`, `CREWAI_TIMEOUT_SECONDS`, and `CREWAI_TEMPERATURE`.
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
 - OpenClaw Gateway service is not installed as a daemon; foreground local startup is handled by `Ai services/openclaw/scripts/start_local_gateway.sh`.
 - Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, and lucide-react.
@@ -183,9 +186,19 @@ Completed OpenClaw Gateway and Vertex onboarding slice:
 - Verified Vertex ADC and the selected model with a direct Google Vertex REST generation smoke.
 - Verified the Gateway starts on loopback, serves the Control UI, and executes the `/job` skill through `openclaw agent` after repairing the local CLI device pairing scope.
 
+Completed optional live CrewAI workflow adapter slice:
+
+- Verified current official CrewAI docs before implementation; live CrewAI requires Python `>=3.10,<3.14` and supports direct agent kickoff with typed Pydantic response formats.
+- Added `Backend/app/services/crewai_workflow.py` with bounded CrewAI agents for resume match explanation, cover letter drafting, and interview coaching.
+- Kept deterministic parsing, matching, ATS bullets/keywords, and final validation as the source of truth.
+- Added safe fallback when CrewAI is missing, provider config is incomplete, or the runtime uses unsupported Python; fallback returns the deterministic report with a `crewai_unavailable` warning.
+- Added backend settings and `.env.example` values for `AGENT_WORKFLOW_MODE`, `CREWAI_LLM_MODEL`, `CREWAI_MAX_ITER`, `CREWAI_TIMEOUT_SECONDS`, and `CREWAI_TEMPERATURE`.
+- Added an optional `ai` dependency extra for `crewai[gemini]` on Python `<3.14`.
+- Routed `/jobs/analyze` and `/chat/openclaw` through app settings so workflow mode is controlled by the active FastAPI configuration.
+
 Next implementation scope:
 
-- Verify current CrewAI package/API docs, then replace or extend the deterministic fallback with live CrewAI structured-output agents.
+- Create a Python 3.12 or 3.13 backend environment, install `.[dev,ai]`, and run a live CrewAI + Vertex smoke through `/jobs/analyze`.
 - Add backend dependency lock when finalizing local Python version/tooling.
 - Add dashboard report export polish and visual regression/browser automation when the UI flow stabilizes.
 
@@ -193,10 +206,9 @@ Next implementation scope:
 
 - Backend dependency lock does not exist yet; frontend `package-lock.json` exists.
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
-- CrewAI APIs should be verified against current official docs at `https://docs.crewai.com/` before live integration.
+- Live CrewAI API behavior was implemented against the current official docs, but provider execution still needs a Python 3.12/3.13 smoke test.
 - OpenClaw APIs should be verified against current official docs before live integration.
-- Python 3.14 is installed locally, but Python 3.12 is the safer target for dependency compatibility.
-- Live CrewAI/provider-backed execution is not implemented yet; current workflow uses deterministic fallback contracts.
+- Python 3.14 is installed locally, but CrewAI live mode needs a Python 3.12/3.13 environment for provider-backed execution.
 - Background queue, caching, metrics, and visual browser regression tests are not implemented yet.
 
 ## Verification Evidence
@@ -205,7 +217,7 @@ Latest verification run: 2026-07-08
 
 | Check | Command | Result |
 |---|---|---|
-| Tests | `cd Backend && .venv/bin/pytest` | Passed: 15 passed, 1 Starlette/httpx deprecation warning |
+| Tests | `cd Backend && .venv/bin/pytest` | Passed: 17 passed, 1 Starlette/httpx deprecation warning |
 | Lint | `cd Backend && .venv/bin/ruff format app tests scripts migrations && .venv/bin/ruff check .` | Passed |
 | Compile | `cd Backend && .venv/bin/python -m compileall app tests scripts` | Passed |
 | Migration | `cd Backend && DATABASE_URL=sqlite:///./.local/data/migration-check.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed |
@@ -232,6 +244,8 @@ Latest verification run: 2026-07-08
 | Backend Vertex settings | `cd Backend && .venv/bin/pytest tests/test_settings.py` | Passed through full backend pytest run |
 | OpenClaw device pairing repair | `./Ai services/openclaw/scripts/repair_cli_device_pairing.sh --yes` | Passed: local CLI device approved scopes include `operator.write` and `operator.pairing`; pending requests cleared |
 | OpenClaw agent CLI smoke | `openclaw agent --message "/job paste:..." --json` | Passed: Gateway RPC accepted the request and returned a ResumePilot job fit report |
+| CrewAI workflow focused tests | `cd Backend && .venv/bin/pytest tests/test_agent_workflow.py tests/test_settings.py` | Passed: 4 passed, 1 Starlette/httpx deprecation warning |
+| Golden evals after CrewAI adapter | `cd Backend && .venv/bin/python scripts/run_golden_evals.py` | Passed: 20 pairs evaluated |
 
 ## Change Log
 
@@ -288,6 +302,10 @@ Latest verification run: 2026-07-08
 - Verified Vertex ADC direct model access and documented the remaining OpenClaw local device pairing blocker.
 - Added a guarded OpenClaw CLI device pairing repair script and used it to resolve the local scope-upgrade loop.
 - Verified `openclaw agent` can execute `/job paste:...` through the running Gateway with Vertex `gemini-3.5-flash`.
+- Verified current official CrewAI docs for typed direct agent kickoff and Python runtime support before live workflow implementation.
+- Added an optional live CrewAI structured-output adapter behind `AGENT_WORKFLOW_MODE=crewai`.
+- Added safe deterministic fallback with a `crewai_unavailable` warning for missing CrewAI, unsupported Python, or incomplete provider config.
+- Added backend settings, docs, optional dependency extra, and tests for CrewAI mode success/fallback behavior.
 
 ## Maintenance Rule
 

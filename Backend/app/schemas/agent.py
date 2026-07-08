@@ -18,6 +18,7 @@ class AgentWorkflowMode(StrEnum):
 
 class AgentStepName(StrEnum):
     jd_parser = "jd_parser"
+    crewai_runtime = "crewai_runtime"
     resume_match = "resume_match"
     ats_optimizer = "ats_optimizer"
     cover_letter = "cover_letter"

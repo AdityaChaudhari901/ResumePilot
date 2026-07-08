@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.schemas.agent import AgentWorkflowMode
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -31,6 +33,14 @@ class Settings(BaseSettings):
     vertex_project_id: str | None = Field(default=None, alias="VERTEX_PROJECT_ID")
     vertex_region: str = Field(default="global", alias="VERTEX_REGION")
     llm_model: str = Field(default="gemini-3.5-flash", alias="LLM_MODEL")
+    agent_workflow_mode: AgentWorkflowMode = Field(
+        default=AgentWorkflowMode.deterministic_fallback,
+        alias="AGENT_WORKFLOW_MODE",
+    )
+    crewai_llm_model: str | None = Field(default=None, alias="CREWAI_LLM_MODEL")
+    crewai_max_iter: int = Field(default=2, ge=1, le=10, alias="CREWAI_MAX_ITER")
+    crewai_timeout_seconds: int = Field(default=60, ge=10, le=300, alias="CREWAI_TIMEOUT_SECONDS")
+    crewai_temperature: float = Field(default=0.2, ge=0, le=1, alias="CREWAI_TEMPERATURE")
 
     allowed_resume_extensions: frozenset[str] = frozenset(
         {".pdf", ".docx", ".txt", ".md", ".markdown"}
@@ -49,7 +59,7 @@ class Settings(BaseSettings):
             raise ValueError("value cannot be empty")
         return normalized
 
-    @field_validator("vertex_project_id")
+    @field_validator("vertex_project_id", "crewai_llm_model")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:

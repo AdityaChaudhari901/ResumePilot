@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_cached_settings
 from app.db.models import AnalysisRecord, JobRecord, ResumeRecord
 from app.repositories.analyses import AnalysisRepository
 from app.repositories.jobs import JobRepository
@@ -41,7 +42,12 @@ def create_resume_from_upload(db: Session, upload: StoredUpload) -> ResumeRecord
     return resumes.save(record)
 
 
-def analyze_job(db: Session, request: JobAnalysisRequest) -> JobAnalysisResponse:
+def analyze_job(
+    db: Session,
+    request: JobAnalysisRequest,
+    settings: Settings | None = None,
+) -> JobAnalysisResponse:
+    resolved_settings = settings or get_cached_settings()
     resumes = ResumeRepository(db)
     jobs = JobRepository(db)
     analyses = AnalysisRepository(db)
@@ -74,6 +80,7 @@ def analyze_job(db: Session, request: JobAnalysisRequest) -> JobAnalysisResponse
         resume=resume,
         job=job,
         match=match,
+        settings=resolved_settings,
     )
     report = workflow_result.report
     markdown = report_to_markdown(report)
