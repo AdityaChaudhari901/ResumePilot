@@ -16,7 +16,6 @@ import { ReportViewer } from "@/features/dashboard/components/report-viewer";
 import { ResumeProfileReviewCard } from "@/features/dashboard/components/resume-profile-review-card";
 import { ResumeUploadCard } from "@/features/dashboard/components/resume-upload-card";
 import { UsageStatusCard } from "@/features/dashboard/components/usage-status-card";
-import { SAMPLE_JOB_TEXT } from "@/features/dashboard/constants";
 import type {
   AgentWorkflowTrace,
   ApplicationReport,
@@ -109,7 +108,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [jobText, setJobText] = useState("");
+  const [jobUrl, setJobUrl] = useState("");
   const [openclaw, setOpenclaw] = useState<OpenClawStatus | null>(null);
   const [report, setReport] = useState<ApplicationReport | null>(null);
   const [reportHistory, setReportHistory] = useState<ReportHistoryItem[]>([]);
@@ -212,6 +211,14 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     setWorkflowTrace(null);
 
     try {
+      const trimmedJobUrl = jobUrl.trim();
+
+      if (!isHttpUrl(trimmedJobUrl)) {
+        setErrorMessage("Enter a valid public http(s) job posting URL.");
+        setIsAnalyzing(false);
+        return;
+      }
+
       const response = await fetch("/api/jobs/analyze", {
         method: "POST",
         headers: {
@@ -219,7 +226,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         },
         body: JSON.stringify({
           resume_id: resume.resume_id,
-          job_text: jobText,
+          job_text: null,
+          job_url: trimmedJobUrl,
           company: company || null,
           role: role || null
         })
@@ -309,7 +317,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
                 Application review console
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-                Upload a resume, compare it with a job description, and inspect the validated
+                Upload a resume, compare it with a job posting URL, and inspect the validated
                 report before moving the same flow into OpenClaw WebChat.
               </p>
             </div>
@@ -364,12 +372,12 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             <JobAnalysisCard
               company={company}
               isAnalyzing={isAnalyzing}
-              jobText={jobText}
+              jobUrl={jobUrl}
               onCompanyChange={setCompany}
-              onJobTextChange={setJobText}
+              onJobUrlChange={setJobUrl}
               onRoleChange={setRole}
               onSampleJob={() => {
-                setJobText(SAMPLE_JOB_TEXT);
+                setJobUrl(new URL("/sample-job-posting.html", window.location.origin).toString());
                 setCompany("NovaHire AI");
                 setRole("Backend Engineer");
               }}
@@ -387,4 +395,13 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       </div>
     </main>
   );
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsedUrl = new URL(value);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
 }

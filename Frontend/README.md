@@ -13,7 +13,7 @@ Next.js dashboard for the local ResumePilot MVP.
 ## Current dashboard capabilities
 
 - Resume upload through the same-origin `/api/resumes/upload` proxy.
-- Job analysis through `/api/jobs/analyze`.
+- Job analysis through `/api/jobs/analyze` using a public job posting URL.
 - Report viewing with JSON, Markdown, workflow trace timings/runtime metadata, provider token/cost estimates, DOCX, LaTeX `.tex`, and PDF downloads.
 - OpenClaw Gateway/provider readiness status.
 
@@ -54,9 +54,9 @@ npm run test:e2e
 
 The smoke command builds the frontend, starts FastAPI on `127.0.0.1:8040`,
 starts the production Next.js server on `127.0.0.1:3040`, uploads the backend
-sample resume, analyzes the sample job, verifies workflow trace timing and
-Markdown/DOCX/LaTeX/PDF exports, and captures desktop/mobile screenshots under
-`Frontend/.local/playwright-results`.
+sample resume, analyzes the sample job, verifies the job URL request contract,
+checks workflow trace timing and Markdown/DOCX/LaTeX/PDF exports, and captures
+desktop/mobile screenshots under `Frontend/.local/playwright-results`.
 
 Override ports with `RESUMEPILOT_E2E_BACKEND_PORT` and
 `RESUMEPILOT_E2E_FRONTEND_PORT` if those defaults are occupied.

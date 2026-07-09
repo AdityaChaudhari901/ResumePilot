@@ -6,6 +6,9 @@ const RESUME_FIXTURE = path.resolve(
   process.cwd(),
   "../Backend/evals/resumes/backend_fresher.md"
 );
+const SAMPLE_JOB_POSTING_PATH = "/sample-job-posting.html";
+const BACKEND_PLATFORM_JOB_PATH = "/backend-platform-job.html";
+const DATA_API_JOB_PATH = "/data-api-job.html";
 
 test("dashboard demo flow renders report and validates exports", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
@@ -47,6 +50,40 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   await captureDashboardScreenshot(page, testInfo, "dashboard-mobile.png");
 });
 
+test("dashboard sends a job posting URL analysis request", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto("/");
+
+  await page.getByLabel("Resume file").setInputFiles(RESUME_FIXTURE);
+  await page.getByRole("button", { name: "Upload" }).click();
+  await expect(page.getByText(/Resume ID \d+/)).toBeVisible({ timeout: 15_000 });
+
+  const jobUrl = "https://example.com/jobs/backend-engineer";
+  const capturedPayloads: Record<string, unknown>[] = [];
+
+  await page.route("**/api/jobs/analyze", async (route) => {
+    capturedPayloads.push(
+      JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>
+    );
+    await route.fulfill({
+      body: JSON.stringify({ detail: "mocked URL analysis request" }),
+      contentType: "application/json",
+      status: 400
+    });
+  });
+
+  await page.getByRole("textbox", { name: "Job posting URL" }).fill(jobUrl);
+  await page.getByRole("textbox", { name: "Company" }).fill("Example");
+  await page.getByRole("textbox", { name: "Role" }).fill("Backend Engineer");
+  await page.getByRole("button", { name: "Analyze" }).click();
+
+  await expect(page.getByText("mocked URL analysis request")).toBeVisible();
+  await expect.poll(() => capturedPayloads[0]?.job_url).toBe(jobUrl);
+  expect(capturedPayloads[0]?.job_text).toBeNull();
+  expect(capturedPayloads[0]?.company).toBe("Example");
+  expect(capturedPayloads[0]?.role).toBe("Backend Engineer");
+});
+
 test("report ledger reopens the selected saved report accurately", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/");
@@ -58,33 +95,13 @@ test("report ledger reopens the selected saved report accurately", async ({ page
   const firstReportId = await analyzeJob(page, {
     company: "Ledger Labs",
     role: "Backend Platform Engineer",
-    text: `Role: Backend Platform Engineer
-Company: Ledger Labs
-
-Requirements:
-- Required Python experience.
-- Required FastAPI experience.
-- Required SQL database experience.
-
-Responsibilities:
-- Build REST APIs for internal application workflows.
-- Improve test coverage for backend services.`
+    url: jobPostingUrl(page, BACKEND_PLATFORM_JOB_PATH)
   });
 
   const secondReportId = await analyzeJob(page, {
     company: "Insight Works",
     role: "Data API Engineer",
-    text: `Role: Data API Engineer
-Company: Insight Works
-
-Requirements:
-- Required Python experience.
-- Required REST API development experience.
-- Preferred Pytest experience.
-
-Responsibilities:
-- Build API integrations for analytics workflows.
-- Work with SQL-backed datasets.`
+    url: jobPostingUrl(page, DATA_API_JOB_PATH)
   });
 
   expect(secondReportId).not.toBe(firstReportId);
@@ -125,8 +142,8 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
   await page.getByRole("button", { name: "Sample" }).click();
   await expect(page.getByRole("textbox", { name: "Company" })).toHaveValue("NovaHire AI");
   await expect(page.getByRole("textbox", { name: "Role" })).toHaveValue("Backend Engineer");
-  await expect(page.getByRole("textbox", { name: "Job description" })).toHaveValue(
-    /Required Python/
+  await expect(page.getByRole("textbox", { name: "Job posting URL" })).toHaveValue(
+    jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH)
   );
 
   await page.getByRole("button", { name: "Analyze" }).click();
@@ -153,19 +170,23 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
 interface AnalyzeJobInput {
   company: string;
   role: string;
-  text: string;
+  url: string;
 }
 
 async function analyzeJob(page: Page, input: AnalyzeJobInput): Promise<string> {
   await page.getByRole("textbox", { name: "Company" }).fill(input.company);
   await page.getByRole("textbox", { name: "Role" }).fill(input.role);
-  await page.getByRole("textbox", { name: "Job description" }).fill(input.text);
+  await page.getByRole("textbox", { name: "Job posting URL" }).fill(input.url);
   await page.getByRole("button", { name: "Analyze" }).click();
   await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
     timeout: 30_000
   });
   const latexHref = await page.getByRole("link", { name: "LaTeX" }).getAttribute("href");
   return extractReportId(latexHref);
+}
+
+function jobPostingUrl(page: Page, pathName: string): string {
+  return new URL(pathName, page.url()).toString();
 }
 
 interface ExpectedExport {
