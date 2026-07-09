@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 
+import { shouldUseClerkProvider } from "@/lib/auth-runtime";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,7 +21,7 @@ export default function RootLayout({
     </html>
   );
 
-  if (process.env.RESUMEPILOT_AUTH_PROVIDER === "clerk") {
+  if (shouldUseClerkProvider(process.env)) {
     return <ClerkProvider>{document}</ClerkProvider>;
   }
 

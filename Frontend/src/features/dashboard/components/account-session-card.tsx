@@ -38,7 +38,7 @@ export function AccountSessionCard({ session }: AccountSessionCardProps) {
           <p className="text-sm leading-6 text-muted-foreground">
             {session?.reason ?? "Sign in to continue."}
           </p>
-          {session?.provider === "clerk" ? (
+          {session?.provider === "clerk" && session.canSignIn ? (
             <ButtonLink
               className="w-full"
               href="/sign-in"

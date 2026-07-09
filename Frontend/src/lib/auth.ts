@@ -1,12 +1,20 @@
 import "server-only";
 
 import { createHmac } from "node:crypto";
+import { headers } from "next/headers";
 
-export type AuthProvider = "local" | "clerk" | "trusted_headers";
+import {
+  isProductionAuthRuntime,
+  resolveAuthRuntimeConfig,
+  type ActiveAuthProvider,
+  type AuthProvider
+} from "@/lib/auth-runtime";
+
+export type { AuthProvider } from "@/lib/auth-runtime";
 
 export interface AuthenticatedSession {
   isAuthenticated: true;
-  provider: AuthProvider;
+  provider: ActiveAuthProvider;
   externalId: string;
   email: string | null;
   displayName: string | null;
@@ -16,6 +24,7 @@ export interface AnonymousSession {
   isAuthenticated: false;
   provider: AuthProvider;
   reason: string;
+  canSignIn: boolean;
 }
 
 export type AuthSession = AuthenticatedSession | AnonymousSession;
@@ -27,21 +36,34 @@ const AUTH_TIMESTAMP_HEADER = "x-resumepilot-auth-timestamp";
 const AUTH_SIGNATURE_HEADER = "x-resumepilot-auth-signature";
 
 export async function getAuthSession(request?: Request): Promise<AuthSession> {
-  const provider = getAuthProvider();
+  const authConfig = resolveAuthRuntimeConfig(process.env);
+  if (!authConfig.isUsable) {
+    return anonymousSession(authConfig.provider, authConfig.reason ?? "Authentication is not configured.", {
+      canSignIn: false
+    });
+  }
+
+  const provider = authConfig.provider;
   if (provider === "local") {
     return localSession();
   }
   if (provider === "trusted_headers") {
     return trustedHeaderSession(request);
   }
-  return clerkSession();
+  if (provider === "clerk") {
+    return clerkSession();
+  }
+  return anonymousSession("invalid", "Authentication provider is not configured.", {
+    canSignIn: false
+  });
 }
 
 export function authFailureResponse(session: AnonymousSession): Response {
   return Response.json(
     {
       detail: session.reason,
-      provider: session.provider
+      provider: session.provider,
+      canSignIn: session.canSignIn
     },
     {
       status: 401,
@@ -65,7 +87,7 @@ export function signedBackendIdentityHeaders(session: AuthenticatedSession): Hea
 
   const secret = process.env.AUTH_TRUSTED_PROXY_SECRET?.trim();
   if (!secret) {
-    if (session.provider === "local") {
+    if (session.provider === "local" && !isProductionAuthRuntime(process.env)) {
       return headers;
     }
     throw new Error("AUTH_TRUSTED_PROXY_SECRET is required for authenticated backend proxy calls.");
@@ -86,14 +108,6 @@ export function signedBackendIdentityHeaders(session: AuthenticatedSession): Hea
   return headers;
 }
 
-function getAuthProvider(): AuthProvider {
-  const configured = (process.env.RESUMEPILOT_AUTH_PROVIDER ?? "local").trim().toLowerCase();
-  if (configured === "local" || configured === "clerk" || configured === "trusted_headers") {
-    return configured;
-  }
-  return "local";
-}
-
 function localSession(): AuthenticatedSession {
   const externalId = process.env.DEV_USER_EXTERNAL_ID?.trim() || "local-dev-user";
   const email = normalizeOptional(process.env.DEV_USER_EMAIL);
@@ -107,61 +121,56 @@ function localSession(): AuthenticatedSession {
   };
 }
 
-function trustedHeaderSession(request: Request | undefined): AuthSession {
-  if (!request) {
-    return {
-      isAuthenticated: false,
-      provider: "trusted_headers",
-      reason: "Trusted identity headers are unavailable for this request."
-    };
-  }
-
-  const externalId = normalizeOptional(request.headers.get("x-resumepilot-auth-user"));
+async function trustedHeaderSession(request: Request | undefined): Promise<AuthSession> {
+  const requestHeaders = request?.headers ?? await headers();
+  const externalId = normalizeOptional(requestHeaders.get("x-resumepilot-auth-user"));
   if (!externalId) {
-    return {
-      isAuthenticated: false,
-      provider: "trusted_headers",
-      reason: "Missing authenticated user context."
-    };
+    return anonymousSession("trusted_headers", "Missing authenticated user context.", {
+      canSignIn: false
+    });
   }
 
   return {
     isAuthenticated: true,
     provider: "trusted_headers",
     externalId,
-    email: normalizeOptional(request.headers.get("x-resumepilot-auth-email")),
-    displayName: normalizeOptional(request.headers.get("x-resumepilot-auth-name"))
+    email: normalizeOptional(requestHeaders.get("x-resumepilot-auth-email")),
+    displayName: normalizeOptional(requestHeaders.get("x-resumepilot-auth-name"))
   };
 }
 
 async function clerkSession(): Promise<AuthSession> {
-  const { auth, currentUser } = await import("@clerk/nextjs/server");
-  const authState = await auth();
-  if (!authState.isAuthenticated || !authState.userId) {
+  try {
+    const { auth, currentUser } = await import("@clerk/nextjs/server");
+    const authState = await auth();
+    if (!authState.isAuthenticated || !authState.userId) {
+      return anonymousSession("clerk", "Sign in to use ResumePilot.", {
+        canSignIn: true
+      });
+    }
+
+    const user = await currentUser().catch(() => null);
+    const email =
+      user?.primaryEmailAddress?.emailAddress ??
+      user?.emailAddresses[0]?.emailAddress ??
+      null;
+    const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
+    const displayName =
+      user?.fullName ??
+      (fullName || email || authState.userId);
+
     return {
-      isAuthenticated: false,
       provider: "clerk",
-      reason: "Sign in to use ResumePilot."
+      isAuthenticated: true,
+      externalId: `clerk:${authState.userId}`,
+      email,
+      displayName
     };
+  } catch {
+    return anonymousSession("clerk", "Clerk authentication is not available.", {
+      canSignIn: false
+    });
   }
-
-  const user = await currentUser();
-  const email =
-    user?.primaryEmailAddress?.emailAddress ??
-    user?.emailAddresses[0]?.emailAddress ??
-    null;
-  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
-  const displayName =
-    user?.fullName ??
-    (fullName || email || authState.userId);
-
-  return {
-    isAuthenticated: true,
-    provider: "clerk",
-    externalId: `clerk:${authState.userId}`,
-    email,
-    displayName
-  };
 }
 
 function signIdentity({
@@ -188,4 +197,17 @@ function normalizeOptional(value: string | null | undefined): string | null {
   }
   const normalized = value.trim();
   return normalized || null;
+}
+
+function anonymousSession(
+  provider: AuthProvider,
+  reason: string,
+  options: { canSignIn: boolean }
+): AnonymousSession {
+  return {
+    isAuthenticated: false,
+    provider,
+    reason,
+    canSignIn: options.canSignIn
+  };
 }

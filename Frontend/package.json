@@ -9,6 +9,7 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "typecheck": "tsc --noEmit",
+    "test:auth-runtime": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-auth-runtime.mts",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:install": "playwright install chromium"
   },

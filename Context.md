@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, production startup safety checks, Docker Compose production-like stack, signed BFF-to-FastAPI user identity boundary with Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, tenant-scoped report history and resume profile review APIs, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with account/session visibility, usage visibility, report ledger, resume extraction review, evidence-strength labels, and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, production startup safety checks, Docker Compose production-like stack, signed BFF-to-FastAPI user identity boundary with explicit production local-auth opt-in, Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, tenant-scoped report history and resume profile review APIs, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with account/session visibility, usage visibility, report ledger, resume extraction review, evidence-strength labels, and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -264,6 +264,10 @@ Completed production auth boundary foundation:
 - Added `AUTH_TRUSTED_PROXY_SECRET` and `AUTH_SIGNATURE_TTL_SECONDS` settings.
 - Kept raw identity headers available only for local/dev mode; when `AUTH_REQUIRED=true`, unsigned user headers are rejected unless the trusted proxy secret is configured.
 - Added frontend server-side auth session adapter with `local`, `clerk`, and `trusted_headers` provider modes.
+- Added a shared frontend auth runtime resolver that fails closed for invalid auth providers, production local auth without explicit opt-in, missing Clerk keys, and missing BFF signing secrets.
+- Marked the dashboard root route as dynamic Node runtime so protected session state is not statically generated.
+- Updated trusted-header dashboard sessions to read Next request headers when no route-handler `Request` object is available.
+- Kept Clerk `auth()` as the session authority while treating `currentUser()` profile lookup as optional enrichment so a profile fetch failure does not block an authenticated session.
 - Added Clerk dependency, Clerk `src/proxy.ts`, `ClerkProvider` wiring, and `/sign-in` plus `/sign-up` App Router pages for future hosted auth.
 - Updated all tenant data BFF routes and OpenClaw control/status routes to require an app session and forward signed identity headers to FastAPI.
 - Added `/api/auth/session` and a dashboard account/session card.
@@ -442,6 +446,13 @@ Latest verification run: 2026-07-09
 
 | Check | Command | Result |
 |---|---|---|
+| Frontend auth runtime config | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:auth-runtime` | Passed: local dev allowed, production local blocked unless explicitly enabled, Clerk/trusted-header modes require signing secrets and keys |
+| Frontend lint after auth boundary update | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
+| Frontend typecheck after auth boundary update | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Frontend production build after auth boundary update | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run build` | Passed: dashboard root route is dynamic (`ƒ /`) |
+| Docker Compose config after auth boundary update | `docker compose --env-file .env.production.example config --quiet` | Passed |
+| Dashboard Playwright smoke after auth boundary update | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 3 Chromium dashboard tests |
+| Docker stack health after interrupted rebuild attempt | `docker compose --env-file .env.production.example ps && curl -fsS http://127.0.0.1:8050/health && curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3050/` | Passed: existing Postgres/backend/frontend containers healthy, backend health ok, frontend returned 200; frontend image rebuild was interrupted after quiet `npm ci` stall |
 | GitHub Actions failure inspection | `gh run view 28966835429 --repo AdityaChaudhari901/ResumePilot --log-failed` | Failed before repair: backend `ruff format app tests scripts migrations --check` reported 5 files needing formatting |
 | Backend CI formatting repair | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check` | Passed: 92 files already formatted |
 | Backend CI lint after repair | `cd Backend && .venv/bin/ruff check .` | Passed: all checks passed |
@@ -543,6 +554,8 @@ Latest verification run: 2026-07-09
 
 ### 2026-07-09
 
+- Hardened the frontend auth runtime boundary so production local auth requires explicit private-stack opt-in, public Clerk/trusted-header modes require signed BFF configuration, and auth config failures do not show misleading sign-in actions.
+- Marked the dashboard root as dynamic Node runtime, added CI-covered auth-runtime checks, updated Playwright startup env, and documented the public-user auth contract in deployment docs and env examples.
 - Added the application workspace slice with tenant-scoped report history, parsed resume profile review, dashboard report ledger, extraction review panel, and evidence-strength labels in the report viewer.
 - Verified the workspace slice with backend focused tests, full backend pytest, backend format/lint, frontend lint/typecheck/build, and Playwright desktop/mobile browser smoke.
 - Repaired the failed GitHub Actions backend quality gate by applying Ruff formatting/import ordering to backend models, migration, and tests, then wrapping long report-generator fixture literals.
@@ -688,7 +701,8 @@ Latest verification run: 2026-07-09
 - Added a GitHub Actions deployment-config job that validates `docker-compose.yml` with `.env.production.example`.
 - Added tests for readiness success/failure, Alembic-upgraded database readiness, production default settings, and production config validation.
 - Verified targeted readiness/settings/auth tests, full backend pytest, Ruff format/check, Python compileall, golden evals, backend quality gate, frontend lint/typecheck/build, Playwright dashboard E2E, and Docker Compose config validation.
-- Attempted Docker Compose image build, but local Docker daemon was not running at `unix:///Users/adityachaudhari/.colima/default/docker.sock`, so image build verification remains pending.
+- Restarted Colima with the Docker runtime after the socket became unreachable, verified Docker Engine client/server connectivity, and built the `resumepilot-backend` and `resumepilot-frontend` images successfully.
+- Started the production-like Docker Compose stack with generated local-only secrets on host ports `8050` and `3050`; verified `GET /health`, `GET /ready` with database and Alembic head checks, frontend `200 OK`, and healthy Postgres/backend/frontend containers.
 
 ## Maintenance Rule
 

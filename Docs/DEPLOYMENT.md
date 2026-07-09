@@ -30,8 +30,16 @@ PY
 ```
 
 For a private single-user stack, `RESUMEPILOT_AUTH_PROVIDER=local` is acceptable.
-Before opening the app to real users, switch to `clerk` or `trusted_headers` and
-keep `AUTH_REQUIRED=true` on the backend.
+Because Next.js runs with `NODE_ENV=production` in Compose, private local mode
+also requires `RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION=true` and
+`AUTH_TRUSTED_PROXY_SECRET`.
+
+Before opening the app to real users, switch to `RESUMEPILOT_AUTH_PROVIDER=clerk`
+or `trusted_headers`, set `RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION=false`, and
+keep `AUTH_REQUIRED=true` on the backend. Clerk mode requires
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and the shared
+`AUTH_TRUSTED_PROXY_SECRET` so the Next.js BFF can sign tenant identity headers
+for FastAPI.
 
 ## Start
 

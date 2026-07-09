@@ -101,6 +101,9 @@ jobs:
       - name: Typecheck frontend
         run: npm run typecheck
 
+      - name: Test frontend auth runtime config
+        run: npm run test:auth-runtime
+
   deployment-config:
     name: Deployment config
     runs-on: ubuntu-latest

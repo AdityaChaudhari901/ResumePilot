@@ -1,8 +1,10 @@
 import { SignIn } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 
+import { isClerkAuthReady } from "@/lib/auth-runtime";
+
 export default function SignInPage() {
-  if (process.env.RESUMEPILOT_AUTH_PROVIDER !== "clerk") {
+  if (!isClerkAuthReady(process.env)) {
     redirect("/");
   }
 

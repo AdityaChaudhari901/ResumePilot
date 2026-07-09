@@ -1,3 +1,5 @@
+import type { AuthProvider } from "@/lib/auth-runtime";
+
 export interface ResumeUploadResponse {
   resume_id: number;
   candidate_name: string | null;
@@ -254,7 +256,7 @@ export interface UsageSummaryResponse {
   live_crewai_enabled: boolean;
 }
 
-export type AuthProvider = "local" | "clerk" | "trusted_headers";
+export type { AuthProvider };
 
 export type DashboardAuthSession =
   | {
@@ -268,4 +270,5 @@ export type DashboardAuthSession =
       isAuthenticated: false;
       provider: AuthProvider;
       reason: string;
+      canSignIn: boolean;
     };

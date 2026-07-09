@@ -42,6 +42,9 @@ export default defineConfig({
     {
       command: [
         `RESUMEPILOT_API_BASE_URL=${backendBaseUrl}`,
+        "RESUMEPILOT_AUTH_PROVIDER=local",
+        "RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION=true",
+        "AUTH_TRUSTED_PROXY_SECRET=test-auth-proxy-secret",
         `npm run start -- -H 127.0.0.1 -p ${frontendPort}`
       ].join(" "),
       reuseExistingServer,

@@ -2,6 +2,9 @@ import { AuthRequiredPanel } from "@/features/dashboard/components/auth-required
 import { DashboardShell } from "@/features/dashboard/components/dashboard-shell";
 import { getAuthSession } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export default async function Page() {
   const session = await getAuthSession();
   if (!session.isAuthenticated) {

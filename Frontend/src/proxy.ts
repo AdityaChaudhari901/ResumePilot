@@ -1,10 +1,12 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 
+import { shouldUseClerkProvider } from "@/lib/auth-runtime";
+
 const clerkProxy = clerkMiddleware();
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
-  if (process.env.RESUMEPILOT_AUTH_PROVIDER === "clerk") {
+  if (shouldUseClerkProvider(process.env)) {
     return clerkProxy(request, event);
   }
   return NextResponse.next();
