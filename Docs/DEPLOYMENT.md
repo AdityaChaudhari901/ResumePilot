@@ -29,6 +29,11 @@ for name in ["POSTGRES_PASSWORD", "AUTH_TRUSTED_PROXY_SECRET", "JOBCOPILOT_API_T
 PY
 ```
 
+Keep the same `POSTGRES_PASSWORD` for the lifetime of a persistent Compose
+volume. The official PostgreSQL image applies `POSTGRES_PASSWORD` only when the
+database volume is initialized; changing the env file later without rotating the
+database user password will make the backend fail authentication.
+
 For a private single-user stack, `RESUMEPILOT_AUTH_PROVIDER=local` is acceptable.
 Because Next.js runs with `NODE_ENV=production` in Compose, private local mode
 also requires `RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION=true` and
@@ -44,8 +49,11 @@ for FastAPI.
 ## Start
 
 ```bash
-docker compose --env-file .env.production up --build
+docker compose --env-file .env.production --progress=plain up --build
 ```
+
+The example env uses host ports `8050` for FastAPI and `3050` for Next.js to
+avoid common local conflicts on `8000` and `3000`.
 
 The backend service runs:
 
@@ -66,9 +74,9 @@ Production startup fails if:
 ## Health Checks
 
 ```bash
-curl -fsS http://127.0.0.1:8000/health
-curl -fsS http://127.0.0.1:8000/ready
-curl -fsS http://127.0.0.1:3000/
+curl -fsS http://127.0.0.1:8050/health
+curl -fsS http://127.0.0.1:8050/ready
+curl -fsS http://127.0.0.1:3050/
 ```
 
 `/health` proves the FastAPI process is alive. `/ready` proves the database is

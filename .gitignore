@@ -9,6 +9,11 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
+!.env.production.example
+!Backend/.env.example
+!Frontend/.env.example
 .local/
 node_modules/
 .next/
