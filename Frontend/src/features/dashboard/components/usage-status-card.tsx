@@ -13,16 +13,16 @@ interface UsageStatusCardProps {
 }
 
 const metricLabels: Record<UsageLimitMetric, string> = {
-  analyses: "Analyses",
+  analyses: "Analysis runs",
   exports: "Exports",
-  crewai_runs: "Live CrewAI"
+  crewai_runs: "Live CrewAI runs"
 };
 
 export function UsageStatusCard({ usage }: UsageStatusCardProps) {
   const planLabel = usage?.plan ? usage.plan.toUpperCase() : "FREE";
 
   return (
-    <Panel as="aside" eyebrow="Usage" title="Plan usage">
+    <Panel as="aside" eyebrow="Usage" title="Plan usage meter">
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-md border border-border bg-surface p-3">
@@ -33,14 +33,14 @@ export function UsageStatusCard({ usage }: UsageStatusCardProps) {
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Badge tone="primary">{planLabel}</Badge>
               <Badge tone={usage?.live_crewai_enabled ? "success" : "neutral"}>
-                {usage?.live_crewai_enabled ? "live CrewAI" : "fallback"}
+                {usage?.live_crewai_enabled ? "live CrewAI allowed" : "fallback mode"}
               </Badge>
             </div>
           </div>
           <div className="rounded-md border border-border bg-surface p-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Activity className="h-4 w-4 text-validation" aria-hidden="true" />
-              Estimated cost
+              Live LLM cost
             </div>
             <p className="mt-2 font-mono text-xl font-semibold tabular-nums">
               {formatCurrency(usage?.total_cost_estimate_usd ?? 0)}
@@ -64,6 +64,10 @@ export function UsageStatusCard({ usage }: UsageStatusCardProps) {
           <span aria-hidden="true">/</span>
           <span>{usage?.subscription_status ?? "inactive"}</span>
         </div>
+        <p className="rounded-md border border-border bg-surface p-3 text-xs leading-5 text-muted-foreground">
+          These counters enforce ResumePilot plan limits in the current app database. Stripe billing
+          is not connected yet.
+        </p>
       </div>
     </Panel>
   );

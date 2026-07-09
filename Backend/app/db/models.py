@@ -88,6 +88,31 @@ class AnalysisRecord(Base):
     job: Mapped[JobRecord] = relationship(back_populates="analyses")
 
 
+class ApplicationRecord(Base):
+    __tablename__ = "applications"
+    __table_args__ = (
+        Index("ix_applications_user_status_created", "user_id", "status", "created_at"),
+        Index("ix_applications_user_report", "user_id", "report_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    source_url: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reviewed_job_profile_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    resume_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
+    job_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
+    analysis_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
+    report_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
+    match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+    user: Mapped["UserRecord"] = relationship(back_populates="applications")
+
+
 class AuditEventRecord(Base):
     __tablename__ = "audit_events"
 
@@ -117,6 +142,7 @@ class UserRecord(Base):
     resumes: Mapped[list[ResumeRecord]] = relationship(back_populates="user")
     jobs: Mapped[list[JobRecord]] = relationship(back_populates="user")
     analyses: Mapped[list[AnalysisRecord]] = relationship(back_populates="user")
+    applications: Mapped[list[ApplicationRecord]] = relationship(back_populates="user")
     audit_events: Mapped[list[AuditEventRecord]] = relationship(back_populates="user")
     usage_events: Mapped[list["UsageEventRecord"]] = relationship(back_populates="user")
 

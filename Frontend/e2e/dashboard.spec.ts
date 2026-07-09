@@ -9,6 +9,7 @@ const RESUME_FIXTURE = path.resolve(
 const SAMPLE_JOB_POSTING_PATH = "/sample-job-posting.html";
 const BACKEND_PLATFORM_JOB_PATH = "/backend-platform-job.html";
 const DATA_API_JOB_PATH = "/data-api-job.html";
+const UNCLEAR_JOB_POSTING_PATH = "/unclear-job-posting.html";
 
 test("dashboard demo flow renders report and validates exports", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
@@ -54,11 +55,64 @@ test("dashboard sends a job posting URL analysis request", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/");
 
+  const jobUrl = "https://example.com/jobs/backend-engineer";
+  await page.route("**/api/jobs/preview", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        job_url: jobUrl,
+        profile: {
+          benefits: [],
+          company: "Example Co",
+          employment_type: null,
+          experience_level: null,
+          job_id: 0,
+          keywords: ["Python"],
+          location: null,
+          preferred_skills: [],
+          required_skills: [
+            {
+              confidence: "high",
+              evidence_text: "Required Python experience.",
+              id: "job_required_001",
+              importance: "required",
+              name: "Python"
+            }
+          ],
+          responsibilities: ["Build backend services."],
+          role_title: "Backend Engineer",
+          unclear_items: [],
+          warnings: []
+        },
+        parser: "generic_html",
+        quality_checks: [
+          {
+            code: "required_or_preferred_skills",
+            message: "Required or preferred skills were extracted.",
+            status: "pass"
+          }
+        ],
+        raw_text_char_count: 120,
+        status: "ready"
+      }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+
+  await page.getByRole("textbox", { name: "Job listing URL" }).fill(jobUrl);
+  await expect(page.getByRole("textbox", { name: "Company" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Role" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Review job evidence" }).click();
+  await expect(page.getByRole("heading", { name: "Review job evidence" })).toBeVisible();
+  await page.getByRole("textbox", { name: "Role" }).fill("Reviewed Backend Engineer");
+  await page.getByRole("button", { name: "Save and continue" }).click();
+
   await page.getByLabel("Resume file").setInputFiles(RESUME_FIXTURE);
   await page.getByRole("button", { name: "Upload" }).click();
-  await expect(page.getByText(/Resume ID \d+/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible({
+    timeout: 15_000
+  });
 
-  const jobUrl = "https://example.com/jobs/backend-engineer";
   const capturedPayloads: Record<string, unknown>[] = [];
 
   await page.route("**/api/jobs/analyze", async (route) => {
@@ -72,40 +126,61 @@ test("dashboard sends a job posting URL analysis request", async ({ page }) => {
     });
   });
 
-  await page.getByRole("textbox", { name: "Job posting URL" }).fill(jobUrl);
-  await page.getByRole("textbox", { name: "Company" }).fill("Example");
-  await page.getByRole("textbox", { name: "Role" }).fill("Backend Engineer");
-  await page.getByRole("button", { name: "Analyze" }).click();
+  await page.getByRole("button", { name: "Run AI analysis" }).click();
 
   await expect(page.getByText("mocked URL analysis request")).toBeVisible();
   await expect.poll(() => capturedPayloads[0]?.job_url).toBe(jobUrl);
   expect(capturedPayloads[0]?.job_text).toBeNull();
-  expect(capturedPayloads[0]?.company).toBe("Example");
-  expect(capturedPayloads[0]?.role).toBe("Backend Engineer");
+  expect(capturedPayloads[0]?.company).toBeNull();
+  expect(capturedPayloads[0]?.role).toBeNull();
+  expect(capturedPayloads[0]?.application_id).toEqual(expect.any(Number));
+  expect(capturedPayloads[0]?.reviewed_job_profile).toMatchObject({
+    company: "Example Co",
+    required_skills: [{ name: "Python" }],
+    role_title: "Reviewed Backend Engineer"
+  });
+});
+
+test("dashboard flags unclear job requirement extraction", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto("/");
+
+  await page.getByRole("textbox", { name: "Job listing URL" }).fill(
+    jobPostingUrl(page, UNCLEAR_JOB_POSTING_PATH)
+  );
+  await page.getByRole("button", { name: "Review job evidence" }).click();
+  await expect(page.getByRole("heading", { name: "Review job evidence" })).toBeVisible();
+  await expect(page.getByText("Job evidence needs review")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue with warning" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue with warning" }).click();
+  await uploadResume(page);
+  await runAiAnalysis(page);
+
+  await expect(page.getByText("Provisional score", { exact: true })).toBeVisible();
+  await expect(page.getByText("Needs job details", { exact: true })).toBeVisible();
+  await expect(page.getByText("Job details need review", { exact: true })).toBeVisible();
+  await expect(page.getByText("No evidence-backed matches yet", { exact: true })).toBeVisible();
+  await expect(page.getByText("Gaps not available", { exact: true })).toBeVisible();
+  await expect(page.getByText("No ATS keywords extracted", { exact: true })).toBeVisible();
 });
 
 test("report ledger reopens the selected saved report accurately", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/");
 
-  await page.getByLabel("Resume file").setInputFiles(RESUME_FIXTURE);
-  await page.getByRole("button", { name: "Upload" }).click();
-  await expect(page.getByText(/Resume ID \d+/)).toBeVisible({ timeout: 15_000 });
-
-  const firstReportId = await analyzeJob(page, {
-    company: "Ledger Labs",
-    role: "Backend Platform Engineer",
+  await enterJobListing(page, {
     url: jobPostingUrl(page, BACKEND_PLATFORM_JOB_PATH)
   });
+  await uploadResume(page);
+  const firstReportId = await runAiAnalysis(page);
 
   const secondReportId = await analyzeJob(page, {
-    company: "Insight Works",
-    role: "Data API Engineer",
     url: jobPostingUrl(page, DATA_API_JOB_PATH)
   });
 
   expect(secondReportId).not.toBe(firstReportId);
 
+  await page.getByText("Workspace review and system status").click();
   await expect(page.getByRole("button", { name: /Data API Engineer/ })).toHaveAttribute(
     "aria-current",
     "true"
@@ -124,29 +199,48 @@ test("report ledger reopens the selected saved report accurately", async ({ page
 
 async function completeDashboardDemoFlow(page: Page): Promise<string> {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Application review console" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Application workflow" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Job listing" })).toBeVisible();
+
+  await page.getByText("Workspace review and system status").click();
   await expect(page.getByRole("heading", { name: "Session" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Application pipeline" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Report ledger" })).toBeVisible();
-  await expect(page.getByText("No saved reports yet.")).toBeVisible();
   await expect(page.getByText("authenticated", { exact: true })).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Job listing URL" }).fill(
+    jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH)
+  );
+  await expect(page.getByRole("textbox", { name: "Company" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Role" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Job listing URL" })).toHaveValue(
+    jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH)
+  );
+  await page.getByRole("button", { name: "Review job evidence" }).click();
+  await expect(page.getByRole("heading", { name: "Review job evidence" })).toBeVisible();
+  await expect(page.getByText("Required skills")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "required skill name" }).first()).toHaveValue(
+    "Python"
+  );
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  await expect(page.getByRole("heading", { name: "Resume upload" })).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Backend Engineer" }).first()).toContainText(
+    "Reviewed"
+  );
 
   await page.getByLabel("Resume file").setInputFiles(RESUME_FIXTURE);
   await expect(page.getByText("backend_fresher.md")).toBeVisible();
 
   await page.getByRole("button", { name: "Upload" }).click();
-  await expect(page.getByText(/Resume ID \d+/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible();
+  await expect(page.getByText("Parse job evidence")).toBeVisible();
+
   await expect(page.getByRole("heading", { name: "Resume extraction" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Parsed skills" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Evidence ledger" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Sample" }).click();
-  await expect(page.getByRole("textbox", { name: "Company" })).toHaveValue("NovaHire AI");
-  await expect(page.getByRole("textbox", { name: "Role" })).toHaveValue("Backend Engineer");
-  await expect(page.getByRole("textbox", { name: "Job posting URL" })).toHaveValue(
-    jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH)
-  );
-
-  await page.getByRole("button", { name: "Analyze" }).click();
+  await page.getByRole("button", { name: "Run AI analysis" }).click();
   await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
     timeout: 30_000
   });
@@ -157,27 +251,60 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Workflow trace" })).toBeVisible();
   await expect(page.getByText(/Report \d+/).first()).toBeVisible();
-  await expect(page.getByText("Deterministic fallback")).toBeVisible();
+  await expect(page.getByText("Deterministic fallback", { exact: true })).toBeVisible();
   await expect(page.getByText(/\d+(?:\.\d)? (?:ms|s) total/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Plan usage" })).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Analyses usage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Plan usage meter" })).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Analysis runs usage" })).toBeVisible();
   await expect(page.getByRole("progressbar", { name: "Exports usage" })).toBeVisible();
+  await expect(page.getByRole("article").filter({ hasText: "Backend Engineer" }).first()).toContainText(
+    "Report ready"
+  );
+  await page.getByRole("button", { name: "Applied" }).first().click();
+  await expect(page.getByRole("article").filter({ hasText: "Backend Engineer" }).first()).toContainText(
+    "Applied"
+  );
+
+  const pageText = await page.locator("body").innerText();
+  expect(pageText).not.toMatch(/(?:summary|skills)_\d{3} ·/);
+  expect(pageText).toMatch(/(?:Project evidence|Work evidence|Resume summary|Skills section) #\d+/);
 
   const latexHref = await page.getByRole("link", { name: "LaTeX" }).getAttribute("href");
   return extractReportId(latexHref);
 }
 
 interface AnalyzeJobInput {
-  company: string;
-  role: string;
   url: string;
 }
 
 async function analyzeJob(page: Page, input: AnalyzeJobInput): Promise<string> {
-  await page.getByRole("textbox", { name: "Company" }).fill(input.company);
-  await page.getByRole("textbox", { name: "Role" }).fill(input.role);
-  await page.getByRole("textbox", { name: "Job posting URL" }).fill(input.url);
-  await page.getByRole("button", { name: "Analyze" }).click();
+  await enterJobListing(page, input);
+  return runAiAnalysis(page);
+}
+
+async function enterJobListing(page: Page, input: AnalyzeJobInput): Promise<void> {
+  const jobUrlInput = page.getByRole("textbox", { name: "Job listing URL" });
+  if (!(await jobUrlInput.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: "Edit job listing" }).click();
+  }
+
+  await jobUrlInput.fill(input.url);
+  await page.getByRole("button", { name: "Review job evidence" }).click();
+  await expect(page.getByRole("heading", { name: "Review job evidence" })).toBeVisible();
+  await page.getByRole("button", { name: /^(Save and continue|Continue with warning)$/ }).click();
+}
+
+async function uploadResume(page: Page): Promise<void> {
+  await expect(page.getByRole("heading", { name: "Resume upload" })).toBeVisible();
+  await page.getByLabel("Resume file").setInputFiles(RESUME_FIXTURE);
+  await page.getByRole("button", { name: "Upload" }).click();
+  await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible({
+    timeout: 15_000
+  });
+}
+
+async function runAiAnalysis(page: Page): Promise<string> {
+  await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible();
+  await page.getByRole("button", { name: "Run AI analysis" }).click();
   await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
     timeout: 30_000
   });

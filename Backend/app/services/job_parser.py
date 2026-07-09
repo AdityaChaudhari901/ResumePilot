@@ -1,6 +1,8 @@
+import json
 import re
 from contextlib import suppress
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -52,10 +54,7 @@ def fetch_job_text(job_url: str, *, settings: "Settings | None" = None) -> str:
             detail="Could not fetch job URL. Paste the job description text instead.",
         ) from exc
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    for element in soup(["script", "style", "noscript"]):
-        element.decompose()
-    text = clean_text(soup.get_text("\n"))
+    text = _html_to_job_text(response.text, job_url)
     if len(text) < MIN_FETCHED_TEXT_CHARS:
         if settings and settings.enable_job_browser_fallback:
             try:
@@ -76,6 +75,98 @@ def fetch_job_text(job_url: str, *, settings: "Settings | None" = None) -> str:
             ),
         )
     return text
+
+
+def _html_to_job_text(html: str, job_url: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    structured_text = _extract_json_ld_job_posting_text(soup)
+    if structured_text:
+        return structured_text
+
+    for element in soup(["script", "style", "noscript"]):
+        element.decompose()
+
+    container = _select_job_container(soup, job_url)
+    return clean_text(container.get_text("\n"))
+
+
+def _extract_json_ld_job_posting_text(soup: BeautifulSoup) -> str:
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        content = script.string or script.get_text()
+        if not content:
+            continue
+        for item in _json_ld_items(content):
+            if not _is_job_posting_item(item):
+                continue
+            lines = _job_posting_lines(item)
+            if lines:
+                return clean_text("\n".join(lines))
+    return ""
+
+
+def _json_ld_items(content: str) -> list[dict]:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return []
+    values = payload if isinstance(payload, list) else [payload]
+    items: list[dict] = []
+    for value in values:
+        if isinstance(value, dict) and isinstance(value.get("@graph"), list):
+            items.extend(item for item in value["@graph"] if isinstance(item, dict))
+        elif isinstance(value, dict):
+            items.append(value)
+    return items
+
+
+def _is_job_posting_item(item: dict) -> bool:
+    item_type = item.get("@type")
+    if isinstance(item_type, list):
+        return any(str(value).casefold() == "jobposting" for value in item_type)
+    return str(item_type).casefold() == "jobposting"
+
+
+def _job_posting_lines(item: dict) -> list[str]:
+    lines: list[str] = []
+    title = item.get("title")
+    if isinstance(title, str):
+        lines.append(f"Role: {title}")
+    organization = item.get("hiringOrganization")
+    if isinstance(organization, dict) and isinstance(organization.get("name"), str):
+        lines.append(f"Company: {organization['name']}")
+    employment_type = item.get("employmentType")
+    if isinstance(employment_type, str):
+        lines.append(f"Employment type: {employment_type}")
+    experience = item.get("experienceRequirements")
+    if isinstance(experience, str):
+        lines.append(f"Experience: {experience}")
+    description = item.get("description")
+    if isinstance(description, str):
+        description_text = BeautifulSoup(description, "html.parser").get_text("\n")
+        lines.append(description_text)
+    return lines
+
+
+def _select_job_container(soup: BeautifulSoup, job_url: str):
+    hostname = urlparse(job_url).hostname or ""
+    selectors = _ats_container_selectors(hostname)
+    for selector in selectors:
+        candidate = soup.select_one(selector)
+        if candidate and len(clean_text(candidate.get_text(" "))) >= MIN_FETCHED_TEXT_CHARS:
+            return candidate
+    return soup.body or soup
+
+
+def _ats_container_selectors(hostname: str) -> tuple[str, ...]:
+    if "greenhouse.io" in hostname:
+        return ("#content", "main", "[data-qa='job-description']")
+    if "lever.co" in hostname:
+        return (".posting", ".content", "main")
+    if "rippling.com" in hostname:
+        return ("main", "[data-testid*='job']", "article")
+    if "myworkdayjobs.com" in hostname or "workdayjobs.com" in hostname:
+        return ("main", "[data-automation-id='jobPostingDescription']", "article")
+    return ("main", "article", "[role='main']")
 
 
 def parse_job_profile(

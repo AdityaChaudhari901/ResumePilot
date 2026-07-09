@@ -42,7 +42,15 @@ def generate_report(
     missing_names = [skill.skill for skill in match.missing_skills]
     role = job.role_title or "this role"
     company = job.company or "the company"
-    summary = _executive_summary(role, company, match.score, matched_names, missing_names)
+    requirements_unclear = _has_warning(warnings, "required_skills_unclear")
+    summary = _executive_summary(
+        role,
+        company,
+        match.score,
+        matched_names,
+        missing_names,
+        requirements_unclear=requirements_unclear,
+    )
 
     return ApplicationReport(
         analysis_id=analysis_id,
@@ -58,11 +66,12 @@ def generate_report(
         cover_letter=_cover_letter(resume, job, match),
         interview_questions=_interview_questions(resume, job, match),
         validation_warnings=warnings,
-        next_actions=_next_actions(match),
+        next_actions=_next_actions(match, warnings),
     )
 
 
 def report_to_markdown(report: ApplicationReport) -> str:
+    requirements_unclear = _has_warning(report.validation_warnings, "required_skills_unclear")
     lines = [
         "# Job Fit Report",
         "",
@@ -79,7 +88,13 @@ def report_to_markdown(report: ApplicationReport) -> str:
         for item in report.matched_skills
     )
     if not report.matched_skills:
-        lines.append("- No matched skills detected.")
+        if requirements_unclear:
+            lines.append(
+                "- No matched skills available because explicit job requirements were not "
+                "extracted from the listing."
+            )
+        else:
+            lines.append("- No matched skills detected.")
 
     lines.extend(["", "## 4. Missing or Weak Skills"])
     lines.extend(
@@ -88,7 +103,13 @@ def report_to_markdown(report: ApplicationReport) -> str:
     )
     lines.extend(f"- Weak: {item.skill}. {item.reason}" for item in report.weak_skills)
     if not report.missing_skills and not report.weak_skills:
-        lines.append("- No missing or weak skills detected.")
+        if requirements_unclear:
+            lines.append(
+                "- Missing skills cannot be determined until explicit job requirements are "
+                "extracted."
+            )
+        else:
+            lines.append("- No missing or weak skills detected.")
 
     lines.extend(["", "## 5. Tailored Resume Bullet Suggestions"])
     lines.extend(
@@ -100,6 +121,8 @@ def report_to_markdown(report: ApplicationReport) -> str:
 
     lines.extend(["", "## 6. ATS Keyword Suggestions"])
     lines.extend(f"- {item.keyword}: {item.note}" for item in report.ats_keywords)
+    if not report.ats_keywords:
+        lines.append("- No ATS keywords were extracted from this job listing.")
 
     lines.extend(["", "## 7. Cover Letter Draft", report.cover_letter])
 
@@ -119,8 +142,20 @@ def report_to_markdown(report: ApplicationReport) -> str:
 
 
 def _executive_summary(
-    role: str, company: str, score: float, matched_names: list[str], missing_names: list[str]
+    role: str,
+    company: str,
+    score: float,
+    matched_names: list[str],
+    missing_names: list[str],
+    *,
+    requirements_unclear: bool,
 ) -> str:
+    if requirements_unclear and not matched_names and not missing_names:
+        return (
+            f"For {role} at {company}, ResumePilot could not extract explicit job "
+            f"requirements, so the provisional score is capped at {score:.1f}/100. "
+            "Review the job URL extraction before tailoring the resume."
+        )
     matched = ", ".join(matched_names[:5]) if matched_names else "no strong technical matches"
     missing = (
         ", ".join(missing_names[:5]) if missing_names else "no critical missing skills detected"
@@ -306,8 +341,14 @@ def _interview_questions(
     ]
 
 
-def _next_actions(match: MatchResult) -> list[str]:
+def _next_actions(match: MatchResult, warnings: list[ValidationWarning]) -> list[str]:
     actions = ["Review extracted resume evidence and correct any low-confidence fields."]
+    if _has_warning(warnings, "required_skills_unclear"):
+        actions.insert(
+            0,
+            "Use a direct public job-detail URL with visible requirements, then rerun analysis "
+            "before trusting the fit score.",
+        )
     if match.missing_skills:
         actions.append(
             "Do not add missing skills unless true; use them as a learning checklist or add "
@@ -320,6 +361,10 @@ def _next_actions(match: MatchResult) -> list[str]:
         )
     actions.append("Use tailored bullets as suggestions, then manually review before applying.")
     return actions
+
+
+def _has_warning(warnings: list[ValidationWarning], code: str) -> bool:
+    return any(warning.code == code for warning in warnings)
 
 
 def _human_list(values: list[str]) -> str:

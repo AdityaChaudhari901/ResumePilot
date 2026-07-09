@@ -82,6 +82,33 @@ def test_fetch_job_text_returns_paste_fallback_when_browser_rendering_is_unavail
     assert "Playwright Chromium browser" in exc_info.value.detail
 
 
+def test_fetch_job_text_prefers_json_ld_job_posting(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.job_parser.requests.get",
+        lambda *args, **kwargs: FakeResponse(
+            status_code=200,
+            text="""<html><body>
+            <script type="application/ld+json">
+            {
+              "@type": "JobPosting",
+              "title": "Platform Engineer",
+              "hiringOrganization": {"name": "Schema Labs"},
+              "description": "<p>Required Python and FastAPI experience.</p>"
+            }
+            </script>
+            <nav>Marketing navigation should not dominate extraction.</nav>
+            </body></html>""",
+        ),
+    )
+
+    text = fetch_job_text("https://boards.greenhouse.io/schema/jobs/1", settings=Settings())
+    profile = parse_job_profile(text, job_id=1)
+
+    assert profile.role_title == "Platform Engineer"
+    assert profile.company == "Schema Labs"
+    assert {"Python", "FastAPI"} <= {skill.name for skill in profile.required_skills}
+
+
 def test_job_parser_marks_required_skill_missing_candidate(sample_job_text):
     profile = parse_job_profile(sample_job_text, job_id=1)
 

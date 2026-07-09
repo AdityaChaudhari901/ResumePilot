@@ -1,6 +1,7 @@
 from app.services.agent_workflow import run_application_agent_workflow
 from app.services.job_parser import parse_job_profile
 from app.services.matcher import match_resume_to_job
+from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import parse_resume_profile
 from app.services.validator import validate_report_against_resume
 
@@ -57,6 +58,15 @@ B.Tech Computer Science
 """
 
 
+UNCLEAR_REQUIREMENTS_JOB_TEXT = """Persistent careers
+
+Join our engineering team and collaborate with product teams on customer-facing software.
+You will improve internal workflows, contribute to platform quality, and communicate with
+stakeholders across delivery teams. This listing describes the team and culture, but it does
+not expose explicit required or preferred technical skills in readable page text.
+"""
+
+
 def test_tailored_bullets_prefer_project_evidence_over_parser_fragments():
     report, resume = _build_report(FRAGMENTED_RESUME_TEXT, FORBES_STYLE_JOB_TEXT)
 
@@ -88,6 +98,20 @@ def test_skills_only_matches_do_not_create_exportable_tailored_bullets():
     assert report.weak_skills
     assert report.tailored_bullets == []
     assert not validate_report_against_resume(report, resume)
+
+
+def test_unclear_job_requirements_produce_low_confidence_report():
+    report, _resume = _build_report(FRAGMENTED_RESUME_TEXT, UNCLEAR_REQUIREMENTS_JOB_TEXT)
+    markdown = report_to_markdown(report)
+
+    assert report.match_score <= 25
+    assert report.matched_skills == []
+    assert report.missing_skills == []
+    assert "cannot calculate a trustworthy fit" in report.executive_summary
+    assert "direct public job-detail URL" in report.next_actions[0]
+    assert "job requirements were not extracted clearly" in report.cover_letter
+    assert "Missing skills cannot be determined" in markdown
+    assert "No ATS keywords were extracted" in markdown
 
 
 def _build_report(resume_text: str, job_text: str):

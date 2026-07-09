@@ -18,6 +18,138 @@ from app.services.crewai_workflow import CrewAIWorkflowSections, CrewAIWorkflowU
 from app.services.pdf_resume_compiler import PdfCompilerUnavailable
 
 
+def test_job_preview_parses_public_url_without_creating_report(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.job_parser.requests.get",
+        lambda *args, **kwargs: _FakeJobFetchResponse(
+            text="""<html><body>
+            <h1>Backend Engineer</h1>
+            <p>Company: NovaHire AI</p>
+            <h2>Requirements</h2>
+            <p>Required Python experience.</p>
+            <p>Required FastAPI experience.</p>
+            <p>Preferred Pytest experience.</p>
+            <h2>Responsibilities</h2>
+            <p>Build REST APIs for hiring workflows.</p>
+            </body></html>"""
+        ),
+    )
+
+    response = client.post(
+        "/jobs/preview",
+        json={"job_url": "https://example.com/jobs/backend-engineer"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["profile"]["role_title"] == "Backend Engineer"
+    assert body["profile"]["company"] == "NovaHire AI"
+    assert {skill["name"] for skill in body["profile"]["required_skills"]} >= {
+        "Python",
+        "FastAPI",
+    }
+    assert {skill["name"] for skill in body["profile"]["preferred_skills"]} >= {"Pytest"}
+    assert body["raw_text_char_count"] > 40
+
+    history_response = client.get("/reports")
+    assert history_response.status_code == 200
+    assert history_response.json()["items"] == []
+
+
+def test_job_preview_marks_unclear_requirements_for_review(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.job_parser.requests.get",
+        lambda *args, **kwargs: _FakeJobFetchResponse(
+            text="""<html><body>
+            <h1>Persistent Careers</h1>
+            <p>Join our engineering team and collaborate with product teams.</p>
+            <p>This public page describes culture but exposes no explicit skill requirements.</p>
+            </body></html>"""
+        ),
+    )
+
+    response = client.post(
+        "/jobs/preview",
+        json={"job_url": "https://example.com/jobs/unclear"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "missing_requirements"
+    assert body["profile"]["required_skills"] == []
+    assert "required_skills_unclear" in {warning["code"] for warning in body["profile"]["warnings"]}
+    assert any(check["code"] == "required_or_preferred_skills" for check in body["quality_checks"])
+
+
+def test_analyze_uses_reviewed_job_profile_without_refetching(
+    client, monkeypatch, sample_resume_text
+):
+    upload_response = client.post(
+        "/resumes/upload",
+        files={"file": ("resume.md", sample_resume_text.encode("utf-8"), "text/markdown")},
+    )
+    assert upload_response.status_code == 201
+    resume_id = upload_response.json()["resume_id"]
+
+    def fail_fetch(*args, **kwargs):
+        raise AssertionError("analysis should use reviewed_job_profile instead of refetching")
+
+    monkeypatch.setattr("app.services.analysis_service.fetch_job_text", fail_fetch)
+
+    analyze_response = client.post(
+        "/jobs/analyze",
+        json={
+            "resume_id": resume_id,
+            "job_url": "https://example.com/jobs/reviewed",
+            "reviewed_job_profile": {
+                "benefits": [],
+                "company": "Reviewed Labs",
+                "employment_type": None,
+                "experience_level": "0-2 years",
+                "job_id": 0,
+                "keywords": ["Python", "FastAPI"],
+                "location": None,
+                "preferred_skills": [],
+                "required_skills": [
+                    {
+                        "confidence": "high",
+                        "evidence_text": "Required Python experience.",
+                        "id": "job_required_001",
+                        "importance": "required",
+                        "name": "Python",
+                    },
+                    {
+                        "confidence": "high",
+                        "evidence_text": "Required FastAPI experience.",
+                        "id": "job_required_002",
+                        "importance": "required",
+                        "name": "FastAPI",
+                    },
+                ],
+                "responsibilities": ["Build REST APIs for reviewed workflows."],
+                "role_title": "Reviewed Backend Engineer",
+                "unclear_items": [],
+                "warnings": [],
+            },
+        },
+    )
+
+    assert analyze_response.status_code == 200
+    body = analyze_response.json()
+
+    report_response = client.get(f"/reports/{body['report_id']}")
+    assert report_response.status_code == 200
+    report = report_response.json()
+    assert {skill["skill"] for skill in report["matched_skills"]} >= {"Python", "FastAPI"}
+
+    history_response = client.get("/reports")
+    assert history_response.status_code == 200
+    item = history_response.json()["items"][0]
+    assert item["company"] == "Reviewed Labs"
+    assert item["role"] == "Reviewed Backend Engineer"
+
+
 def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_text):
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
     assert body["status"] == "completed"
@@ -327,3 +459,13 @@ def _set_dev_user_plan(client, plan: str) -> None:
         user.plan = plan
         user.subscription_status = "active"
         db.commit()
+
+
+class _FakeJobFetchResponse:
+    status_code = 200
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        return None

@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, production startup safety checks, Docker Compose production-like stack with cached frontend npm installs and verified 8050/3050 local ports, signed BFF-to-FastAPI user identity boundary with explicit production local-auth opt-in, Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, tenant-scoped report history and resume profile review APIs, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, project-local OpenClaw `/job` skill, Next.js WebChat/dashboard workbench with account/session visibility, usage visibility, report ledger, resume extraction review, job posting URL analysis, evidence-strength labels, and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, production startup safety checks, Docker Compose production-like stack with cached frontend npm installs and verified 8050/3050 local ports, signed BFF-to-FastAPI user identity boundary with explicit production local-auth opt-in, Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, tenant-scoped report history, application pipeline, and resume profile review APIs, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, unclear job-requirement score capping and review-first report states, ATS-aware job listing preview API with JSON-LD and host-aware extraction, editable dashboard job-evidence review saved as the analysis source of truth, project-local OpenClaw `/job` skill, guided Next.js WebChat/dashboard workflow for job listing URL, job evidence review, resume upload, AI services, application status tracking, and report review, collapsed workspace panels for account/session, usage, report ledger, resume extraction, OpenClaw status, human-readable evidence source labels, and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -27,15 +27,19 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 - Implemented application structure:
   - `Backend/app/main.py`
   - `Backend/app/api/routes/*.py`
+  - `Backend/app/api/routes/applications.py`
   - `Backend/app/core/*.py`
   - `Backend/app/core/production.py`
   - `Backend/app/db/*.py`
   - `Backend/app/repositories/*.py`
+  - `Backend/app/repositories/applications.py`
   - `Backend/app/repositories/usage_events.py`
   - `Backend/app/schemas/*.py`
+  - `Backend/app/schemas/application.py`
   - `Backend/app/schemas/agent.py`
   - `Backend/app/schemas/usage.py`
   - `Backend/app/services/*.py`
+  - `Backend/app/services/application_service.py`
   - `Backend/app/services/agent_workflow.py`
   - `Backend/app/services/auth_signature.py`
   - `Backend/app/services/audit_service.py`
@@ -50,6 +54,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/data/provider_pricing.json`
   - `Backend/app/data/skill_dictionary.json`
   - `Backend/migrations/*.py`
+  - `Backend/migrations/versions/20260709_0005_add_applications.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/tests/test_audit_privacy_api.py`
@@ -71,6 +76,8 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Frontend/.env.example`
   - `Frontend/src/proxy.ts`
   - `Frontend/src/app/api/auth/session/route.ts`
+  - `Frontend/src/app/api/applications/route.ts`
+  - `Frontend/src/app/api/applications/[applicationId]/status/route.ts`
   - `Frontend/src/app/api/reports/route.ts`
   - `Frontend/src/app/api/resumes/[resumeId]/route.ts`
   - `Frontend/src/app/api/openclaw/control/route.ts`
@@ -79,6 +86,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Frontend/src/app/sign-up/[[...sign-up]]/page.tsx`
   - `Frontend/src/lib/auth.ts`
   - `Frontend/src/lib/openclaw.ts`
+  - `Frontend/src/features/dashboard/components/application-pipeline-card.tsx`
   - `.github/workflows/ci.yml`
   - `docker-compose.yml`
   - `.env.production.example`
@@ -419,7 +427,7 @@ Completed application workspace and evidence review slice:
 - Added backend tests proving report history and resume profile reads are owner-scoped.
 - Added Next.js BFF routes for report history and resume profile review.
 - Added dashboard `Report ledger` and `Resume extraction` panels so a user can reopen prior reports and inspect parsed skills/facts after upload.
-- Added evidence-strength labels to the report viewer so project/work evidence, skills-only evidence, summary evidence, education, and certification references are distinguishable.
+- Added human-readable evidence source labels to the report viewer so project/work evidence, skills-section evidence, summary evidence, education, and certification references are distinguishable without exposing parser IDs as the main UI text.
 - Updated Playwright desktop/mobile smoke coverage for report history, resume extraction review, and existing export flow.
 
 Next implementation scope:
@@ -447,6 +455,30 @@ Latest verification run: 2026-07-09
 
 | Check | Command | Result |
 |---|---|---|
+| Backend application workspace focused tests | `cd Backend && .venv/bin/pytest tests/test_applications_api.py tests/test_analysis_api.py tests/test_tenant_isolation.py -q` | Passed: 14 tests covering draft creation, analysis linking, export status, status updates, and tenant isolation |
+| Backend application workspace lint | `cd Backend && .venv/bin/ruff format app tests migrations --check && .venv/bin/ruff check app tests migrations` | Passed |
+| Backend full suite after application workspace | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check app tests scripts migrations && .venv/bin/pytest -q` | Passed: Ruff format/check and 77 pytest tests |
+| Application workspace migration check | `cd Backend && DATABASE_URL=sqlite:////tmp/resumepilot-app-migration-check-20260709.db RESUMEPILOT_DATA_DIR=.local/data .venv/bin/alembic upgrade head` | Passed: upgraded through `20260709_0005` |
+| Frontend application workspace checks | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Dashboard application workspace smoke | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 5 Chromium tests covering application drafts, application-id analysis payloads, status transitions, exports, mobile usability, and report ledger reopen |
+| Live local application workspace smoke | `curl http://127.0.0.1:8041/health`, `curl -I http://127.0.0.1:3041`, `GET /applications`, and local Alembic version check | Passed: backend health ok, frontend 200, applications API returned tenant-scoped list, local DB stamped to `20260709_0005` |
+| Frontend lint after removing Sample URL action | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
+| Frontend typecheck after removing Sample URL action | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Dashboard Playwright smoke after removing Sample URL action | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 4 Chromium tests covering direct URL entry without a Sample button, resume upload, AI workflow, exports, mobile usability, URL-only payload, and report ledger reopen |
+| Backend checks after reviewed job evidence boundary | `cd Backend && .venv/bin/ruff format app tests --check && .venv/bin/ruff check app tests && .venv/bin/pytest -q` | Passed: Ruff format/check and 74 pytest tests |
+| Frontend checks after editable job evidence review | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Dashboard Playwright smoke after editable job evidence review | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 5 Chromium tests covering editable job evidence, reviewed-profile analysis payload, unclear extraction, mobile usability, exports, and report ledger reopen |
+| Live local smoke after editable job evidence review | `curl http://127.0.0.1:8041/health`, `curl -I http://127.0.0.1:3041`, and `POST /jobs/preview` for `http://127.0.0.1:3041/sample-job-posting.html` | Passed: backend health ok, frontend 200, preview `status=ready` with Python, FastAPI, SQL, and Pytest extracted |
+| Frontend lint after URL-only job listing form cleanup | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
+| Frontend typecheck after URL-only job listing form cleanup | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Dashboard Playwright smoke after URL-only job listing form cleanup | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 4 Chromium tests covering the guided URL-only form, absence of Company/Role inputs, URL-only request payload, report exports, mobile usability, and report ledger reopen |
+| Frontend lint after evidence-label cleanup | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
+| Frontend typecheck after evidence-label cleanup | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Dashboard Playwright smoke after evidence-label cleanup | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 4 Chromium tests covering the guided flow, report exports, usage heading copy, and absence of old cryptic `summary_### ·` / `skills_### ·` evidence chips |
+| Frontend lint after guided dashboard workflow | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
+| Frontend typecheck after guided dashboard workflow | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
+| Dashboard Playwright smoke after guided dashboard workflow | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 4 Chromium tests covering job-listing-first flow, resume upload, AI workflow step, report exports, request payload, mobile usability, and report ledger reopen |
+| Diff whitespace after guided dashboard workflow | `git diff --check` | Passed |
 | Frontend lint after dashboard job URL mode | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run lint` | Passed |
 | Frontend typecheck after dashboard job URL mode | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run typecheck` | Passed |
 | Dashboard Playwright smoke after job URL mode | `cd Frontend && PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" npm run test:e2e` | Passed: production build plus 4 Chromium tests covering job posting URL analysis, URL request payload, report history, and exports |
@@ -561,6 +593,24 @@ Latest verification run: 2026-07-09
 
 ### 2026-07-09
 
+- Added tenant-scoped application workspace persistence with `applications` table, draft creation, report linking, match score tracking, and statuses `draft`, `reviewed`, `analyzed`, `exported`, and `applied`.
+- Added `GET /applications`, `POST /applications`, and `PATCH /applications/{application_id}/status`, plus Next.js BFF proxies for the same routes.
+- Wired dashboard analysis to save reviewed job evidence as an application draft and pass `application_id` into `/jobs/analyze` so the generated report completes that application workspace item.
+- Added an Application pipeline card to the dashboard with report open actions and exported/applied status transitions.
+- Marked applications as exported when report export endpoints are used, without downgrading applications already marked applied.
+- Added backend and Playwright coverage for application draft creation, analysis linking, tenant isolation, export status, application-id request payloads, and dashboard status transitions.
+- Added ATS-aware job preview extraction with JSON-LD `JobPosting` support and host-aware containers for Greenhouse, Lever, Rippling, Workday, and generic pages.
+- Added structured preview quality statuses/checks and clearer URL-only preview failure messages for blocked, unreadable, or incomplete job listings.
+- Made the dashboard job evidence review editable for role, company, required/preferred skills, evidence text, and responsibilities, then locked analysis until the reviewed profile is saved.
+- Updated `/jobs/analyze` to accept `reviewed_job_profile` so dashboard analysis uses the reviewed evidence instead of silently refetching and reparsing the URL.
+- Added backend and Playwright coverage for reviewed-profile analysis, editable job evidence, unclear extraction warnings, and reviewed-profile request payloads.
+- Removed the `Sample` action from Step 01 so the job listing form presents only direct URL entry and continue.
+- Removed dashboard Company/Role inputs and the extra public URL helper text from Step 01 so the job listing step accepts only a public job URL; frontend analysis payloads now send `company: null` and `role: null`.
+- Removed the unused pasted-JD sample constant from the frontend because the dashboard flow is URL-only.
+- Replaced raw evidence chip labels such as `summary_009 · summary` and `skills_007 · skills-only` with readable labels such as `Resume summary #9` and `Skills section #7`, while preserving raw evidence IDs in accessible descriptions/tooltips.
+- Clarified the usage panel as a plan usage meter, renamed `Analyses` to `Analysis runs`, renamed `Live CrewAI` to `Live CrewAI runs`, and added copy explaining Stripe billing is not connected yet.
+- Reworked the dashboard into a guided four-step flow: job listing URL, resume upload, AI services, and validated report, with report history/system panels moved into a collapsed workspace review.
+- Added focused workflow components and updated Playwright coverage so the browser smoke follows the new step-by-step application journey.
 - Changed the dashboard MVP JD input to job posting URL only while keeping backend/OpenClaw pasted JD support available outside the dashboard flow.
 - Added Playwright coverage proving URL mode sends the expected analysis payload without relying on a live external job board.
 - Optimized the frontend Docker build by adding a BuildKit npm cache mount, npm registry retry settings, and install-time audit/fund/update-notifier suppression for container builds.
@@ -715,6 +765,8 @@ Latest verification run: 2026-07-09
 - Verified targeted readiness/settings/auth tests, full backend pytest, Ruff format/check, Python compileall, golden evals, backend quality gate, frontend lint/typecheck/build, Playwright dashboard E2E, and Docker Compose config validation.
 - Restarted Colima with the Docker runtime after the socket became unreachable, verified Docker Engine client/server connectivity, and built the `resumepilot-backend` and `resumepilot-frontend` images successfully.
 - Started the production-like Docker Compose stack with generated local-only secrets on host ports `8050` and `3050`; verified `GET /health`, `GET /ready` with database and Alembic head checks, frontend `200 OK`, and healthy Postgres/backend/frontend containers.
+- Added an unclear-job-requirement confidence boundary so reports with no extracted required/preferred skills cap the score, explain that the job URL needs review, avoid misleading empty states, keep the workflow trace expandable in the dashboard, and are covered by a Playwright URL-ingestion regression fixture.
+- Added `POST /jobs/preview` and `/api/jobs/preview` so the dashboard fetches and parses a public job URL before resume upload, then shows a five-step workflow with required/preferred skills, responsibilities, extraction warnings, and a continue-with-warning path for unclear pages.
 
 ## Maintenance Rule
 

@@ -3,6 +3,7 @@ import { AlertTriangle, ClipboardCheck, Mail, MapPin, Phone } from "lucide-react
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import type { Confidence, ResumeFact, ResumeProfile } from "@/features/dashboard/types";
+import { formatEvidenceSource } from "@/features/dashboard/utils/evidence";
 
 interface ResumeProfileReviewCardProps {
   profile: ResumeProfile | null;
@@ -140,10 +141,14 @@ function ResumeStat({ label, value }: { label: string; value: number }) {
 }
 
 function ResumeFactRow({ fact }: { fact: ResumeFact }) {
+  const evidence = formatEvidenceSource(fact.id);
+
   return (
     <div className="rounded-md border border-border bg-surface p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="primary">{fact.id}</Badge>
+        <Badge aria-label={evidence.description} title={evidence.description} tone={evidence.tone}>
+          {evidence.label}
+        </Badge>
         <Badge tone={confidenceTone(fact.confidence)}>{fact.confidence} confidence</Badge>
       </div>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{fact.text}</p>

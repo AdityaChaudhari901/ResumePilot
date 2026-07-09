@@ -18,6 +18,7 @@ ACTION_VERBS = {
     "launched",
     "developed",
 }
+NO_ACTIONABLE_SKILLS_SCORE_CAP = 25.0
 
 
 def match_resume_to_job(resume: ResumeProfile, job: JobProfile) -> MatchResult:
@@ -49,8 +50,12 @@ def match_resume_to_job(resume: ResumeProfile, job: JobProfile) -> MatchResult:
         + quality_score * 0.05
     )
 
+    has_actionable_job_skills = bool(job.required_skills or job.preferred_skills)
+    if not has_actionable_job_skills:
+        total = min(total, NO_ACTIONABLE_SKILLS_SCORE_CAP)
+
     confidence = Confidence.high if job.required_skills and resume.skills else Confidence.medium
-    if not job.required_skills or not resume.skills:
+    if not has_actionable_job_skills or not job.required_skills or not resume.skills:
         confidence = Confidence.low
 
     return MatchResult(

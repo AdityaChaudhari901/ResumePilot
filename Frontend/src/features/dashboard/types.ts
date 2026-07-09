@@ -50,6 +50,74 @@ export interface JobAnalysisResponse {
   status: string;
 }
 
+export interface JobSkill {
+  id: string;
+  name: string;
+  importance: "required" | "preferred" | "keyword";
+  evidence_text: string;
+  confidence: Confidence;
+}
+
+export interface JobProfile {
+  job_id: number;
+  company: string | null;
+  role_title: string | null;
+  location: string | null;
+  employment_type: string | null;
+  required_skills: JobSkill[];
+  preferred_skills: JobSkill[];
+  responsibilities: string[];
+  experience_level: string | null;
+  keywords: string[];
+  benefits: string[];
+  unclear_items: string[];
+  warnings: ValidationWarning[];
+}
+
+export type JobPreviewStatus =
+  | "ready"
+  | "needs_review"
+  | "blocked_private"
+  | "too_short"
+  | "missing_requirements";
+
+export interface JobPreviewQualityCheck {
+  code: string;
+  status: "pass" | "warn" | "fail";
+  message: string;
+}
+
+export interface JobPreviewResponse {
+  job_url: string;
+  profile: JobProfile;
+  raw_text_char_count: number;
+  status: JobPreviewStatus;
+  parser: string;
+  quality_checks: JobPreviewQualityCheck[];
+}
+
+export type ApplicationStatus = "draft" | "reviewed" | "analyzed" | "exported" | "applied";
+
+export interface ApplicationItem {
+  id: number;
+  status: ApplicationStatus;
+  job_url: string;
+  company: string | null;
+  role: string | null;
+  resume_id: number | null;
+  job_id: number | null;
+  analysis_id: number | null;
+  report_id: number | null;
+  match_score: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApplicationListResponse {
+  items: ApplicationItem[];
+  count: number;
+}
+
 export type AgentWorkflowMode = "deterministic_fallback" | "crewai";
 
 export type AgentStepName =

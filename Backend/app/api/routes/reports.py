@@ -20,6 +20,7 @@ from app.services.analysis_service import (
     get_tailored_resume_pdf,
     list_report_history,
 )
+from app.services.application_service import mark_application_exported_for_report
 from app.services.audit_service import record_audit_event
 from app.services.privacy_service import delete_report
 from app.services.usage_service import enforce_export_limit, record_export_usage
@@ -62,6 +63,7 @@ def read_report_markdown(
         payload={"report_id": report_id, "format": "markdown"},
     )
     record_export_usage(db, current_user, report_id=report_id, export_format="markdown")
+    mark_application_exported_for_report(db, current_user, report_id=report_id)
     return markdown
 
 
@@ -90,6 +92,7 @@ def read_tailored_resume_latex(
         payload={"report_id": report_id, "format": "latex"},
     )
     record_export_usage(db, current_user, report_id=report_id, export_format="latex")
+    mark_application_exported_for_report(db, current_user, report_id=report_id)
     return PlainTextResponse(
         content=latex,
         media_type="application/x-tex",
@@ -115,6 +118,7 @@ def read_tailored_resume_docx(
         payload={"report_id": report_id, "format": "docx"},
     )
     record_export_usage(db, current_user, report_id=report_id, export_format="docx")
+    mark_application_exported_for_report(db, current_user, report_id=report_id)
     return Response(
         content=docx,
         media_type=DOCX_MEDIA_TYPE,
@@ -141,6 +145,7 @@ def read_tailored_resume_pdf(
         payload={"report_id": report_id, "format": "pdf"},
     )
     record_export_usage(db, current_user, report_id=report_id, export_format="pdf")
+    mark_application_exported_for_report(db, current_user, report_id=report_id)
     return Response(
         content=pdf,
         media_type="application/pdf",

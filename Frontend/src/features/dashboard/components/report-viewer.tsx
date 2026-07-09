@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  ChevronDown,
   CircleAlert,
   CircleCheck,
   CircleX,
@@ -27,6 +28,7 @@ import type {
   ApplicationReport,
   JobAnalysisResponse
 } from "@/features/dashboard/types";
+import { formatEvidenceSource } from "@/features/dashboard/utils/evidence";
 import { formatScore, scoreLabel, scoreTone } from "@/features/dashboard/utils/report";
 
 interface ReportViewerProps {
@@ -38,13 +40,13 @@ interface ReportViewerProps {
 export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerProps) {
   if (!report || !analysis) {
     return (
-      <Panel eyebrow="Step 03" title="Report">
+      <Panel eyebrow="Step 05" title="Report">
         <div className="flex min-h-80 items-center justify-center rounded-md border border-dashed border-border bg-surface p-6 text-center">
           <div>
             <ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <p className="mt-3 text-sm font-medium text-foreground">No analysis yet</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Upload a resume and analyze a job to generate a report.
+              Add a job listing URL, upload a resume, and run AI analysis to generate a report.
             </p>
           </div>
         </div>
@@ -53,6 +55,13 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
   }
 
   const matchTone = scoreTone(report.match_score);
+  const hasUnclearJobRequirements = report.validation_warnings.some(
+    (warning) => warning.code === "required_skills_unclear"
+  );
+  const scoreBadgeTone = hasUnclearJobRequirements ? "danger" : matchTone;
+  const scoreBadgeLabel = hasUnclearJobRequirements
+    ? "Needs job details"
+    : scoreLabel(report.match_score);
   const latexDownloadHref = `/api/reports/${encodeURIComponent(
     String(analysis.report_id)
   )}/resume/latex`;
@@ -112,13 +121,13 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
         <div className="grid gap-3 md:grid-cols-[12rem_1fr]">
           <div className="rounded-lg border border-border bg-surface p-4">
             <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
-              Match score
+              {hasUnclearJobRequirements ? "Provisional score" : "Match score"}
             </p>
             <p className="mt-2 font-mono text-5xl font-semibold tabular-nums">
               {formatScore(report.match_score)}
             </p>
-            <Badge className="mt-3" tone={matchTone}>
-              {scoreLabel(report.match_score)}
+            <Badge className="mt-3" tone={scoreBadgeTone}>
+              {scoreBadgeLabel}
             </Badge>
           </div>
           <div className="rounded-lg border border-border bg-surface p-4">
@@ -126,6 +135,30 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{report.executive_summary}</p>
           </div>
         </div>
+
+        {hasUnclearJobRequirements ? (
+          <div
+            className="rounded-lg border border-warning/25 bg-warning/10 p-4"
+            role="status"
+          >
+            <div className="flex gap-3">
+              <AlertTriangle
+                className="mt-0.5 h-5 w-5 shrink-0 text-warning"
+                aria-hidden="true"
+              />
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  Job details need review
+                </p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  ResumePilot could not extract explicit required skills from this listing. Use
+                  a direct public job-detail URL with visible requirements, then rerun the
+                  analysis before tailoring or exporting the resume.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid gap-3 md:grid-cols-3">
           <Metric label="Matched" value={report.matched_skills.length} />
@@ -159,6 +192,16 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
                   <EvidenceIdBadges evidenceIds={item.resume_evidence_ids} />
                 </div>
               ))}
+              {report.matched_skills.length === 0 ? (
+                <EmptyReportState
+                  tone={hasUnclearJobRequirements ? "warning" : "neutral"}
+                  title="No evidence-backed matches yet"
+                >
+                  {hasUnclearJobRequirements
+                    ? "No matches can be trusted until the job requirements are extracted."
+                    : "No resume evidence matched the extracted job skills."}
+                </EmptyReportState>
+              ) : null}
             </div>
           </div>
 
@@ -190,9 +233,16 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
                 </div>
               ))}
               {report.missing_skills.length === 0 && report.weak_skills.length === 0 && (
-                <div className="rounded-md border border-border bg-surface p-3 text-sm text-muted-foreground">
-                  No missing skills found by the deterministic matcher.
-                </div>
+                <EmptyReportState
+                  tone={hasUnclearJobRequirements ? "warning" : "neutral"}
+                  title={
+                    hasUnclearJobRequirements ? "Gaps not available" : "No gaps detected"
+                  }
+                >
+                  {hasUnclearJobRequirements
+                    ? "Missing skills cannot be determined until explicit job requirements are extracted."
+                    : "No missing or weak skills were found in the extracted job evidence."}
+                </EmptyReportState>
               )}
             </div>
           </div>
@@ -250,6 +300,16 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
                   <EvidenceIdBadges evidenceIds={item.evidence_ids} />
                 </div>
               ))}
+              {topKeywords.length === 0 ? (
+                <EmptyReportState
+                  tone={hasUnclearJobRequirements ? "warning" : "neutral"}
+                  title="No ATS keywords extracted"
+                >
+                  {hasUnclearJobRequirements
+                    ? "The job page did not expose enough requirement evidence for safe keyword suggestions."
+                    : "No supported or add-only-if-true keywords were produced for this report."}
+                </EmptyReportState>
+              ) : null}
             </div>
           </div>
 
@@ -311,54 +371,50 @@ function Metric({ label, value }: MetricProps) {
   );
 }
 
+function EmptyReportState({
+  children,
+  title,
+  tone
+}: {
+  children: string;
+  title: string;
+  tone: "neutral" | "warning";
+}) {
+  const toneClass =
+    tone === "warning"
+      ? "border-warning/25 bg-warning/10"
+      : "border-border bg-surface";
+
+  return (
+    <div className={`rounded-md border p-3 ${toneClass}`}>
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{children}</p>
+    </div>
+  );
+}
+
 function EvidenceIdBadges({ evidenceIds }: { evidenceIds: string[] }) {
   if (evidenceIds.length === 0) {
     return null;
   }
   return (
     <div className="mt-2 flex flex-wrap gap-2">
-      {evidenceIds.map((evidenceId) => (
-        <Badge key={evidenceId} tone={evidenceTone(evidenceId)}>
-          {evidenceLabel(evidenceId)}
-        </Badge>
-      ))}
+      {evidenceIds.map((evidenceId) => {
+        const evidence = formatEvidenceSource(evidenceId);
+
+        return (
+          <Badge
+            aria-label={evidence.description}
+            key={evidenceId}
+            title={evidence.description}
+            tone={evidence.tone}
+          >
+            {evidence.label}
+          </Badge>
+        );
+      })}
     </div>
   );
-}
-
-function evidenceTone(evidenceId: string): "success" | "warning" | "primary" | "neutral" {
-  if (evidenceId.startsWith("projects_") || evidenceId.startsWith("experience_")) {
-    return "success";
-  }
-  if (evidenceId.startsWith("skills_") || evidenceId.startsWith("summary_")) {
-    return "warning";
-  }
-  if (evidenceId.startsWith("education_") || evidenceId.startsWith("certifications_")) {
-    return "primary";
-  }
-  return "neutral";
-}
-
-function evidenceLabel(evidenceId: string): string {
-  if (evidenceId.startsWith("projects_")) {
-    return `${evidenceId} · project`;
-  }
-  if (evidenceId.startsWith("experience_")) {
-    return `${evidenceId} · work`;
-  }
-  if (evidenceId.startsWith("skills_")) {
-    return `${evidenceId} · skills-only`;
-  }
-  if (evidenceId.startsWith("summary_")) {
-    return `${evidenceId} · summary`;
-  }
-  if (evidenceId.startsWith("education_")) {
-    return `${evidenceId} · education`;
-  }
-  if (evidenceId.startsWith("certifications_")) {
-    return `${evidenceId} · certification`;
-  }
-  return evidenceId;
 }
 
 function confidenceTone(confidence: ApplicationReport["matched_skills"][number]["confidence"]) {
@@ -400,11 +456,11 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
   );
 
   return (
-    <section
+    <details
       aria-labelledby="workflow-trace-title"
-      className="rounded-lg border border-border bg-surface p-4"
+      className="group rounded-lg border border-border bg-surface"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <summary className="flex cursor-pointer list-none flex-col gap-3 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-2">
           {trace.mode === "crewai" ? (
             <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -424,11 +480,16 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
             </p>
           </div>
         </div>
-        <Badge tone={workflowModeTone(trace.mode)}>{workflowModeLabel(trace.mode)}</Badge>
-      </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge tone={workflowModeTone(trace.mode)}>{workflowModeLabel(trace.mode)}</Badge>
+          <ChevronIndicator />
+        </div>
+      </summary>
+
+      <div className="border-t border-border p-4 pt-0">
 
       {hasRuntimeMetadata ? (
-        <div className="mt-4 border-t border-border pt-4">
+        <div className="pt-4">
           <h4 className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
             Runtime
           </h4>
@@ -479,7 +540,17 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
           ))}
         </div>
       )}
-    </section>
+      </div>
+    </details>
+  );
+}
+
+function ChevronIndicator() {
+  return (
+    <ChevronDown
+      aria-hidden="true"
+      className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180"
+    />
   );
 }
 

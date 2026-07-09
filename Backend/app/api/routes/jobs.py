@@ -4,8 +4,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.schemas.auth import CurrentUser
-from app.schemas.job import JobAnalysisRequest, JobAnalysisResponse
-from app.services.analysis_service import analyze_job
+from app.schemas.job import (
+    JobAnalysisRequest,
+    JobAnalysisResponse,
+    JobPreviewRequest,
+    JobPreviewResponse,
+)
+from app.services.analysis_service import analyze_job, preview_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -18,3 +23,12 @@ def analyze_job_description(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> JobAnalysisResponse:
     return analyze_job(db, request, current_user, settings)
+
+
+@router.post("/preview", response_model=JobPreviewResponse)
+def preview_job_listing(
+    request: JobPreviewRequest,
+    settings: Settings = Depends(get_settings),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> JobPreviewResponse:
+    return preview_job(request, settings)

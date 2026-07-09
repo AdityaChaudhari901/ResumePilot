@@ -14,7 +14,7 @@ from app.schemas.agent import (
     InterviewCoachAgentOutput,
     ResumeMatchAgentOutput,
 )
-from app.schemas.common import ValidationWarning
+from app.schemas.common import Confidence, ValidationWarning
 from app.schemas.job import JobProfile
 from app.schemas.match import MatchResult
 from app.schemas.report import ApplicationReport, InterviewQuestionGroup
@@ -375,10 +375,23 @@ def _resume_match_agent(
         evidence_id for item in match.matched_skills[:5] for evidence_id in item.resume_evidence_ids
     )
 
-    summary = (
-        f"The resume scores {match.score:.1f}/100 for {role} at {company}. "
-        f"The strongest supported matches are {_human_list(strongest_matches)}."
-    )
+    if not _has_actionable_job_skills(job):
+        summary = (
+            f"ResumePilot cannot calculate a trustworthy fit for {role} at {company} yet. "
+            "The job listing did not expose explicit required or preferred skills, so the "
+            f"provisional score is capped at {match.score:.1f}/100 until the job evidence is "
+            "clearer."
+        )
+    elif strongest_matches:
+        summary = (
+            f"The resume scores {match.score:.1f}/100 for {role} at {company}. "
+            f"The strongest supported matches are {_human_list(strongest_matches)}."
+        )
+    else:
+        summary = (
+            f"The resume scores {match.score:.1f}/100 for {role} at {company}, but no "
+            "resume evidence-backed skill matches were found."
+        )
     if missing:
         summary += f" Required gaps to handle honestly: {_human_list(missing[:5])}."
 
@@ -512,6 +525,11 @@ def _positioning_statement(
     resume: ResumeProfile, match: MatchResult, matched_skills: list[str], missing: list[str]
 ) -> str:
     candidate = resume.candidate.name or "The candidate"
+    if match.confidence == Confidence.low and not matched_skills and not match.missing_skills:
+        return (
+            f"{candidate} should review the job URL extraction before tailoring the resume; "
+            "the current report is a requirements-quality warning, not a fit recommendation."
+        )
     if match.score >= 75 and matched_skills:
         return (
             f"{candidate} should lead with evidence-backed strengths in "
@@ -534,6 +552,12 @@ def _next_actions(
     ats: AtsOptimizerAgentOutput,
 ) -> list[str]:
     actions = [*base_report.next_actions]
+    if _has_warning(base_report.validation_warnings, "required_skills_unclear"):
+        actions.insert(
+            0,
+            "Use a direct public job-detail URL with visible requirements, then rerun analysis "
+            "before trusting the fit score.",
+        )
     if fit.evidence_ids:
         actions.append(
             f"Review the main evidence IDs used for positioning: {', '.join(fit.evidence_ids[:5])}."
@@ -543,6 +567,11 @@ def _next_actions(
 
 
 def _cover_letter_confidence_note(job: JobProfile, match: MatchResult) -> str:
+    if not job.required_skills and not job.preferred_skills:
+        return (
+            "Confidence note: job requirements were not extracted clearly, so do not use this "
+            "draft until the job URL is reviewed and analysis is rerun."
+        )
     if not job.company or not job.role_title:
         return (
             "Confidence note: company or role details were incomplete, so this draft avoids "
@@ -583,6 +612,14 @@ def _human_list(values: list[str]) -> str:
     if len(clean_values) == 2:
         return f"{clean_values[0]} and {clean_values[1]}"
     return f"{', '.join(clean_values[:-1])}, and {clean_values[-1]}"
+
+
+def _has_actionable_job_skills(job: JobProfile) -> bool:
+    return bool(job.required_skills or job.preferred_skills)
+
+
+def _has_warning(warnings: list[ValidationWarning], code: str) -> bool:
+    return any(warning.code == code for warning in warnings)
 
 
 def _unique(values) -> list:

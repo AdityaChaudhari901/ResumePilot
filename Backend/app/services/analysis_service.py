@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from fastapi import HTTPException, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -9,10 +11,23 @@ from app.repositories.jobs import JobRepository
 from app.repositories.resumes import ResumeRepository
 from app.schemas.agent import AgentWorkflowMode, AgentWorkflowTrace, ReportWorkflowTraceResponse
 from app.schemas.auth import CurrentUser
-from app.schemas.job import JobAnalysisRequest, JobAnalysisResponse, JobProfile
+from app.schemas.common import ValidationWarning
+from app.schemas.job import (
+    JobAnalysisRequest,
+    JobAnalysisResponse,
+    JobPreviewQualityCheck,
+    JobPreviewRequest,
+    JobPreviewResponse,
+    JobPreviewStatus,
+    JobProfile,
+)
 from app.schemas.report import ApplicationReport, ReportHistoryItem, ReportHistoryResponse
 from app.schemas.resume import ResumeProfile
 from app.services.agent_workflow import run_application_agent_workflow
+from app.services.application_service import (
+    record_application_analysis,
+    validate_application_for_analysis,
+)
 from app.services.audit_service import record_audit_event
 from app.services.docx_resume_renderer import render_tailored_resume_docx
 from app.services.file_storage import StoredUpload
@@ -35,6 +50,8 @@ from app.services.usage_service import (
     record_analysis_usage,
     record_crewai_usage,
 )
+
+MIN_CONFIDENT_PREVIEW_TEXT_CHARS = 160
 
 
 def create_resume_from_upload(
@@ -102,6 +119,7 @@ def analyze_job(
     resume_record = resumes.get(request.resume_id, user_id=current_user.id)
     if not resume_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
+    application_record = validate_application_for_analysis(db, request.application_id, current_user)
 
     resume = ResumeProfile.model_validate(resume_record.profile_json)
     raw_job_text = _job_text_from_request(request, resolved_settings)
@@ -163,6 +181,16 @@ def analyze_job(
             analysis_id=analysis_record.id,
             cost_estimate_usd=workflow_result.trace.cost_estimate_usd,
         )
+    if request.job_url or application_record:
+        record_application_analysis(
+            db,
+            request=request,
+            current_user=current_user,
+            resume=resume_record,
+            job=job_record,
+            analysis=analysis_record,
+            application=application_record,
+        )
     record_audit_event(
         db,
         event_type="job.analyzed",
@@ -184,6 +212,47 @@ def analyze_job(
         report_id=analysis_record.id,
         match_score=analysis_record.match_score,
         status=analysis_record.status,
+    )
+
+
+def preview_job(
+    request: JobPreviewRequest,
+    settings: Settings | None = None,
+) -> JobPreviewResponse:
+    resolved_settings = settings or get_cached_settings()
+    parser_name = _parser_name_for_url(str(request.job_url))
+    try:
+        raw_job_text = fetch_job_text(str(request.job_url), settings=resolved_settings)
+    except HTTPException as exc:
+        preview_status = _preview_status_from_fetch_error(exc)
+        message = _preview_error_message(preview_status, exc)
+        return JobPreviewResponse(
+            job_url=request.job_url,
+            profile=JobProfile(
+                job_id=0,
+                warnings=[_preview_warning(preview_status.value, message)],
+            ),
+            raw_text_char_count=0,
+            status=preview_status,
+            parser=parser_name,
+            quality_checks=[
+                JobPreviewQualityCheck(
+                    code=preview_status.value,
+                    status="fail",
+                    message=message,
+                )
+            ],
+        )
+
+    profile = parse_job_profile(raw_job_text, job_id=0)
+    quality_checks = _job_preview_quality_checks(profile, raw_text_length=len(raw_job_text))
+    return JobPreviewResponse(
+        job_url=request.job_url,
+        profile=profile,
+        raw_text_char_count=len(raw_job_text),
+        status=_job_preview_status(quality_checks),
+        parser=parser_name,
+        quality_checks=quality_checks,
     )
 
 
@@ -295,13 +364,124 @@ def get_tailored_resume_pdf(
         ) from exc
 
 
+def _parser_name_for_url(job_url: str) -> str:
+    hostname = urlparse(job_url).hostname or ""
+    if "greenhouse.io" in hostname:
+        return "greenhouse"
+    if "lever.co" in hostname:
+        return "lever"
+    if "rippling.com" in hostname:
+        return "rippling"
+    if "myworkdayjobs.com" in hostname or "workdayjobs.com" in hostname:
+        return "workday"
+    return "generic_html"
+
+
+def _preview_status_from_fetch_error(exc: HTTPException) -> JobPreviewStatus:
+    detail = str(exc.detail).lower()
+    if any(marker in detail for marker in ("blocked", "private", "rate limited")):
+        return JobPreviewStatus.blocked_private
+    if "could not fetch" in detail:
+        return JobPreviewStatus.needs_review
+    return JobPreviewStatus.too_short
+
+
+def _preview_error_message(preview_status: JobPreviewStatus, exc: HTTPException) -> str:
+    if preview_status == JobPreviewStatus.blocked_private:
+        return (
+            "This listing is private, blocked, or rate limited. Use a public job listing URL "
+            "that exposes readable role requirements."
+        )
+    if preview_status == JobPreviewStatus.too_short:
+        return (
+            "The listing did not expose enough readable job text. Use a public job listing URL "
+            "with visible requirements and responsibilities."
+        )
+    return f"ResumePilot could not fetch this listing. Check the URL and try again. ({exc.detail})"
+
+
+def _job_preview_quality_checks(
+    profile: JobProfile, *, raw_text_length: int
+) -> list[JobPreviewQualityCheck]:
+    checks = [
+        JobPreviewQualityCheck(
+            code="readable_text",
+            status="pass" if raw_text_length >= MIN_CONFIDENT_PREVIEW_TEXT_CHARS else "warn",
+            message=(
+                "Job page has enough readable text."
+                if raw_text_length >= MIN_CONFIDENT_PREVIEW_TEXT_CHARS
+                else "Job page readable text is short; extraction may be incomplete."
+            ),
+        ),
+        JobPreviewQualityCheck(
+            code="required_or_preferred_skills",
+            status="pass" if profile.required_skills or profile.preferred_skills else "fail",
+            message=(
+                "Required or preferred skills were extracted."
+                if profile.required_skills or profile.preferred_skills
+                else "No explicit required or preferred skills were extracted."
+            ),
+        ),
+        JobPreviewQualityCheck(
+            code="role_and_company",
+            status="pass" if profile.role_title and profile.company else "warn",
+            message=(
+                "Role and company were extracted."
+                if profile.role_title and profile.company
+                else "Role or company could not be extracted confidently."
+            ),
+        ),
+    ]
+    return checks
+
+
+def _job_preview_status(checks: list[JobPreviewQualityCheck]) -> JobPreviewStatus:
+    failing_codes = {check.code for check in checks if check.status == "fail"}
+    warning_codes = {check.code for check in checks if check.status == "warn"}
+    if "required_or_preferred_skills" in failing_codes:
+        return JobPreviewStatus.missing_requirements
+    if "readable_text" in failing_codes:
+        return JobPreviewStatus.too_short
+    if warning_codes:
+        return JobPreviewStatus.needs_review
+    return JobPreviewStatus.ready
+
+
+def _preview_warning(code: str, message: str) -> ValidationWarning:
+    return ValidationWarning(code=code, message=message)
+
+
+def _job_text_from_reviewed_profile(profile: JobProfile) -> str:
+    lines = [
+        f"Role: {profile.role_title}" if profile.role_title else "Role: Unknown",
+        f"Company: {profile.company}" if profile.company else "Company: Unknown",
+        "",
+        "Requirements:",
+    ]
+    lines.extend(
+        f"- Required {skill.name}. {skill.evidence_text}" for skill in profile.required_skills
+    )
+    lines.extend(
+        f"- Preferred {skill.name}. {skill.evidence_text}" for skill in profile.preferred_skills
+    )
+    if profile.responsibilities:
+        lines.extend(["", "Responsibilities:"])
+        lines.extend(f"- {responsibility}" for responsibility in profile.responsibilities)
+    if profile.experience_level:
+        lines.extend(["", f"Experience: {profile.experience_level}"])
+    return "\n".join(lines).strip()
+
+
 def _job_text_from_request(request: JobAnalysisRequest, settings: Settings) -> str:
+    if request.reviewed_job_profile:
+        return _job_text_from_reviewed_profile(request.reviewed_job_profile)
     if request.job_text:
         return request.job_text
     if request.job_url:
         return fetch_job_text(str(request.job_url), settings=settings)
     raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST, detail="Either job_text or job_url is required"
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Either job_text, job_url, or reviewed_job_profile is required",
     )
 
 
@@ -317,7 +497,7 @@ def _create_job_record(
     if existing:
         return existing
 
-    profile = parse_job_profile(
+    profile = request.reviewed_job_profile or parse_job_profile(
         raw_job_text,
         job_id=0,
         company=request.company,

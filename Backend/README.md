@@ -168,8 +168,12 @@ provider credentials and networked model calls.
 
 - `GET /health`
 - `GET /ready`
+- `GET /applications`
+- `POST /applications`
+- `PATCH /applications/{application_id}/status`
 - `POST /resumes/upload`
 - `DELETE /resumes/{resume_id}`
+- `POST /jobs/preview`
 - `POST /jobs/analyze`
 - `GET /reports/{report_id}`
 - `GET /reports/{report_id}/markdown`
@@ -181,6 +185,18 @@ provider credentials and networked model calls.
 - `GET /audit/events`
 - `POST /retention/purge`
 - `POST /chat/openclaw`
+
+`POST /jobs/preview` fetches a public job listing URL, extracts structured job
+evidence, and returns parser/quality metadata without creating a job or report.
+`POST /jobs/analyze` accepts either the legacy job text/URL inputs or a
+`reviewed_job_profile`; dashboard analysis uses the reviewed profile so user
+corrections are the source of truth.
+
+`POST /applications` saves reviewed job evidence as a tenant-scoped application
+draft. `POST /jobs/analyze` can receive `application_id` to complete that draft
+with resume/job/report IDs and match score. `PATCH /applications/{id}/status`
+supports the dashboard pipeline statuses `draft`, `reviewed`, `analyzed`,
+`exported`, and `applied`.
 
 The `/chat/openclaw` endpoint requires:
 

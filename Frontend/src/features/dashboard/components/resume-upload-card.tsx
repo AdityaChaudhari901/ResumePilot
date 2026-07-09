@@ -22,7 +22,7 @@ export function ResumeUploadCard({
   resume
 }: ResumeUploadCardProps) {
   return (
-    <Panel eyebrow="Step 01" title="Resume dossier">
+    <Panel eyebrow="Step 03" title="Resume upload">
       <form className="space-y-4" onSubmit={onSubmit}>
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-foreground">Resume file</span>

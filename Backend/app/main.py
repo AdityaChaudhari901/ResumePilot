@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 
-from app.api.routes import audit, chat, health, jobs, privacy, reports, resumes, usage
+from app.api.routes import applications, audit, chat, health, jobs, privacy, reports, resumes, usage
 from app.core.config import Settings, get_cached_settings
 from app.core.logging import configure_logging
 from app.core.production import validate_production_settings
@@ -30,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = session_factory
 
     app.include_router(health.router)
+    app.include_router(applications.router)
     app.include_router(resumes.router)
     app.include_router(jobs.router)
     app.include_router(reports.router)
