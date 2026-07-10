@@ -29,7 +29,7 @@ export function MatchScoreBreakdownView({
     return (
       <section
         aria-labelledby="score-breakdown-title"
-        className="rounded-lg border border-border bg-surface p-4"
+        className="rounded-xl border border-border bg-surface p-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold" id="score-breakdown-title">
@@ -48,7 +48,7 @@ export function MatchScoreBreakdownView({
   return (
     <section
       aria-labelledby="score-breakdown-title"
-      className="rounded-lg border border-border bg-surface p-4"
+      className="rounded-xl border border-border bg-surface p-5"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -69,7 +69,7 @@ export function MatchScoreBreakdownView({
         {breakdown.components.map((component) => {
           const detailsId = `score-component-${component.key}-details`;
           return (
-            <div className="rounded-md border border-border bg-background p-3" key={component.key}>
+            <div className="rounded-xl border border-border bg-background p-4" key={component.key}>
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-medium">{COMPONENT_LABELS[component.key]}</p>
                 <Badge tone={componentTone(component)}>{componentValue(component)}</Badge>
@@ -98,7 +98,7 @@ export function MatchScoreBreakdownView({
       </div>
 
       {breakdown.score_cap === null ? null : (
-        <p className="mt-3 rounded-md border border-warning/25 bg-warning/10 p-3 text-xs leading-5">
+        <p className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-4 text-xs leading-5">
           This result is provisional and capped at {Math.round(breakdown.score_cap)}% because the
           reviewed job evidence is incomplete.
         </p>

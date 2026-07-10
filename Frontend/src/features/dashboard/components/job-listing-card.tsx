@@ -36,8 +36,8 @@ export function JobListingCard({
       eyebrow="Step 01"
       title="Job listing"
     >
-      <form className="space-y-5" onSubmit={onSubmit}>
-        <div className="rounded-lg border border-primary/15 bg-primary/5 p-4">
+      <form className="space-y-6" onSubmit={onSubmit}>
+        <div className="border-l-2 border-primary bg-surface px-4 py-3">
           <div className="flex items-start gap-3">
             <BriefcaseBusiness className="mt-0.5 h-5 w-5 text-primary" aria-hidden="true" />
             <div>
@@ -52,7 +52,7 @@ export function JobListingCard({
 
         <fieldset>
           <legend className="text-sm font-medium text-foreground">Job source</legend>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <SourceOption
               checked={jobSourceType === "url"}
               description="Fetch a public listing"
@@ -79,7 +79,7 @@ export function JobListingCard({
             </span>
             <input
               autoComplete="url"
-              className="h-11 w-full rounded-md border border-border bg-surface-inset px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+              className="h-12 w-full rounded-lg border border-border-strong bg-surface-inset px-4 text-sm shadow-inner focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               onChange={(event) => onJobUrlChange(event.target.value)}
               placeholder="https://company.com/jobs/backend-engineer"
               type="url"
@@ -92,8 +92,8 @@ export function JobListingCard({
               Job description
             </span>
             <textarea
-              aria-describedby="job-description-help job-description-count"
-              className="min-h-64 w-full resize-y rounded-md border border-border bg-surface-inset px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+              aria-describedby="job-description-help"
+              className="min-h-64 w-full resize-y rounded-lg border border-border-strong bg-surface-inset px-4 py-3 text-sm leading-6 shadow-inner focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               maxLength={MAX_JOB_TEXT_CHARS}
               onChange={(event) => onJobTextChange(event.target.value)}
               placeholder="Paste the complete role, requirements, and responsibilities…"
@@ -111,8 +111,9 @@ export function JobListingCard({
           </label>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end border-t border-border pt-5">
           <Button
+            className="w-full sm:w-auto"
             disabled={!isJobInputValid || isPreviewing}
             icon={
               isPreviewing ? (
@@ -147,7 +148,7 @@ function SourceOption({
   value: JobSourceType;
 }) {
   return (
-    <label className="cursor-pointer rounded-md border border-border bg-surface p-3 has-[:checked]:border-primary/40 has-[:checked]:bg-primary/10">
+    <label className="cursor-pointer rounded-xl border border-border-strong bg-surface p-4 transition-colors hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-primary/10">
       <span className="flex items-start gap-3">
         <input
           checked={checked}

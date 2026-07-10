@@ -23,19 +23,29 @@ export function ResumeUploadCard({
 }: ResumeUploadCardProps) {
   return (
     <Panel eyebrow="Step 03" title="Resume upload">
-      <form className="space-y-4" onSubmit={onSubmit}>
-        <label className="block">
-          <span className="mb-2 block text-sm font-medium text-foreground">Resume file</span>
+      <form className="space-y-5" onSubmit={onSubmit}>
+        <label className="block rounded-2xl border border-dashed border-border-strong bg-surface p-5 transition-colors focus-within:border-primary focus-within:bg-primary/5 sm:p-7">
+          <span className="flex items-center gap-3 text-sm font-bold text-foreground">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary text-primary-foreground">
+              <FileUp className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <span>
+              Resume file
+              <span className="mt-1 block text-xs font-normal leading-5 text-muted-foreground">
+                PDF, DOCX, TXT, Markdown
+              </span>
+            </span>
+          </span>
           <input
             accept=".pdf,.docx,.txt,.md,.markdown"
-            className="block w-full rounded-md border border-border bg-surface-inset px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+            className="mt-5 block w-full rounded-lg border border-border bg-surface-inset px-3 py-2.5 text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-foreground file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             onChange={onFileChange}
             type="file"
           />
         </label>
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="min-h-5 text-sm text-muted-foreground">
-            {fileName || "PDF, DOCX, TXT, Markdown"}
+            {fileName ? `Selected: ${fileName}` : "Choose one resume file to continue."}
           </p>
           <Button
             disabled={isUploading || !fileName}
@@ -54,7 +64,7 @@ export function ResumeUploadCard({
       </form>
 
       {resume && (
-        <div className="mt-4 rounded-md border border-border bg-surface p-3">
+        <div className="mt-5 rounded-xl border border-validation/30 bg-validation/10 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">

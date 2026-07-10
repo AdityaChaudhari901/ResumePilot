@@ -20,18 +20,25 @@ export function Panel({
 }: PanelProps) {
   return (
     <Component
-      className={cn("rounded-lg border border-border bg-surface-raised p-4 shadow-sm", className)}
+      className={cn(
+        "min-w-0 rounded-2xl border border-border bg-surface-raised p-5 shadow-[0_18px_55px_-42px_rgba(12,17,10,0.85)] sm:p-6",
+        className
+      )}
       {...props}
     >
       {(eyebrow || title || action) && (
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
+        <div className="mb-5 flex items-start justify-between gap-4 border-b border-border pb-4">
+          <div className="min-w-0">
             {eyebrow && (
-              <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+              <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 {eyebrow}
               </p>
             )}
-            {title && <h2 className="mt-1 text-lg font-semibold text-foreground">{title}</h2>}
+            {title && (
+              <h2 className="mt-1.5 text-xl font-extrabold tracking-[-0.035em] text-foreground">
+                {title}
+              </h2>
+            )}
           </div>
           {action}
         </div>

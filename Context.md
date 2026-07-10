@@ -4,6 +4,16 @@ Last updated: 2026-07-10
 
 ## Active Implementation Checkpoint
 
+Production interface system completed and verified (2026-07-10):
+
+- Rebuilt every user-facing Next.js surface around a distinctive evidence-desk visual system: warm paper/graphite surfaces, one chartreuse action accent, self-hosted Manrope and IBM Plex Mono, connected evidence rails, responsive editorial hierarchy, and persisted light/dark themes.
+- Added branded anonymous access, Clerk sign-in/sign-up framing and appearance tokens, loading, recoverable error, and 404 states. Authentication remains server-gated and fail-closed; the public page no longer exposes internal configuration reasons.
+- Adapted Aceternity Spotlight/Bento and Magic UI Blur Fade as local, reduced-motion-aware public/auth primitives. Motion is excluded from approval, validation, report authority, and other critical workflow controls.
+- Restyled the six-step dashboard, inputs, application context, evidence report, durable approval, tailored-resume review, exports, and system review without changing BFF/API payloads, polling, focus restoration, evidence IDs, score provenance, or accepted-draft-only export boundaries.
+- Added pre-hydration theme restoration, system theme support, 320 px initial/report/draft overflow and reduced-motion coverage, a branded 404 accessibility scan, and WCAG-safe semantic status contrast. Real Clerk widget rendering remains a deployment-credential smoke because the local production environment has no Clerk keys.
+- Frontend release evidence is green: npm audit reports 0 vulnerabilities; ESLint, TypeScript, auth-runtime checks, and the production build pass; the Playwright production suite now contains 15 Chromium scenarios covering WCAG A/AA, desktop/mobile workflows, 320 px theme persistence, durable approval recovery, evidence/report/draft integrity, exports, and 404 recovery.
+- Rebuilt the production Compose frontend with static `public/` assets explicitly copied into the runtime image. The live Docker surface serves the pre-hydration theme script with HTTP 200, renders the effective dark scheme and Manrope at 320 px with no overflow or failed requests, and remains healthy alongside the ready API, PostgreSQL, and worker on loopback ports 3050/8050.
+
 Versioned evidence-fit scoring completed and verified (2026-07-10):
 
 - Started from synchronized `main` at `b0e01c1` and reproduced the audited experience, substring, missing-preferred, and synthetic-neutral score failures before changing production code.
@@ -125,6 +135,16 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
   - `Frontend/src/app/api/usage/summary/route.ts`
   - `Frontend/src/app/sign-in/[[...sign-in]]/page.tsx`
   - `Frontend/src/app/sign-up/[[...sign-up]]/page.tsx`
+  - `Frontend/src/app/loading.tsx`
+  - `Frontend/src/app/error.tsx`
+  - `Frontend/src/app/not-found.tsx`
+  - `Frontend/src/components/auth-shell.tsx`
+  - `Frontend/src/components/product-mark.tsx`
+  - `Frontend/src/components/status-page.tsx`
+  - `Frontend/src/components/ui/spotlight.tsx`
+  - `Frontend/src/components/ui/bento-grid.tsx`
+  - `Frontend/src/components/ui/blur-fade.tsx`
+  - `Frontend/src/components/ui/theme-toggle.tsx`
   - `Frontend/src/lib/auth.ts`
   - `Frontend/src/lib/openclaw.ts`
   - `Frontend/src/features/dashboard/components/application-pipeline-card.tsx`
@@ -162,7 +182,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
 - Production checkpoints use `langgraph-checkpoint-postgres`; the migration role runs `PostgresSaver.setup()` under an advisory lock, readiness verifies its four tables, and the worker removes terminal/orphan threads at startup and every `WORKFLOW_CHECKPOINT_RECONCILE_SECONDS`.
 - Local Google Cloud ADC is present and the local gcloud project is set from the ADC quota project.
 - OpenClaw Gateway service is installed as a local LaunchAgent on `127.0.0.1:18789`; project-local foreground startup remains available through `Ai services/openclaw/scripts/start_local_gateway.sh`.
-- Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, lucide-react, and optional Clerk App Router auth support.
+- Frontend app implemented in `Frontend/` with Next.js `16.2.10`, React `19.2.7`, TypeScript, Tailwind CSS, self-hosted Manrope/IBM Plex Mono, Motion, lucide-react, persisted light/dark product tokens, restrained local Aceternity/Magic UI adaptations, and optional Clerk App Router auth support.
 - Frontend route handlers proxy browser requests to FastAPI through `RESUMEPILOT_API_BASE_URL`, expose report history and Markdown report export, expose parsed resume profiles, recover/list/poll/cancel/approve durable operations, allow DOCX/LaTeX/PDF resume documents only from the accepted application-specific draft, probe OpenClaw Gateway/model/session readiness through `/api/openclaw/status`, and open authenticated local OpenClaw Control UI tabs through `/api/openclaw/control`.
 - Frontend auth provider mode is controlled by `RESUMEPILOT_AUTH_PROVIDER`: `local` for deterministic local dev, `clerk` for Clerk App Router sessions, and `trusted_headers` for identity-aware reverse proxies.
 - FastAPI production auth mode requires `AUTH_REQUIRED=true` and `AUTH_TRUSTED_PROXY_SECRET` so tenant identity headers must be signed by the trusted Next.js BFF instead of accepted directly from browsers.
@@ -211,7 +231,7 @@ Before implementing or changing live workflow behavior, verify the current offic
 | LLM/model layer | LangChain structured model calls inside LangGraph nodes only; Google Vertex |
 | Reports | JSON, Markdown, editable DOCX, LaTeX `.tex`, and compiled PDF resume export |
 | Auth | OpenClaw token via `JOBCOPILOT_API_TOKEN`; dashboard user sessions via signed BFF identity headers with optional Clerk |
-| Frontend | Next.js App Router, React, TypeScript, Tailwind CSS |
+| Frontend | Next.js App Router, React, TypeScript, Tailwind CSS, self-hosted Manrope/IBM Plex Mono, Motion for non-critical public/auth effects |
 | Frontend API bridge | Next.js route handlers as backend-for-frontend proxy |
 | OpenClaw model provider path | Google Vertex via `google-vertex` and gcloud ADC |
 | Frontend icons | lucide-react |
@@ -559,6 +579,8 @@ Next implementation scope:
 - Generated PDF artifacts live on the local/shared data volume. Move them to encrypted object storage with retention policies before running workers on multiple hosts.
 - URL preview still fetches synchronously to support immediate evidence review, while the authoritative analysis fetch runs in the durable worker. A fully asynchronous preview/capture operation remains future work for slow or JavaScript-heavy sources.
 - Caching, production metrics/alerts, visual screenshot baseline regression, and a queue/operator dashboard are not implemented yet.
+- Clerk sign-in/sign-up code compiles and is themed, but a real widget render and hosted redirect smoke require deployment Clerk credentials; local and CI browser gates intentionally use signed local auth without those secrets.
+- Existing response hardening covers framing, MIME sniffing, referrer, permissions, and no-store boundaries, but a Clerk-compatible nonce-based Content Security Policy still needs to be implemented and smoke-tested with real hosted Clerk credentials before public launch.
 - LangGraph execution is at-least-once around a hard process crash: if Vertex returns immediately before the node checkpoint is persisted, that one provider call can repeat. Completed checkpointed nodes and approval resumes do not rerun; monitor provider billing against recorded usage.
 - Terminal/account-deletion checkpoint cleanup is eventually consistent. Direct cleanup happens on normal paths, while the worker reconciles orphan/terminal threads at startup and every 60 seconds; account erasure can therefore precede final checkpoint cleanup by a bounded interval.
 - GitHub-hosted CI now exercises backend, frontend, browser/accessibility, and fresh Linux/amd64 production-container gates on every push; the fresh image build is the authoritative guard against architecture-specific dependency gaps.
@@ -573,10 +595,11 @@ Latest verification run: 2026-07-10
 | SQLite migration/drift gate | Fresh temporary SQLite upgrade/check plus downgrade to `20260710_0009` and re-upgrade | Passed through `20260710_0010`; no drift; score provenance columns remained present after the round trip |
 | PostgreSQL 16 migration/checkpoint/finalization gate | Isolated PostgreSQL 16 plus `Backend/scripts/run_postgres_migration_gate.py` | Passed: fresh and seeded `0007` upgrades, score-version backfill from `0009`, downgrade/re-upgrade, Alembic drift/ownership checks, concurrent finalization, durable LangGraph interrupt/resume, orphan reconciliation, indexes, seeds, sequences, exclusive `SKIP LOCKED` claims, and stale-lease recovery |
 | Frontend static/security/build gate | `npm run security:audit && npm run lint && npm run typecheck && npm run test:auth-runtime && npm run build` | Passed on Next.js 16.2.10; npm reported 0 vulnerabilities; auth runtime checks and the production build passed |
-| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: production build and 13/13 Chromium tests covering WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, approval refresh recovery, validation, evidence-fit breakdown/disclaimer, legacy/v1 report and ledger/application labels, accepted exports, desktop/mobile overflow, and report reopen |
+| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: production build and 15/15 Chromium tests covering WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, approval refresh recovery, validation, evidence-fit breakdown/disclaimer, legacy/v1 report and ledger/application labels, accepted exports, 320/390 px initial/report/draft overflow, dark/reduced-motion theme persistence, branded 404 recovery, and report reopen |
 | Production dependency/security audit | Isolated `pip-audit --disable-pip -r Backend/requirements/py312-production.lock.txt`; `npm audit --audit-level=low` | Passed with 0 known Python or npm vulnerabilities |
 | Live LangGraph/LangChain/Vertex approval smoke | Real `gemini-3.5-flash` structured calls through the three LangGraph generation nodes, in-memory checkpoint inspection, then `Command(resume=...)` rejection | Passed: 3 successful provider requests, 11,796 total tokens, durable approval pause, rejection resumed without another provider call, stable proposal revision, and no raw resume/JD/contact values in checkpoint history |
 | Live production Compose stack | `docker compose --env-file .env.production up -d --build migrate backend worker frontend` plus health/readiness/image/runtime checks | Passed on local arm64: clean hash-locked images built; migration exited 0; PostgreSQL/API/frontend healthy; worker and checkpoint reconciler running; `/health`, `/ready`, frontend, and same-origin upload→worker→report smoke passed; `pip check` clean; CrewAI/ChromaDB absent; LangGraph 1.2.9 and PostgreSQL saver 3.1.0 installed. Stack remains on 8050/3050 |
+| Redesigned frontend Compose render | Rebuild/restart `frontend`, HTTP probes for `/` and `/theme-init.js`, then Playwright against `http://127.0.0.1:3050` at 320 px dark/reduced-motion | Passed: frontend healthy; both routes returned 200; ready API reported database, Alembic head, and LangGraph checkpoint schema ready; rendered the expected workflow with Manrope, effective dark color scheme, zero horizontal overflow, and no actionable network/HTTP failures |
 | OpenClaw regression | `cd 'Ai services/openclaw' && ../../Backend/.venv/bin/python -m pytest -q tests` plus script compile | Passed: 7 tests; OpenClaw remains unchanged as the thin channel interface |
 | First GitHub-hosted production gate | GitHub Actions run `29074378258` for commit `26fbd21` | Backend, frontend, and browser/accessibility jobs passed; the deployment job failed a fresh Linux/amd64 image because Tectonic's Graphite2 runtime was not declared |
 | Linux/amd64 backend image repair | `docker buildx build --platform linux/amd64 --load --progress=plain -t resumepilot-backend:ci-fix Backend` plus an in-container Tectonic/`ldd`/`pip check`/UID smoke | Passed: checksum verification completed, Tectonic 0.16.9 loaded with no unresolved libraries, Python dependencies were consistent, and the runtime user remained UID 1000 |
@@ -718,6 +741,9 @@ Latest verification run: 2026-07-10
 
 ### 2026-07-10
 
+- Rebuilt the complete frontend as a responsive evidence-desk SaaS interface with shared typography/color/depth tokens, persisted light/dark themes, restrained Aceternity/Magic UI public effects, branded auth/error/loading/404 surfaces, and state-specific dashboard/report/draft polish while preserving every evidence and export boundary.
+- Expanded Playwright to 15 production Chromium scenarios with 320 px completed report/draft coverage, dark/reduced-motion persistence, and accessible 404 recovery; verified WCAG A/AA, responsive overflow, npm audit, lint, types, auth runtime, production build, and fresh single-server visual renders.
+- Corrected the production Next.js image boundary to include `public/`, then rebuilt and browser-verified the live Compose UI so the pre-hydration theme script, typography, dark preference, and 320 px layout match the tested application.
 - Added versioned `evidence_v2` score semantics with candidate-attributed tenure evidence, exact-token responsibilities, not-applicable reweighting, unknown-weight reservation at zero, score caps, guarded rollback-safe provenance, a 38-case/14-pair benchmark, and an accessible evidence-fit breakdown with historical-version labels.
 - Replaced multi-commit analysis completion with one correlation-validated, row-locked, replay-repairing transaction; added supersession protection, stale-worker lease fencing, SQLite failure/crash regressions, PostgreSQL concurrent replay proof, and synchronous OpenClaw finalization coverage.
 - Replaced the CrewAI runtime with a consented LangGraph live-draft workflow only after adding durable asynchronous human approval; retained OpenClaw unchanged and restricted LangChain to graph generation nodes.

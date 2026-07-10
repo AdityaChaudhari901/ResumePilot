@@ -71,7 +71,7 @@ export function TailoredResumeWorkspaceCard({
       title="Tailored resume workspace"
     >
       <div className="space-y-5">
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 md:grid-cols-4">
           <DraftMetric label="Accepted" value={draft?.accepted_count ?? 0} />
           <DraftMetric label="Pending" value={draft?.pending_count ?? 0} />
           <DraftMetric label="Rejected" value={draft?.rejected_count ?? 0} />
@@ -79,7 +79,7 @@ export function TailoredResumeWorkspaceCard({
         </div>
 
         {isLoading ? (
-          <div className="rounded-md border border-border bg-surface p-4 text-sm text-muted-foreground">
+          <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
             Loading tailored resume draft...
           </div>
         ) : null}
@@ -112,8 +112,8 @@ export function TailoredResumeWorkspaceCard({
 
         <section
           className={cn(
-            "rounded-lg border p-4",
-            canExport ? "border-primary/25 bg-primary/10" : "border-border bg-surface"
+            "rounded-xl border p-4 sm:p-5",
+            canExport ? "border-primary/40 bg-primary/10" : "border-border bg-surface"
           )}
           aria-label="Reviewed resume export"
         >
@@ -244,7 +244,7 @@ function TailoredResumeItemRow({
   }
 
   return (
-    <article className="rounded-lg border border-border bg-surface p-4">
+    <article className="rounded-xl border border-border bg-surface p-4 sm:p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -297,7 +297,7 @@ function TailoredResumeItemRow({
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2" aria-label="Original and proposed bullet comparison">
-        <section className="rounded-md border border-border bg-background p-3">
+        <section className="rounded-xl border border-border bg-background p-4">
           <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
             Original resume evidence
           </p>
@@ -363,7 +363,7 @@ function TailoredResumeItemRow({
         <div className="mt-3 space-y-2">
           {item.validation_warnings.map((warning) => (
             <div
-              className="rounded-md border border-warning/25 bg-warning/10 p-3"
+              className="rounded-xl border border-warning/25 bg-warning/10 p-4"
               key={`${item.id}-${warning.code}`}
             >
               <div className="flex items-center gap-2">
@@ -403,7 +403,7 @@ function InlineApiProblem({ itemId, problem }: { itemId: string; problem: ApiPro
         <ul className="mt-3 space-y-2">
           {problem.warnings.map((warning) => (
             <li
-              className="rounded border border-destructive/20 bg-background p-2 text-xs leading-5 text-foreground"
+              className="rounded-lg border border-destructive/20 bg-background p-3 text-xs leading-5 text-foreground"
               key={`${itemId}-${warning.code}`}
             >
               <div className="flex flex-wrap items-center gap-2">
@@ -441,9 +441,11 @@ function InlineApiProblem({ itemId, problem }: { itemId: string; problem: ApiPro
 
 function DraftMetric({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="rounded-md border border-border bg-surface p-3">
-      <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">{label}</p>
-      <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-foreground">
+    <div className="bg-surface-raised p-4">
+      <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 font-mono text-2xl font-semibold tracking-[-0.04em] tabular-nums text-foreground">
         {value}
       </p>
     </div>
@@ -452,7 +454,7 @@ function DraftMetric({ label, value }: { label: string; value: number | string }
 
 function EmptyDraftState({ children, title }: { children: string; title: string }) {
   return (
-    <div className="rounded-md border border-border bg-surface p-4">
+    <div className="rounded-xl border border-dashed border-border-strong bg-surface p-5">
       <p className="text-sm font-semibold text-foreground">{title}</p>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">{children}</p>
     </div>

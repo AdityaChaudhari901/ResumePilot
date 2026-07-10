@@ -1,7 +1,14 @@
 import { SignUp } from "@clerk/nextjs";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { AuthShell } from "@/components/auth-shell";
 import { isClerkAuthReady } from "@/lib/auth-runtime";
+import { clerkAppearance } from "@/lib/clerk-appearance";
+
+export const metadata: Metadata = {
+  title: "Create account"
+};
 
 export default function SignUpPage() {
   if (!isClerkAuthReady(process.env)) {
@@ -9,8 +16,13 @@ export default function SignUpPage() {
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-8">
-      <SignUp path="/sign-up" routing="path" signInUrl="/sign-in" />
-    </main>
+    <AuthShell mode="sign-up">
+      <SignUp
+        appearance={clerkAppearance}
+        path="/sign-up"
+        routing="path"
+        signInUrl="/sign-in"
+      />
+    </AuthShell>
   );
 }

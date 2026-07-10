@@ -1,12 +1,14 @@
 "use client";
 
-import { ChevronDown, RefreshCcw } from "lucide-react";
+import { CheckCircle2, ChevronDown, FileCheck2, RefreshCcw, ScanSearch } from "lucide-react";
 import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ProductMark } from "@/components/product-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { AccountSessionCard } from "@/features/dashboard/components/account-session-card";
 import { AiWorkflowCard } from "@/features/dashboard/components/ai-workflow-card";
 import { ApplicationPipelineCard } from "@/features/dashboard/components/application-pipeline-card";
@@ -1296,33 +1298,78 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   }
 
   return (
-    <main className="min-h-dvh px-4 py-4 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4">
-        <header className="rounded-lg border border-border bg-surface-raised p-4 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="primary">ResumePilot</Badge>
-                <Badge tone="success">evidence-first</Badge>
-                <Badge tone="neutral">local MVP</Badge>
-              </div>
-              <h1 className="mt-3 text-2xl font-semibold text-foreground sm:text-3xl">
-                Guided application workflow
-              </h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-                Add a job URL or paste the description, review the extracted job evidence, upload the resume,
-                then run ResumePilot&apos;s evidence-first AI services and approve the tailored
-                resume draft before exporting.
-              </p>
-            </div>
+    <main className="min-h-dvh overflow-x-clip">
+      <div className="rp-frosted sticky top-0 z-40 border-b border-border">
+        <div className="mx-auto flex h-16 max-w-[90rem] items-center justify-between px-4 sm:px-6 lg:px-8">
+          <ProductMark />
+          <div className="flex items-center gap-2">
+            <Badge className="hidden sm:inline-flex" tone="neutral">
+              private workspace
+            </Badge>
             <Button
+              className="h-9 px-3"
               icon={<RefreshCcw className="h-4 w-4" aria-hidden="true" />}
               onClick={() => void loadStatus()}
-              variant="secondary"
+              variant="ghost"
             >
-              Refresh status
+              <span className="hidden sm:inline">Refresh status</span>
+              <span className="sm:hidden">Refresh</span>
             </Button>
+            <ThemeToggle />
           </div>
+        </div>
+      </div>
+
+      <div className="mx-auto flex max-w-[90rem] flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <header className="grid gap-8 border-b border-border-strong pb-7 lg:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.75fr)] lg:items-end">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="primary">evidence-first</Badge>
+              <span className="font-mono text-[0.68rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                application workspace / 01
+              </span>
+            </div>
+            <h1 className="mt-5 max-w-3xl text-3xl font-extrabold leading-[1.05] tracking-[-0.055em] text-foreground sm:text-5xl">
+              Guided application workflow
+            </h1>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
+              Capture the role, verify what ResumePilot extracted, then connect every recommendation
+              to resume evidence before you approve an export.
+            </p>
+          </div>
+
+          <dl
+            aria-label="Evidence protocol status"
+            className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3"
+          >
+            <div className="bg-surface-raised p-4">
+              <dt className="flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.13em] text-muted-foreground">
+                <ScanSearch className="h-3.5 w-3.5" aria-hidden="true" />
+                Source
+              </dt>
+              <dd className="mt-2 text-sm font-bold text-foreground">
+                {isJobSourceValid ? "Captured" : "Needed first"}
+              </dd>
+            </div>
+            <div className="bg-surface-raised p-4">
+              <dt className="flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.13em] text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Evidence
+              </dt>
+              <dd className="mt-2 text-sm font-bold text-foreground">
+                {isJobEvidenceReady ? "Reviewed" : "Awaiting review"}
+              </dd>
+            </div>
+            <div className="bg-surface-raised p-4">
+              <dt className="flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.13em] text-muted-foreground">
+                <FileCheck2 className="h-3.5 w-3.5" aria-hidden="true" />
+                Export
+              </dt>
+              <dd className="mt-2 text-sm font-bold text-foreground">
+                {tailoredResumeDraft?.export_ready ? "Approved" : "Approval gated"}
+              </dd>
+            </div>
+          </dl>
         </header>
 
         <WorkflowProgress steps={workflowSteps} />
@@ -1330,15 +1377,18 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         {errorMessage && (
           <div
             aria-live="assertive"
-            className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
+            className="rounded-xl border border-destructive/35 bg-destructive/10 p-4 text-sm font-medium text-destructive shadow-sm"
             role="alert"
           >
             {errorMessage}
           </div>
         )}
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <section aria-label="Active workflow step" className="space-y-4">
+        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(20rem,0.7fr)]">
+          <section
+            aria-label="Active workflow step"
+            className="min-w-0 space-y-5 [&>section]:border-border-strong"
+          >
             {workflowStep === "job" ? (
               <JobListingCard
                 isJobInputValid={isJobSourceValid}
@@ -1422,7 +1472,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             ) : null}
           </section>
 
-          <div className="space-y-4">
+          <aside aria-label="Application context" className="min-w-0 space-y-5">
             <ApplicationPipelineCard
               activeApplicationId={activeApplicationId}
               applications={applications}
@@ -1465,18 +1515,23 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               tailoredResumeDraft={tailoredResumeDraft}
               workflowTrace={workflowTrace}
             />
-          </div>
+          </aside>
         </div>
 
-        <details className="group rounded-lg border border-border bg-surface-raised shadow-sm">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
-            <span>Workspace review and system status</span>
+        <details className="group overflow-hidden rounded-2xl border border-border bg-surface-raised shadow-[0_18px_55px_-42px_rgba(12,17,10,0.85)]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 text-sm font-bold tracking-[-0.01em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary sm:px-6">
+            <span className="flex items-center gap-3">
+              <span className="font-mono text-[0.65rem] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                System
+              </span>
+              Workspace review and system status
+            </span>
             <ChevronDown
               className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180"
               aria-hidden="true"
             />
           </summary>
-          <div className="grid min-w-0 gap-4 border-t border-border p-4 [&>*]:min-w-0 xl:grid-cols-2">
+          <div className="grid min-w-0 gap-5 border-t border-border bg-surface p-4 [&>*]:min-w-0 sm:p-6 xl:grid-cols-2">
             <Panel as="aside" eyebrow="Runtime" title="FastAPI status">
               <HealthStrip health={health} isLoading={isLoadingStatus} />
             </Panel>
@@ -1509,6 +1564,11 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             </Panel>
           </div>
         </details>
+
+        <footer className="flex flex-col gap-2 border-t border-border py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <p>ResumePilot keeps source evidence visible from intake through export.</p>
+          <p className="font-mono">AI suggests / you approve</p>
+        </footer>
       </div>
     </main>
   );

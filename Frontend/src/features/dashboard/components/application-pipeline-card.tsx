@@ -36,13 +36,13 @@ export function ApplicationPipelineCard({
     <Panel as="aside" eyebrow="Workspace" title="Application pipeline">
       <div className="space-y-3">
         {isLoading ? (
-          <div className="rounded-md border border-border bg-surface p-3 text-sm text-muted-foreground">
+          <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
             Loading applications...
           </div>
         ) : null}
 
         {!isLoading && applications.length === 0 ? (
-          <div className="rounded-md border border-border bg-surface p-3 text-sm leading-6 text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-border-strong bg-surface p-4 text-sm leading-6 text-muted-foreground">
             No saved applications yet. Review a job description to create one.
           </div>
         ) : null}
@@ -83,7 +83,7 @@ function ApplicationPipelineRow({
 
   return (
     <article
-      className="rounded-md border border-border bg-surface p-3"
+      className="rounded-xl border border-border bg-surface p-4 transition-colors aria-current:border-primary/60 aria-current:bg-primary/5"
       aria-current={isActive ? "true" : undefined}
     >
       <div className="flex items-start justify-between gap-3">

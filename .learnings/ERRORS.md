@@ -47,6 +47,171 @@ and reject mismatched operation, analysis, or graph-state versions.
 
 ---
 
+## [ERR-20260710-044] next-rsc-prefetch-smoke-false-positive
+
+**Logged**: 2026-07-10T19:19:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The production browser smoke classified a cancelled Next.js RSC prefetch as a
+failed static asset even though the page rendered with no HTTP error response.
+
+### Error
+
+```text
+requestfailed: /?_rsc=...
+```
+
+### Context
+
+- The document rendered the expected workflow heading, correct font, and no
+  horizontal overflow.
+- Next.js may cancel speculative RSC requests as navigation settles.
+- With no stored override, dark mode is intentionally selected by the CSS
+  system-preference media query rather than a `data-theme` attribute.
+
+### Suggested Fix
+
+Record failure reasons and treat `net::ERR_ABORTED` speculative requests as
+non-actionable while continuing to fail on HTTP 4xx/5xx and other network
+errors. Verify effective `color-scheme` instead of requiring a theme marker.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/public/theme-init.js, Frontend/src/app/globals.css
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:19:00Z
+- **Notes**: Refined the smoke to inspect failure reasons and computed theme state.
+
+---
+
+## [ERR-20260710-043] host-node-missing-from-path
+
+**Logged**: 2026-07-10T19:17:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: developer tooling
+
+### Summary
+
+The final Playwright smoke could not start because the non-interactive host
+shell did not expose the installed Node binary on `PATH`.
+
+### Error
+
+```text
+zsh: command not found: node
+```
+
+### Context
+
+- The application and Compose containers remained healthy.
+- The frontend build and earlier E2E suite had already completed in their
+  configured environments.
+
+### Suggested Fix
+
+Resolve and prepend the workstation's managed Node installation path before
+running host-side Playwright commands.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: none
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:17:00Z
+- **Notes**: Used the installed managed Node binary explicitly for the smoke.
+
+---
+
+## [ERR-20260710-042] zsh-status-readonly-health-probe
+
+**Logged**: 2026-07-10T19:14:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: developer tooling
+
+### Summary
+
+A Compose health polling helper assigned to `status`, which is a read-only
+special parameter in zsh, so the helper exited before evaluating the container.
+
+### Error
+
+```text
+zsh: read-only variable: status
+```
+
+### Context
+
+- The frontend container had already restarted successfully.
+- Only the local verification helper failed.
+
+### Suggested Fix
+
+Use a non-special name such as `health_state` in cross-shell verification
+snippets.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: none
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:14:00Z
+- **Notes**: Renamed the helper variable and reran the health probe.
+
+---
+
+## [ERR-20260710-041] next-docker-public-assets-missing
+
+**Logged**: 2026-07-10T19:10:00Z
+**Priority**: high
+**Status**: resolved
+**Area**: deployment
+
+### Summary
+
+The production Next.js container served application routes but returned 404 for
+the pre-hydration theme script because the runtime image did not copy `public/`.
+
+### Error
+
+```text
+GET /theme-init.js 404
+```
+
+### Context
+
+- Local builds and Playwright runs served the asset correctly.
+- The failure appeared only after rebuilding and probing the Compose runtime.
+
+### Suggested Fix
+
+Copy `/app/public` from the builder stage into the frontend runtime image and
+retain an HTTP asset probe in production verification.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/Dockerfile, Frontend/public/theme-init.js
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:10:00Z
+- **Notes**: Added the missing runtime-stage `public/` copy and rebuilt the image.
+
+---
+
 ## [ERR-20260710-020] openclaw-backend-venv-relative-path
 
 **Logged**: 2026-07-10T16:05:00Z
@@ -1275,5 +1440,370 @@ Use an explicit file header before every hunk in a multi-file patch.
 
 - **Resolved**: 2026-07-10T17:08:00Z
 - **Notes**: Reapplied the changes with explicit file boundaries and verified each result.
+
+---
+
+## [ERR-20260710-032] fontsource-variable-package-name-not-published
+
+**Logged**: 2026-07-10T17:39:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The dependency lookup assumed IBM Plex Mono had a Fontsource variable-font
+package, but that scoped package is not published.
+
+### Error
+
+```text
+npm error 404 Not Found - GET https://registry.npmjs.org/@fontsource-variable%2fibm-plex-mono
+```
+
+### Context
+
+- The failure occurred during a read-only npm registry lookup before the font
+  dependency was installed.
+- `@fontsource-variable/manrope` exists, while IBM Plex Mono must use its
+  non-variable `@fontsource/ibm-plex-mono` package or a different mono family.
+
+### Suggested Fix
+
+Verify Fontsource package names with `npm view` before adding them, and use the
+published non-variable IBM Plex Mono package when this font pairing is needed.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/package.json, .learnings/ERRORS.md
+
+### Resolution
+
+- **Resolved**: 2026-07-10T17:39:00Z
+- **Notes**: Switched the planned dependency to the published non-variable package.
+
+---
+
+## [ERR-20260710-033] tailored-draft-style-patch-context-mismatch
+
+**Logged**: 2026-07-10T17:55:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+A combined styling patch expected an outdated TailoredResume metric class and
+failed atomically before editing either target component.
+
+### Error
+
+```text
+apply_patch verification failed: Failed to find expected lines in tailored-resume-workspace-card.tsx
+```
+
+### Context
+
+- The helper used a `text-2xl` metric class while the patch expected `text-xl`.
+- The failed patch also included approval-panel changes, but no hunk was applied.
+
+### Suggested Fix
+
+Inspect the exact helper context and split broad multi-file visual patches into
+smaller file-scoped patches.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/tailored-resume-workspace-card.tsx, Frontend/src/features/dashboard/components/workflow-approval-panel.tsx
+
+### Resolution
+
+- **Resolved**: 2026-07-10T17:55:00Z
+- **Notes**: Re-read the live source and reapplied smaller exact-context patches.
+
+---
+
+## [ERR-20260710-034] theme-toggle-effect-state-lint
+
+**Logged**: 2026-07-10T18:01:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The first theme-toggle implementation synchronously updated React state inside
+an effect and failed the React 19 hooks lint rule.
+
+### Error
+
+```text
+react-hooks/set-state-in-effect: Avoid calling setState() directly within an effect
+```
+
+### Context
+
+- TypeScript passed; only the frontend lint gate failed.
+- The effect was synchronizing persisted or system theme preference after hydration.
+
+### Suggested Fix
+
+Model browser theme preference with `useSyncExternalStore`, publish a local
+theme-change event, and reserve the effect for synchronizing external DOM state.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/components/ui/theme-toggle.tsx
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:01:00Z
+- **Notes**: Replaced effect-driven component state with a browser theme store subscription.
+
+---
+
+## [ERR-20260710-035] playwright-iphone-profile-required-webkit
+
+**Logged**: 2026-07-10T18:06:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The standalone Playwright screenshot command selected WebKit for an iPhone
+device profile, but only Chromium is installed in this frontend workspace.
+
+### Error
+
+```text
+Executable doesn't exist at .../ms-playwright/webkit-2311/pw_run.sh
+```
+
+### Context
+
+- The application build and desktop Chromium render both succeeded.
+- The product E2E project is intentionally configured for Chromium.
+
+### Suggested Fix
+
+Use the installed Chromium executable with an explicit mobile viewport and
+user agent instead of letting the screenshot CLI infer WebKit from an iPhone profile.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/playwright.config.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:06:00Z
+- **Notes**: Re-ran mobile visual checks in Chromium with explicit viewport sizes.
+
+---
+
+## [ERR-20260710-036] report-score-warning-badge-contrast
+
+**Logged**: 2026-07-10T18:12:00Z
+**Priority**: medium
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The semantic warning badge used its normal amber-on-tint treatment inside the
+new inverted score panel and failed WCAG AA contrast in desktop and mobile E2E.
+
+### Error
+
+```text
+color-contrast: #92530d on #232013, contrast 2.69, expected 4.5:1
+```
+
+### Context
+
+- Eleven of thirteen Playwright scenarios passed.
+- Both failures came from the same `Partial evidence coverage` badge after the
+  completed report accessibility scan.
+
+### Suggested Fix
+
+Keep the semantic text label, but use the score panel's inverted background
+and foreground tokens for badges placed inside that panel.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/report-viewer.tsx, Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:12:00Z
+- **Notes**: Added a theme-safe inverted badge override and reran accessibility checks.
+
+---
+
+## [ERR-20260710-037] nextjs-security-scan-command-assumptions
+
+**Logged**: 2026-07-10T18:20:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The first security-scan batch assumed the bundled dependency script was
+executable and referenced the Next.js proxy from the wrong relative path.
+
+### Error
+
+```text
+permission denied: .../scripts/dependency-audit.sh
+rg: proxy.ts: No such file or directory
+```
+
+### Context
+
+- Secret and pattern scanners completed; real environment files remained excluded.
+- The actual proxy is `src/proxy.ts`.
+
+### Suggested Fix
+
+Invoke the read-only dependency scanner explicitly with `bash` and search the
+live file map rather than assuming a root-level proxy path.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/proxy.ts, Frontend/package.json
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:20:00Z
+- **Notes**: Reran the dependency audit through bash and corrected the manual scan paths.
+
+---
+
+## [ERR-20260710-038] security-audit-wrapper-required-jq
+
+**Logged**: 2026-07-10T18:23:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The bundled dependency-audit wrapper could not parse npm's JSON because `jq`
+is not installed, leaving blank counts and exiting with status 127.
+
+### Error
+
+```text
+Vulnerability Summary: Critical: [blank] ... exit 127
+```
+
+### Context
+
+- The wrapper did invoke `npm audit`, but its own parser was not portable to
+  this workstation.
+- No product dependency or source file caused the tool failure.
+
+### Suggested Fix
+
+Use the repository's `npm run security:audit` gate, which requires no external
+JSON parser, and inspect `npm audit --json` directly only when details are needed.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/package.json
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:23:00Z
+- **Notes**: Replaced the wrapper result with the native npm audit gate.
+
+---
+
+## [ERR-20260710-039] clerk-presence-awk-portability
+
+**Logged**: 2026-07-10T18:31:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: developer tooling
+
+### Summary
+
+A secret-safe credential-presence check used an awk conditional expression
+that the workstation awk rejected before reading any value.
+
+### Error
+
+```text
+awk: syntax error at source line 1
+```
+
+### Context
+
+- The command was intended to report only `present`, `absent`, or `undefined`.
+- No environment value was printed.
+
+### Suggested Fix
+
+Use `grep -Eq '^VARIABLE=.+$'` for boolean presence checks instead of parsing
+or printing the value.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: .env.production
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:31:00Z
+- **Notes**: Replaced the awk expression with a value-redacting grep presence check.
+
+---
+
+## [ERR-20260710-040] axe-standalone-required-browser-context
+
+**Logged**: 2026-07-10T18:48:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The standalone public-page Axe smoke created a page directly from the browser,
+but the installed Axe Playwright adapter requires an explicit browser context.
+
+### Error
+
+```text
+Error: Please use browser.newContext()
+```
+
+### Context
+
+- The public page and assets loaded before Axe rejected the test harness shape.
+- The repository Playwright suite already uses fixture-provided contexts and was unaffected.
+
+### Suggested Fix
+
+Create `browser.newContext()` with the target viewport, then create the page
+from that context before constructing `AxeBuilder`.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:48:00Z
+- **Notes**: Reran the public WCAG smoke with explicit isolated browser contexts.
 
 ---

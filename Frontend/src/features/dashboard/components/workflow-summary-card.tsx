@@ -64,7 +64,7 @@ export function WorkflowSummaryCard({
 
   return (
     <Panel as="aside" eyebrow="Current application" title="Workflow summary">
-      <div className="space-y-3">
+      <div className="grid min-w-0 w-full gap-px overflow-hidden rounded-xl border border-border bg-border">
         <SummaryRow
           actionLabel="Edit"
           actionName="Edit job listing"
@@ -146,7 +146,7 @@ export function WorkflowSummaryCard({
           onAction={onViewDraft}
         />
       </div>
-      <p className="mt-4 rounded-md border border-border bg-surface p-3 text-xs leading-5 text-muted-foreground">
+      <p className="mt-4 border-l-2 border-primary bg-surface px-3 py-2.5 text-xs leading-5 text-muted-foreground">
         Inputs are reviewed first. Exports should use accepted draft bullets, not unreviewed
         suggestions.
       </p>
@@ -178,8 +178,8 @@ function SummaryRow({
   statusLabel
 }: SummaryRowProps) {
   return (
-    <div className="rounded-md border border-border bg-surface p-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="min-w-0 bg-surface-raised p-4">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             {icon}
@@ -188,6 +188,7 @@ function SummaryRow({
           <p className="mt-1 truncate text-xs text-muted-foreground">{detail}</p>
         </div>
         <Badge
+          className="self-start shrink-0"
           tone={status === "ready" ? "success" : status === "attention" ? "warning" : "neutral"}
         >
           {statusLabel}

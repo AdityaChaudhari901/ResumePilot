@@ -93,7 +93,7 @@ export function AiWorkflowCard({
       title="AI services"
     >
       <form className="space-y-5" onSubmit={onSubmit}>
-        <div className="rounded-lg border border-border bg-surface p-4">
+        <div className="border-l-2 border-primary bg-surface px-4 py-3">
           <div className="flex items-start gap-3">
             <GitBranch className="mt-0.5 h-5 w-5 text-primary" aria-hidden="true" />
             <div>
@@ -108,15 +108,15 @@ export function AiWorkflowCard({
           </div>
         </div>
 
-        <ol className="grid gap-3 md:grid-cols-2">
+        <ol className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-2">
           {WORKFLOW_ITEMS.map((item, index) => {
             const Icon = item.icon;
 
             return (
-              <li className="rounded-md border border-border bg-surface p-3" key={item.label}>
+              <li className="bg-surface-raised p-4" key={item.label}>
                 <div className="flex items-start gap-3">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-primary/20 bg-primary/10 font-mono text-xs font-semibold text-primary">
-                    {index + 1}
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary font-mono text-xs font-semibold text-primary-foreground">
+                    0{index + 1}
                   </span>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
@@ -134,7 +134,7 @@ export function AiWorkflowCard({
         </ol>
 
         {usage?.live_ai_enabled ? (
-          <label className="flex items-start gap-3 rounded-md border border-border bg-surface p-3 text-sm">
+          <label className="flex items-start gap-3 rounded-xl border border-border-strong bg-surface p-4 text-sm">
             <input
               checked={allowLiveAiProcessing}
               className="mt-1 h-4 w-4"
@@ -157,7 +157,7 @@ export function AiWorkflowCard({
         {shouldShowProgress && operation ? (
           <div
             aria-live="polite"
-            className="rounded-md border border-primary/20 bg-primary/5 p-3"
+            className="rounded-xl border border-primary/40 bg-primary/10 p-4"
           >
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="font-semibold text-foreground">

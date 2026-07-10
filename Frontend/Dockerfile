@@ -38,6 +38,7 @@ COPY --from=builder --chown=resumepilot:resumepilot /app/package.json ./package.
 COPY --from=builder --chown=resumepilot:resumepilot /app/package-lock.json ./package-lock.json
 COPY --from=builder --chown=resumepilot:resumepilot /app/node_modules ./node_modules
 COPY --from=builder --chown=resumepilot:resumepilot /app/.next ./.next
+COPY --from=builder --chown=resumepilot:resumepilot /app/public ./public
 COPY --from=builder --chown=resumepilot:resumepilot /app/next.config.ts ./next.config.ts
 
 USER resumepilot

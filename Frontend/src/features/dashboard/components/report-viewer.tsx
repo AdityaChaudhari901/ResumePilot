@@ -61,7 +61,7 @@ export function ReportViewer({
   if (!report || !analysis) {
     return (
       <Panel eyebrow="Step 05" title="Report">
-        <div className="flex min-h-80 items-center justify-center rounded-md border border-dashed border-border bg-surface p-6 text-center">
+        <div className="flex min-h-80 items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface p-6 text-center">
           <div>
             <ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <p className="mt-3 text-sm font-medium text-foreground">No analysis yet</p>
@@ -107,8 +107,8 @@ export function ReportViewer({
     ? "Needs job details"
     : hasProvisionalScore
       ? usesEvidenceV2
-        ? "Provisional — evidence incomplete"
-        : "Historical score — provisional"
+        ? "Provisional, evidence incomplete"
+        : "Historical score, provisional"
       : usesEvidenceV2
         ? scoreLabel(report.match_score)
         : "Historical score";
@@ -156,24 +156,29 @@ export function ReportViewer({
       title="Evidence-backed fit"
     >
       <div className="space-y-5">
-        <div className="grid gap-3 md:grid-cols-[12rem_1fr]">
-          <div className="rounded-lg border border-border bg-surface p-4">
-            <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+        <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-[14rem_1fr]">
+          <div className="bg-foreground p-5 text-background">
+            <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-background/60">
               {scoreHeading}
             </p>
-            <p className="mt-2 font-mono text-5xl font-semibold tabular-nums">
+            <p className="mt-3 font-mono text-6xl font-semibold tracking-[-0.08em] text-primary tabular-nums">
               {formatScore(report.match_score)}
             </p>
-            <Badge className="mt-3" tone={scoreBadgeTone}>
+            <Badge
+              className="mt-3 border-background/25 bg-background text-foreground"
+              tone={scoreBadgeTone}
+            >
               {scoreBadgeLabel}
             </Badge>
-            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+            <p className="mt-4 text-xs leading-5 text-background/65">
               This deterministic comparison is not a hiring probability or ATS guarantee.
             </p>
           </div>
-          <div className="rounded-lg border border-border bg-surface p-4">
-            <p className="text-sm font-semibold">Executive summary</p>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{report.executive_summary}</p>
+          <div className="bg-surface-raised p-5 sm:p-6">
+            <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+              Executive summary
+            </p>
+            <p className="mt-4 text-sm leading-7 text-muted-foreground">{report.executive_summary}</p>
           </div>
         </div>
 
@@ -184,7 +189,7 @@ export function ReportViewer({
 
         {hasUnclearJobRequirements ? (
           <div
-            className="rounded-lg border border-warning/25 bg-warning/10 p-4"
+            className="rounded-xl border border-warning/30 bg-warning/10 p-4"
             role="status"
           >
             <div className="flex gap-3">
@@ -206,7 +211,7 @@ export function ReportViewer({
           </div>
         ) : null}
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-3">
           <Metric label="Matched" value={report.matched_skills.length} />
           <Metric label="Missing" value={report.missing_skills.length} />
           <Metric label="Warnings" value={report.validation_warnings.length} />
@@ -222,7 +227,7 @@ export function ReportViewer({
             </div>
             <div className="space-y-2">
               {report.matched_skills.slice(0, 8).map((item) => (
-                <div className="rounded-md border border-border bg-surface p-3" key={item.skill}>
+                <div className="rounded-xl border border-border bg-surface p-4" key={item.skill}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{item.skill}</p>
                     <div className="flex shrink-0 flex-wrap justify-end gap-2">
@@ -258,7 +263,7 @@ export function ReportViewer({
             </div>
             <div className="space-y-2">
               {report.missing_skills.slice(0, 5).map((item) => (
-                <div className="rounded-md border border-border bg-surface p-3" key={item.skill}>
+                <div className="rounded-xl border border-border bg-surface p-4" key={item.skill}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{item.skill}</p>
                     <Badge tone={item.importance === "required" ? "danger" : "warning"}>
@@ -269,7 +274,7 @@ export function ReportViewer({
                 </div>
               ))}
               {report.weak_skills.slice(0, 5).map((item) => (
-                <div className="rounded-md border border-border bg-surface p-3" key={item.skill}>
+                <div className="rounded-xl border border-border bg-surface p-4" key={item.skill}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{item.skill}</p>
                     <Badge tone="warning">weak evidence</Badge>
@@ -301,7 +306,7 @@ export function ReportViewer({
           </div>
           <div className="space-y-2">
             {report.tailored_bullets.map((item) => (
-              <div className="rounded-md border border-border bg-surface p-3" key={item.bullet}>
+              <div className="rounded-xl border border-border bg-surface p-4" key={item.bullet}>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <p className="text-sm leading-6">{item.bullet}</p>
                   {item.unsupported_claims.length > 0 ? (
@@ -319,7 +324,7 @@ export function ReportViewer({
               </div>
             ))}
             {report.tailored_bullets.length === 0 ? (
-              <div className="rounded-md border border-border bg-surface p-3 text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border-strong bg-surface p-4 text-sm text-muted-foreground">
                 No project or experience evidence was strong enough for an exportable tailored
                 bullet. Add truthful project/work evidence before editing the resume.
               </div>
@@ -335,7 +340,7 @@ export function ReportViewer({
             </div>
             <div className="space-y-2">
               {topKeywords.map((item) => (
-                <div className="rounded-md border border-border bg-surface p-3" key={item.keyword}>
+                <div className="rounded-xl border border-border bg-surface p-4" key={item.keyword}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium">{item.keyword}</p>
                     <Badge tone={keywordStatusTone(item.status)}>
@@ -367,7 +372,7 @@ export function ReportViewer({
             <ol className="space-y-2">
               {report.next_actions.map((action) => (
                 <li
-                  className="rounded-md border border-border bg-surface p-3 text-sm leading-6 text-muted-foreground"
+                  className="rounded-xl border border-border bg-surface p-4 text-sm leading-6 text-muted-foreground"
                   key={action}
                 >
                   {action}
@@ -399,7 +404,7 @@ export function ReportViewer({
             </div>
             <div className="space-y-2">
               {report.validation_warnings.map((warning) => (
-                <div className="rounded-md border border-border bg-surface p-3" key={warning.code}>
+                <div className="rounded-xl border border-border bg-surface p-4" key={warning.code}>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={validationSeverityTone(warning)}>
                       {validationSeverityLabel(warning)}
@@ -457,9 +462,11 @@ interface MetricProps {
 
 function Metric({ label, value }: MetricProps) {
   return (
-    <div className="rounded-md border border-border bg-surface p-3">
-      <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">{label}</p>
-      <p className="mt-2 font-mono text-2xl font-semibold tabular-nums">{value}</p>
+    <div className="bg-surface-raised p-4">
+      <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 font-mono text-3xl font-semibold tracking-[-0.05em] tabular-nums">{value}</p>
     </div>
   );
 }
@@ -479,7 +486,7 @@ function EmptyReportState({
       : "border-border bg-surface";
 
   return (
-    <div className={`rounded-md border p-3 ${toneClass}`}>
+    <div className={`rounded-xl border p-4 ${toneClass}`}>
       <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">{children}</p>
     </div>

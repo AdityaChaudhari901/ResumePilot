@@ -8,9 +8,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<NonNullable<ButtonProps["variant"]>, string> = {
-  primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-  secondary: "border border-border bg-surface-raised text-foreground hover:bg-muted",
-  ghost: "text-muted-foreground hover:bg-muted hover:text-foreground"
+  primary:
+    "border border-primary bg-primary text-primary-foreground shadow-[0_8px_24px_-14px_color-mix(in_srgb,var(--color-primary)_85%,transparent)] hover:brightness-95",
+  secondary:
+    "border border-border-strong bg-surface-raised text-foreground shadow-sm hover:border-foreground/30 hover:bg-surface",
+  ghost: "border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
 };
 
 export function Button({
@@ -25,7 +27,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,filter,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-px disabled:pointer-events-none disabled:opacity-45 disabled:shadow-none",
         variantClasses[variant],
         className
       )}

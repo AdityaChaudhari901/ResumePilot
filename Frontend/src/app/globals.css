@@ -1,30 +1,96 @@
 @import "tailwindcss";
 
-@theme {
-  --color-background: #f6f7f2;
-  --color-foreground: #20231f;
-  --color-surface: #fbfbf7;
-  --color-surface-raised: #ffffff;
-  --color-surface-inset: #eeefe8;
-  --color-muted: #e8e9df;
-  --color-muted-foreground: #62685f;
-  --color-border: rgba(32, 35, 31, 0.12);
-  --color-border-strong: rgba(32, 35, 31, 0.22);
-  --color-primary: #1957a6;
-  --color-primary-foreground: #ffffff;
-  --color-accent: #2c7a63;
-  --color-accent-foreground: #ffffff;
-  --color-warning: #8a4b0f;
-  --color-destructive: #b42318;
-  --color-validation: #177245;
-  --color-terminal: #102018;
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+@theme inline {
+  --color-background: var(--rp-background);
+  --color-foreground: var(--rp-foreground);
+  --color-surface: var(--rp-surface);
+  --color-surface-raised: var(--rp-surface-raised);
+  --color-surface-inset: var(--rp-surface-inset);
+  --color-muted: var(--rp-muted);
+  --color-muted-foreground: var(--rp-muted-foreground);
+  --color-border: var(--rp-border);
+  --color-border-strong: var(--rp-border-strong);
+  --color-primary: var(--rp-primary);
+  --color-primary-foreground: var(--rp-primary-foreground);
+  --color-accent: var(--rp-accent);
+  --color-accent-foreground: var(--rp-accent-foreground);
+  --color-warning: var(--rp-warning);
+  --color-destructive: var(--rp-destructive);
+  --color-validation: var(--rp-validation);
+  --color-terminal: var(--rp-terminal);
+  --font-sans: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius-sm: 0.45rem;
+  --radius-md: 0.65rem;
+  --radius-lg: 0.9rem;
+  --radius-xl: 1.15rem;
+  --radius-2xl: 1.45rem;
 }
 
 :root {
+  --rp-background: #f1f2e9;
+  --rp-foreground: #171a14;
+  --rp-surface: #f8f9f1;
+  --rp-surface-raised: #fffef8;
+  --rp-surface-inset: #e9ebe1;
+  --rp-muted: #e4e7dc;
+  --rp-muted-foreground: #5e6559;
+  --rp-border: rgba(23, 26, 20, 0.14);
+  --rp-border-strong: rgba(23, 26, 20, 0.28);
+  --rp-primary: #b7e744;
+  --rp-primary-foreground: #15190f;
+  --rp-accent: #587414;
+  --rp-accent-foreground: #11150b;
+  --rp-warning: #92530d;
+  --rp-destructive: #b42318;
+  --rp-validation: #147349;
+  --rp-terminal: #12170f;
   color-scheme: light;
   background: var(--color-background);
+}
+
+:root[data-theme="dark"] {
+  --rp-background: #0d0f0c;
+  --rp-foreground: #f1f4e9;
+  --rp-surface: #141711;
+  --rp-surface-raised: #191d15;
+  --rp-surface-inset: #10130e;
+  --rp-muted: #24291f;
+  --rp-muted-foreground: #aeb6a5;
+  --rp-border: rgba(235, 242, 223, 0.13);
+  --rp-border-strong: rgba(235, 242, 223, 0.25);
+  --rp-primary: #c2ef55;
+  --rp-primary-foreground: #10140b;
+  --rp-accent: #c2ef55;
+  --rp-accent-foreground: #10140b;
+  --rp-warning: #f0a84b;
+  --rp-destructive: #ff786f;
+  --rp-validation: #65d89d;
+  --rp-terminal: #080a07;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --rp-background: #0d0f0c;
+    --rp-foreground: #f1f4e9;
+    --rp-surface: #141711;
+    --rp-surface-raised: #191d15;
+    --rp-surface-inset: #10130e;
+    --rp-muted: #24291f;
+    --rp-muted-foreground: #aeb6a5;
+    --rp-border: rgba(235, 242, 223, 0.13);
+    --rp-border-strong: rgba(235, 242, 223, 0.25);
+    --rp-primary: #c2ef55;
+    --rp-primary-foreground: #10140b;
+    --rp-accent: #c2ef55;
+    --rp-accent-foreground: #10140b;
+    --rp-warning: #f0a84b;
+    --rp-destructive: #ff786f;
+    --rp-validation: #65d89d;
+    --rp-terminal: #080a07;
+    color-scheme: dark;
+  }
 }
 
 * {
@@ -35,18 +101,97 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    linear-gradient(180deg, rgba(44, 122, 99, 0.06), transparent 28rem),
+    linear-gradient(var(--rp-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--rp-border) 1px, transparent 1px),
+    radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--rp-primary) 18%, transparent), transparent 34rem),
     var(--color-background);
+  background-attachment: fixed;
+  background-size: 32px 32px, 32px 32px, auto, auto;
   color: var(--color-foreground);
   font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
 }
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
 
+button,
+a,
+input,
+select,
+summary,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input,
+select,
+textarea {
+  color: var(--color-foreground);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--color-muted-foreground) 72%, transparent);
+}
+
+:where(a, button, input, select, summary, textarea):focus-visible {
+  outline: 2px solid var(--color-accent) !important;
+  outline-offset: 2px !important;
+}
+
+progress {
+  accent-color: var(--color-primary);
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
 ::selection {
-  background: rgba(25, 87, 166, 0.18);
+  background: color-mix(in srgb, var(--color-primary) 55%, transparent);
+  color: var(--color-primary-foreground);
+}
+
+.rp-frosted {
+  background: color-mix(in srgb, var(--color-background) 82%, transparent);
+  backdrop-filter: blur(18px) saturate(120%);
+}
+
+.rp-spotlight-beam {
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--color-primary) 32%, transparent) 0%,
+    color-mix(in srgb, var(--color-primary) 12%, transparent) 36%,
+    transparent 72%
+  );
+  filter: blur(2px);
+}
+
+.rp-dot-field {
+  background-image: radial-gradient(var(--color-border-strong) 0.8px, transparent 0.8px);
+  background-size: 16px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

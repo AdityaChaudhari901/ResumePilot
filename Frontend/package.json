@@ -16,10 +16,15 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.14",
+    "@fontsource-variable/manrope": "5.2.8",
+    "@fontsource/ibm-plex-mono": "5.2.7",
+    "clsx": "2.1.1",
     "lucide-react": "^0.468.0",
+    "motion": "12.42.2",
     "next": "^16.2.10",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "3.6.0"
   },
   "overrides": {
     "next": {

@@ -93,6 +93,56 @@ test("dashboard enforces browser security headers and an accessibility baseline"
   expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
 });
 
+test("dashboard supports compact dark mode and reduced-motion preferences", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
+  const themeToggle = page.getByRole("button", { name: "Switch to light theme" });
+  await expect(themeToggle).toBeVisible();
+  expect(await page.locator("html").evaluate((element) => getComputedStyle(element).colorScheme)).toBe(
+    "dark"
+  );
+
+  const viewport = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth
+  }));
+  expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+  const editJobBounds = await page.getByRole("button", { name: "Edit job listing" }).boundingBox();
+  expect(editJobBounds).not.toBeNull();
+  expect(editJobBounds?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((editJobBounds?.x ?? 0) + (editJobBounds?.width ?? 0)).toBeLessThanOrEqual(320);
+
+  await themeToggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "Switch to dark theme" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "Switch to dark theme" })).toBeVisible();
+});
+
+test("not-found routes provide an accessible recovery path", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const response = await page.goto("/outside-the-evidence-trail");
+
+  expect(response?.status()).toBe(404);
+  await expect(
+    page.getByRole("heading", { name: "This page is outside the evidence trail." })
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Return to ResumePilot" })).toBeVisible();
+
+  const accessibilityScan = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    accessibilityScan.violations.map((violation) => violation.id),
+    JSON.stringify(accessibilityScan.violations, null, 2)
+  ).toEqual([]);
+});
+
 test("dashboard restores a durable pending approval after refresh", async ({ page }) => {
   const operation = pendingApprovalOperation();
   await page.route("**/api/operations?limit=20", async (route) => {
@@ -179,12 +229,21 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   ).toBe(true);
   await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-score.png");
 
+  await page.setViewportSize({ width: 320, height: 1200 });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true);
+  await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-320-score.png");
+
   await page.getByRole("button", { name: "Open tailored resume draft" }).click();
   await expect(page.getByRole("button", { name: "Download DOCX" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download LaTeX" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
 
-  await captureDashboardScreenshot(page, testInfo, "dashboard-mobile.png");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true);
+  await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-320-draft.png");
 });
 
 test("dashboard sends a job posting URL analysis request", async ({ page }) => {

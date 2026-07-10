@@ -1,12 +1,15 @@
 # ResumePilot Frontend
 
-Next.js dashboard for the local ResumePilot MVP.
+Next.js evidence workspace and public authentication surface for ResumePilot.
 
 ## Stack
 
 - Next.js App Router
 - React and TypeScript
 - Tailwind CSS
+- Self-hosted Manrope and IBM Plex Mono typography
+- Light/dark product tokens with reduced-motion support
+- Restrained Aceternity UI and Magic UI adaptations on public/auth surfaces
 - Server route handlers as a backend-for-frontend proxy to FastAPI
 - Playwright browser smoke tests
 
@@ -27,6 +30,12 @@ Next.js dashboard for the local ResumePilot MVP.
   interview-prep panels, and evidence comparisons. Resume DOCX/LaTeX/PDF
   downloads are available only from the accepted application draft.
 - Collapsed workspace review for report history, parsed resume evidence, account/session state, usage limits, OpenClaw Gateway/provider readiness, and validation boundaries.
+- Branded anonymous, Clerk sign-in/sign-up, loading, error, and not-found states with a shared evidence-desk visual system.
+- Theme persistence, system dark-mode support, and purposefully limited motion that is removed for `prefers-reduced-motion` users.
+
+Aceternity's Spotlight and Bento Grid patterns and Magic UI's Blur Fade pattern
+are adapted as locally owned components. They are used for public storytelling,
+not around approvals, validation, or other critical workflow controls.
 
 ## Local setup
 
@@ -70,7 +79,9 @@ sample resume, runs the AI workflow, verifies the job URL request contract,
 checks URL and pasted-description snapshots, application-id analysis operations,
 progress/cancellation behavior, workflow trace timing, Markdown report export,
 accepted-draft DOCX/LaTeX/PDF exports, application status transitions, security headers, and
-the automated WCAG A/AA baseline. It captures
+the automated WCAG A/AA baseline. Compact 320px dark/reduced-motion behavior,
+completed report/draft overflow, and the branded 404 recovery path are covered
+as well. It captures
 desktop/mobile screenshots under
 `Frontend/.local/playwright-results`.
 

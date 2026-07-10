@@ -44,11 +44,11 @@ export function WorkflowApprovalPanel({
       aria-busy={isSubmitting}
       aria-describedby={descriptionId}
       aria-labelledby={titleId}
-      className="rounded-lg border border-warning/35 bg-warning/5 p-4 shadow-sm"
+      className="rounded-2xl border border-warning/40 bg-warning/5 p-4 shadow-[0_18px_55px_-42px_rgba(12,17,10,0.85)] sm:p-5"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-warning/25 bg-warning/10 text-warning">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-warning/25 bg-warning/10 text-warning">
             <Sparkles className="h-5 w-5" aria-hidden="true" />
           </span>
           <div className="min-w-0">
@@ -71,7 +71,7 @@ export function WorkflowApprovalPanel({
       </div>
 
       {approval.warning_codes.length > 0 ? (
-        <div className="mt-4 rounded-md border border-warning/25 bg-surface p-3">
+        <div className="mt-4 rounded-xl border border-warning/25 bg-surface p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />
             Validation notes
@@ -120,7 +120,7 @@ export function WorkflowApprovalPanel({
               <div className="grid gap-3 lg:grid-cols-2">
                 {approval.proposal.interview_questions.map((group, groupIndex) => (
                   <div
-                    className="rounded-md border border-border bg-background p-3"
+                    className="rounded-xl border border-border bg-background p-4"
                     key={`${group.category}-${groupIndex}`}
                   >
                     <h5 className="text-sm font-semibold text-foreground">{group.category}</h5>
@@ -141,7 +141,7 @@ export function WorkflowApprovalPanel({
         </div>
       </div>
 
-      <div className="mt-4 flex items-start gap-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+      <div className="mt-4 flex items-start gap-3 rounded-xl border border-primary/30 bg-primary/10 p-4">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <p className="text-xs leading-5 text-muted-foreground">
           This decision applies only to the live AI summary, cover letter, and interview
@@ -187,7 +187,7 @@ function ProposalSection({
   title: string;
 }) {
   return (
-    <article className="h-full rounded-md border border-border bg-surface p-3">
+    <article className="h-full rounded-xl border border-border bg-surface p-4">
       <div className="flex items-center gap-2">
         {icon}
         <h4 className="text-sm font-semibold text-foreground">{title}</h4>
