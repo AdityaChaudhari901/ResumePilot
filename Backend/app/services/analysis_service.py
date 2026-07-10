@@ -5,7 +5,13 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_cached_settings
-from app.db.models import AnalysisRecord, JobRecord, ResumeRecord, default_workflow_trace
+from app.db.models import (
+    AnalysisRecord,
+    JobRecord,
+    ResumeRecord,
+    UsageEventRecord,
+    default_workflow_trace,
+)
 from app.repositories.analyses import AnalysisRepository
 from app.repositories.jobs import JobRepository
 from app.repositories.resumes import ResumeRepository
@@ -30,25 +36,26 @@ from app.services.application_service import (
 )
 from app.services.audit_service import record_audit_event
 from app.services.docx_resume_renderer import render_tailored_resume_docx
-from app.services.file_storage import StoredUpload
+from app.services.file_storage import StoredUpload, persist_resume_upload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
 from app.services.latex_resume_renderer import render_tailored_resume_latex
 from app.services.matcher import match_resume_to_job
 from app.services.pdf_resume_compiler import (
     PdfCompilationFailed,
     PdfCompilationTimedOut,
+    PdfCompilerBusy,
     PdfCompilerUnavailable,
     PdfOutputTooLarge,
     compile_latex_to_pdf,
 )
 from app.services.report_generator import report_to_markdown
-from app.services.resume_parser import extract_resume_text, parse_resume_profile
+from app.services.resume_parser import ResumeParseError, extract_resume_text, parse_resume_profile
 from app.services.usage_service import (
-    enforce_analysis_limit,
-    enforce_crewai_limit,
+    finalize_analysis_usage,
+    finalize_crewai_usage,
     is_live_crewai_enabled,
-    record_analysis_usage,
-    record_crewai_usage,
+    reserve_analysis_usage,
+    reserve_crewai_usage,
 )
 
 MIN_CONFIDENT_PREVIEW_TEXT_CHARS = 160
@@ -72,8 +79,14 @@ def create_resume_from_upload(
         )
         return existing
 
-    raw_text = extract_resume_text(upload.content, upload.extension)
-    profile = parse_resume_profile(raw_text, resume_id=0)
+    try:
+        raw_text = extract_resume_text(upload.content, upload.extension)
+        profile = parse_resume_profile(raw_text, resume_id=0)
+    except ResumeParseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     record = ResumeRecord(
         user_id=current_user.id,
         file_name=upload.original_name,
@@ -90,6 +103,15 @@ def create_resume_from_upload(
     profile.resume_id = record.id
     record.profile_json = profile.model_dump(mode="json")
     saved = resumes.save(record)
+    try:
+        persist_resume_upload(upload)
+    except OSError as exc:
+        db.delete(saved)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Resume could not be stored safely",
+        ) from exc
     record_audit_event(
         db,
         event_type="resume.uploaded",
@@ -115,11 +137,11 @@ def analyze_job(
     jobs = JobRepository(db)
     analyses = AnalysisRepository(db)
 
-    enforce_analysis_limit(db, current_user)
     resume_record = resumes.get(request.resume_id, user_id=current_user.id)
     if not resume_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
     application_record = validate_application_for_analysis(db, request.application_id, current_user)
+    analysis_usage = reserve_analysis_usage(db, current_user)
 
     resume = ResumeProfile.model_validate(resume_record.profile_json)
     raw_job_text = _job_text_from_request(request, resolved_settings)
@@ -147,14 +169,41 @@ def analyze_job(
     )
     analyses.add(analysis_record)
 
-    workflow_settings = _settings_for_user_plan(resolved_settings, db, current_user)
-    workflow_result = run_application_agent_workflow(
-        analysis_id=analysis_record.id,
-        resume=resume,
-        job=job,
-        match=match,
-        settings=workflow_settings,
+    workflow_settings, crewai_usage = _settings_for_user_plan(
+        resolved_settings,
+        db,
+        current_user,
+        allow_live_ai_processing=request.allow_live_ai_processing,
     )
+    try:
+        workflow_result = run_application_agent_workflow(
+            analysis_id=analysis_record.id,
+            resume=resume,
+            job=job,
+            match=match,
+            settings=workflow_settings,
+        )
+    except Exception:
+        analysis_record.status = "failed"
+        analysis_record.workflow_mode = workflow_settings.agent_workflow_mode.value
+        analyses.save(analysis_record)
+        finalize_analysis_usage(
+            db,
+            analysis_usage,
+            analysis_id=analysis_record.id,
+            report_id=analysis_record.id,
+            workflow_mode=analysis_record.workflow_mode,
+            runtime_status="failed",
+        )
+        if crewai_usage:
+            finalize_crewai_usage(
+                db,
+                crewai_usage,
+                analysis_id=analysis_record.id,
+                runtime_status="failed",
+                cost_estimate_usd=None,
+            )
+        raise
     report = workflow_result.report
     markdown = report_to_markdown(report)
 
@@ -167,18 +216,23 @@ def analyze_job(
     analysis_record.workflow_mode = workflow_result.trace.mode.value
     analysis_record.workflow_trace_json = workflow_result.trace.model_dump(mode="json")
     analyses.save(analysis_record)
-    record_analysis_usage(
+    finalize_analysis_usage(
         db,
-        current_user,
+        analysis_usage,
         analysis_id=analysis_record.id,
         report_id=analysis_record.id,
         workflow_mode=analysis_record.workflow_mode,
     )
-    if workflow_result.trace.mode == AgentWorkflowMode.crewai:
-        record_crewai_usage(
+    if crewai_usage:
+        finalize_crewai_usage(
             db,
-            current_user,
+            crewai_usage,
             analysis_id=analysis_record.id,
+            runtime_status=(
+                "completed"
+                if workflow_result.trace.mode == AgentWorkflowMode.crewai
+                else "fallback"
+            ),
             cost_estimate_usd=workflow_result.trace.cost_estimate_usd,
         )
     if request.job_url or application_record:
@@ -347,6 +401,12 @@ def get_tailored_resume_pdf(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="PDF export requires tectonic or pdflatex on the server.",
         ) from exc
+    except PdfCompilerBusy as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF compiler is busy. Retry the export shortly.",
+            headers={"Retry-After": "2"},
+        ) from exc
     except PdfCompilationTimedOut as exc:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -359,7 +419,7 @@ def get_tailored_resume_pdf(
         ) from exc
     except PdfCompilationFailed as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Generated LaTeX could not be compiled into PDF.",
         ) from exc
 
@@ -522,15 +582,19 @@ def _settings_for_user_plan(
     settings: Settings,
     db: Session,
     current_user: CurrentUser,
-) -> Settings:
+    *,
+    allow_live_ai_processing: bool,
+) -> tuple[Settings, UsageEventRecord | None]:
     if settings.agent_workflow_mode != AgentWorkflowMode.crewai:
-        return settings
-    if not is_live_crewai_enabled(current_user):
-        return settings.model_copy(
-            update={"agent_workflow_mode": AgentWorkflowMode.deterministic_fallback}
+        return settings, None
+    if not allow_live_ai_processing or not is_live_crewai_enabled(current_user):
+        return (
+            settings.model_copy(
+                update={"agent_workflow_mode": AgentWorkflowMode.deterministic_fallback}
+            ),
+            None,
         )
-    enforce_crewai_limit(db, current_user)
-    return settings
+    return settings, reserve_crewai_usage(db, current_user)
 
 
 def _workflow_trace_from_record(analysis: AnalysisRecord) -> AgentWorkflowTrace:

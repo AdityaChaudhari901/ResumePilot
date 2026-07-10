@@ -1,6 +1,6 @@
 # ResumePilot Context
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 ## Purpose
 
@@ -9,7 +9,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, production startup safety checks, Docker Compose production-like stack with cached frontend npm installs and verified 8050/3050 local ports, signed BFF-to-FastAPI user identity boundary with explicit production local-auth opt-in, Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, tenant-scoped report history, application pipeline, and resume profile review APIs, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, unclear job-requirement score capping and review-first report states, ATS-aware job listing preview API with JSON-LD and host-aware extraction, editable dashboard job-evidence review saved as the analysis source of truth, project-local OpenClaw `/job` skill, guided Next.js WebChat/dashboard workflow for job listing URL, job evidence review, resume upload, AI services, application status tracking, and report review, collapsed workspace panels for account/session, usage, report ledger, resume extraction, OpenClaw status, human-readable evidence source labels, and Markdown, DOCX, LaTeX, and PDF report downloads, and Playwright dashboard browser smoke implemented.
+- Current state: four-folder workspace created; backend foundation, Python 3.12 locked backend runtime, GitHub Actions CI quality gate, deterministic backend speed/accuracy quality gate, Postgres-ready user ownership foundation, production startup safety checks, Docker Compose production-like stack with cached frontend npm installs and verified 8050/3050 local ports, signed BFF-to-FastAPI user identity boundary with explicit production local-auth opt-in, Clerk-ready frontend auth mode, plan-based usage metering and SaaS limit enforcement, tenant-scoped report history, application pipeline, resume profile review APIs, tailored resume draft review/export APIs, evidence-backed DOCX, LaTeX, and PDF resume export, sanitized tenant-scoped audit logs, delete/retention privacy controls, optional Playwright browser fallback for public JavaScript-rendered job pages, live CrewAI structured-output workflow adapter verified against Google Vertex with deterministic fallback, persisted workflow trace metadata with latency/provider/model/token usage/cost observability, unclear job-requirement score capping and review-first report states, ATS-aware job listing preview API with JSON-LD and host-aware extraction, editable dashboard job-evidence review saved as the analysis source of truth, project-local OpenClaw `/job` skill, guided Next.js WebChat/dashboard workflow for job listing URL, job evidence review, resume upload, AI services, report review, tailored resume approval, application status tracking, collapsed workspace panels for account/session, usage, report ledger, resume extraction, OpenClaw status, human-readable evidence source labels, Markdown/DOCX/LaTeX/PDF report downloads, accepted-draft DOCX/LaTeX/PDF resume downloads, and Playwright dashboard browser smoke implemented.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -33,14 +33,17 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/db/*.py`
   - `Backend/app/repositories/*.py`
   - `Backend/app/repositories/applications.py`
+  - `Backend/app/repositories/tailored_resumes.py`
   - `Backend/app/repositories/usage_events.py`
   - `Backend/app/schemas/*.py`
   - `Backend/app/schemas/application.py`
   - `Backend/app/schemas/agent.py`
+  - `Backend/app/schemas/tailored_resume.py`
   - `Backend/app/schemas/usage.py`
   - `Backend/app/services/*.py`
   - `Backend/app/services/application_service.py`
   - `Backend/app/services/agent_workflow.py`
+  - `Backend/app/services/tailored_resume_service.py`
   - `Backend/app/services/auth_signature.py`
   - `Backend/app/services/audit_service.py`
   - `Backend/app/services/crewai_workflow.py`
@@ -55,6 +58,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/app/data/skill_dictionary.json`
   - `Backend/migrations/*.py`
   - `Backend/migrations/versions/20260709_0005_add_applications.py`
+  - `Backend/migrations/versions/20260709_0006_add_tailored_resume_drafts.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/tests/test_audit_privacy_api.py`
@@ -62,6 +66,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Backend/tests/test_docx_resume_renderer.py`
   - `Backend/tests/test_latex_resume_renderer.py`
   - `Backend/tests/test_pdf_resume_compiler.py`
+  - `Backend/tests/test_tailored_resume_api.py`
   - `Backend/scripts/run_golden_evals.py`
   - `Backend/scripts/run_backend_quality_gate.py`
   - `Backend/scripts/bootstrap_py312.sh`
@@ -78,6 +83,11 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Frontend/src/app/api/auth/session/route.ts`
   - `Frontend/src/app/api/applications/route.ts`
   - `Frontend/src/app/api/applications/[applicationId]/status/route.ts`
+  - `Frontend/src/app/api/applications/[applicationId]/tailored-resume/route.ts`
+  - `Frontend/src/app/api/applications/[applicationId]/tailored-resume/items/[itemId]/route.ts`
+  - `Frontend/src/app/api/applications/[applicationId]/tailored-resume/latex/route.ts`
+  - `Frontend/src/app/api/applications/[applicationId]/tailored-resume/docx/route.ts`
+  - `Frontend/src/app/api/applications/[applicationId]/tailored-resume/pdf/route.ts`
   - `Frontend/src/app/api/reports/route.ts`
   - `Frontend/src/app/api/resumes/[resumeId]/route.ts`
   - `Frontend/src/app/api/openclaw/control/route.ts`
@@ -87,6 +97,7 @@ ResumePilot is being created from the CrewAI Job Application Copilot MVP documen
   - `Frontend/src/lib/auth.ts`
   - `Frontend/src/lib/openclaw.ts`
   - `Frontend/src/features/dashboard/components/application-pipeline-card.tsx`
+  - `Frontend/src/features/dashboard/components/tailored-resume-workspace-card.tsx`
   - `.github/workflows/ci.yml`
   - `docker-compose.yml`
   - `.env.production.example`
@@ -346,7 +357,7 @@ Completed GitHub Actions CI quality gate slice:
 Completed evidence-backed DOCX resume export slice:
 
 - Added `Backend/app/services/docx_resume_renderer.py` to generate an editable `.docx` resume from validated `ResumeProfile`, `JobProfile`, and `ApplicationReport` data.
-- Added `GET /reports/{report_id}/resume/docx`, returning a downloadable Office Open XML attachment with a stable filename.
+- Added `POST /reports/{report_id}/resume/docx`, returning a downloadable Office Open XML attachment with a stable filename.
 - The DOCX export renders candidate/contact data, professional summary, evidence-backed skills, supported tailored highlights, experience, projects, education, and certifications.
 - The renderer excludes missing skills and unsupported tailored bullets, uses compact resume styling, and sets document properties to ResumePilot instead of local machine/user metadata.
 - Added a Next.js backend-for-frontend proxy route at `Frontend/src/app/api/reports/[reportId]/resume/docx/route.ts`.
@@ -387,7 +398,7 @@ Completed deterministic backend speed/accuracy quality gate slice:
 Completed evidence-backed LaTeX resume export backend slice:
 
 - Added `Backend/app/services/latex_resume_renderer.py` using Aditya's compact one-page ATS LaTeX resume structure.
-- Added `GET /reports/{report_id}/resume/latex`, returning a downloadable `.tex` file with `application/x-tex` media type and a stable attachment filename.
+- Added `POST /reports/{report_id}/resume/latex`, returning a downloadable `.tex` file with `application/x-tex` media type and a stable attachment filename.
 - The LaTeX export renders candidate/contact data, professional summary, evidence-backed skills, tailored resume highlights, experience, projects, education, and certifications from persisted `ResumeProfile`, `JobProfile`, and `ApplicationReport` data.
 - The renderer escapes LaTeX metacharacters and excludes missing or `add_only_if_true` skills from owned resume sections.
 - Added focused tests for LaTeX escaping, missing-skill exclusion, and API download behavior.
@@ -405,7 +416,7 @@ Completed evidence-backed PDF resume export slice:
 
 - Added `Backend/app/services/pdf_resume_compiler.py` to compile generated LaTeX with a guarded local compiler boundary.
 - Preferred `tectonic --untrusted`, added `pdflatex -no-shell-escape` fallback, and enforced no shell invocation, temporary workspaces, timeout limits, and output-size limits.
-- Added `GET /reports/{report_id}/resume/pdf`, returning a downloadable `application/pdf` attachment from the same persisted report data as the LaTeX export.
+- Added `POST /reports/{report_id}/resume/pdf`, returning a downloadable `application/pdf` attachment from the same persisted report data as the LaTeX export.
 - Added a Next.js backend-for-frontend proxy route at `Frontend/src/app/api/reports/[reportId]/resume/pdf/route.ts`.
 - Added a dashboard `PDF` download button beside Markdown and LaTeX exports.
 - Updated backend/frontend/root README files and source-of-truth docs with the PDF endpoint, compiler requirements, and report export safety controls.
@@ -430,31 +441,64 @@ Completed application workspace and evidence review slice:
 - Added human-readable evidence source labels to the report viewer so project/work evidence, skills-section evidence, summary evidence, education, and certification references are distinguishable without exposing parser IDs as the main UI text.
 - Updated Playwright desktop/mobile smoke coverage for report history, resume extraction review, and existing export flow.
 
+Completed tailored resume review workspace slice:
+
+- Added tenant-scoped `tailored_resume_drafts` persistence linked to applications and reports.
+- Added FastAPI routes to create/read a tailored resume draft, update bullet review status, and export accepted draft bullets as DOCX, LaTeX, and PDF.
+- Added deterministic draft validation that rejects accepted edits with unsupported skills, high-risk claims, or metrics not present in linked resume evidence.
+- Added Next.js BFF proxies for the tailored resume draft and application-specific export routes.
+- Added a dashboard Tailored resume workspace step where users edit, accept, reject, reset, and export accepted evidence-backed bullets.
+- Updated Playwright coverage so the browser smoke accepts a draft bullet and validates application-specific DOCX/LaTeX/PDF exports.
+
+Production hardening completed 2026-07-09:
+
+- Changed report and tailored-resume export actions to `POST` so usage reservation, audit logging, application status, and download generation commit atomically.
+- Enforced application-scoped draft ownership, stale-draft invalidation after re-analysis, SQLite foreign keys, and privacy-safe report/application deletion cleanup.
+- Tightened the evidence gate so job-description-only skills, unsupported metrics, and high-risk claims such as patent or customer-count assertions are rejected; reset edits now clear persisted overrides.
+- Added signed trusted-header verification with replay TTL enforcement, private no-store BFF responses, and request-method/body forwarding for POST proxies.
+
+Production readiness hardening completed 2026-07-10:
+
+- Added public-network SSRF controls for job URLs: scheme/credential checks, DNS and connected-peer validation, private/reserved address rejection, redirect-hop validation, bounded content types and response sizes, and service-worker blocking in the optional browser fallback.
+- Streams resume uploads through the Next.js BFF, enforces gateway/backend size limits, validates PDF/DOCX/text signatures, rejects DOCX expansion bombs, bounds extracted PDF/DOCX content, and persists validated uploads atomically with `0600` permissions.
+- Reconstructs wrapped PDF resume bullets, filters dangling fragments, and limits tailored bullet candidates to complete action-led project/work evidence.
+- Requires per-analysis consent before live AI can run and removes candidate contact fields, name occurrences, links, and the deterministic cover letter from provider prompts.
+- Binds BFF identity signatures to HTTP method and path, disables OpenClaw token redirects outside private local auth, removes raw provider/database exception text from public responses, and rejects placeholder/short production secrets.
+- Reserves monthly analysis, live-AI, and export usage under the user-row lock before billable work, then finalizes usage metadata after completion.
+- Added hash-locked production Python dependencies, pinned container bases and GitHub Actions, removed the vulnerable CrewAI/ChromaDB tree from the default image, and added Python/npm dependency audits to CI.
+- Made production Compose fail closed to Clerk or signed trusted headers, bind host ports to loopback by default, and pass trusted-header credentials correctly. The frontend image now receives the Clerk publishable key at build time.
+- Added a clean production-build Playwright gate with six Chromium scenarios, WCAG A/AA Axe checks, security-header assertions, responsive coverage, and report/tailored export verification.
+
 Next implementation scope:
 
-- Add saved export history, richer export management, live-provider latency/cost aggregation in the backend quality gate, screenshot baseline/accessibility checks for the dashboard, multiple-resume default selection, and optional UI controls for audit/deletion workflows.
+- Add saved export history, richer export management, live-provider latency/cost aggregation in the backend quality gate, visual screenshot baseline diffing, multiple-resume default selection, and optional UI controls for audit/deletion workflows.
 
 ## Known Gaps
 
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw APIs should be verified against current official docs before live integration.
-- Backend lock is a pinned pip constraints file, not a hash-locked artifact; add hash locking or container builds before remote production deployment.
 - The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency and token usage are visible in per-report traces but not included in the deterministic quality gate yet.
-- PDF export is implemented with local `tectonic` verification; remote production deployment should preinstall/cache the TeX toolchain and consider an OS/container sandbox for compilation.
+- The amd64 backend image installs checksum-pinned Tectonic and bounds compiler concurrency, time, and output. Arm64 images still require a verified compiler, and remote deployment should move compilation to a network-disabled, resource-limited worker.
 - Workflow trace cost estimates currently cover only the configured Vertex global standard `google/gemini-3.5-flash` path; additional provider/model/region rates must be added before other traces can emit cost.
 - DOCX export has structural package and browser download coverage; pixel-level DOCX render QA requires installing `pdf2image` plus LibreOffice/`soffice` on this machine.
 - Python Playwright fallback requires `python -m playwright install chromium` on environments that need JavaScript-rendered public job page fetches.
-- Uploaded PDF resume parsing can still surface fragment-like tailored bullets from summary evidence; harden resume sentence extraction and tailored bullet generation before calling report quality production-ready.
 - OpenClaw configure/start scripts now set LaunchAgent environment variables for the active login session and register the durable global Vertex model provider; reboot persistence for launchd environment still needs a plist/env-file strategy before broader handoff.
-- Background queue, caching, metrics, and visual screenshot baseline regression are not implemented yet.
-- Playwright browser smoke is implemented locally; CI browser execution, screenshot baseline diffing, and accessibility audits are not implemented yet.
+- A reverse proxy or API gateway must enforce TLS, request-rate/body limits, and private-network egress policy. ResumePilot now reserves monthly quotas atomically, but it does not provide a distributed per-minute limiter or idempotency-key store.
+- Background workers, caching, production metrics/alerts, and visual screenshot baseline regression are not implemented yet.
+- The CI browser workflow is implemented and locally verified; this uncommitted workflow has not run on GitHub-hosted infrastructure yet.
 
 ## Verification Evidence
 
-Latest verification run: 2026-07-09
+Latest verification run: 2026-07-10
 
 | Check | Command | Result |
 |---|---|---|
+| Backend full gate | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check app tests scripts migrations && .venv/bin/pytest -q` | Passed: Ruff format/check and 103 pytest tests; one upstream Starlette/httpx deprecation warning |
+| Migration and deterministic quality gate | Fresh temporary SQLite upgrade to head, downgrade to `20260709_0006`, upgrade to head; `python -m compileall`; golden eval and quality-gate scripts | Passed through `20260709_0007`; 20 pairs, 100% schemas, 0 evidence/routing/unsupported gaps, 8.32 ms average and 12.45 ms p95 |
+| Frontend static and production build | `npm run lint && npm run typecheck && npm run test:auth-runtime && npm run security:audit && npm run build` | Passed; npm reported 0 vulnerabilities |
+| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: clean production build and 6/6 Chromium tests; WCAG A/AA, security headers, desktop/mobile, POST exports, reviewed evidence, and ledger reopen verified |
+| Production dependency audit | `uvx --python .venv/bin/python --from pip-audit==2.10.1 pip-audit -r requirements/py312-production.lock.txt` | Passed: no known vulnerabilities in the hash-locked default runtime |
+| Production containers and Compose | Compose config/build plus an isolated `resumepilot-prodcheck` stack on ports 8150/3150 | Passed on local arm64: Postgres/backend/frontend became healthy, `/health` and migration-aware `/ready` returned `ok` at head `20260709_0007`, frontend returned 200 with security headers, backend runs as UID/GID 1000, `pip check` passed, and ChromaDB is absent; the disposable stack and volumes were removed |
 | Backend application workspace focused tests | `cd Backend && .venv/bin/pytest tests/test_applications_api.py tests/test_analysis_api.py tests/test_tenant_isolation.py -q` | Passed: 14 tests covering draft creation, analysis linking, export status, status updates, and tenant isolation |
 | Backend application workspace lint | `cd Backend && .venv/bin/ruff format app tests migrations --check && .venv/bin/ruff check app tests migrations` | Passed |
 | Backend full suite after application workspace | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check app tests scripts migrations && .venv/bin/pytest -q` | Passed: Ruff format/check and 77 pytest tests |
@@ -593,6 +637,11 @@ Latest verification run: 2026-07-09
 
 ### 2026-07-09
 
+- Added tenant-scoped tailored resume draft persistence with `tailored_resume_drafts`, report/application linkage, review status counts, and idempotent draft creation.
+- Added FastAPI and Next.js BFF routes for tailored resume draft read/update plus accepted-draft DOCX, LaTeX, and PDF exports.
+- Added deterministic validation for accepted draft edits so unsupported skills, high-risk claims, and unsupported metrics are rejected before export.
+- Added the dashboard Tailored resume workspace as Step 06 with edit, save, accept, reject, reset, evidence review, and accepted-bullet export controls.
+- Updated Playwright browser coverage to accept a draft bullet and verify application-specific DOCX/LaTeX/PDF exports.
 - Added tenant-scoped application workspace persistence with `applications` table, draft creation, report linking, match score tracking, and statuses `draft`, `reviewed`, `analyzed`, `exported`, and `applied`.
 - Added `GET /applications`, `POST /applications`, and `PATCH /applications/{application_id}/status`, plus Next.js BFF proxies for the same routes.
 - Wired dashboard analysis to save reviewed job evidence as an application draft and pass `application_id` into `/jobs/analyze` so the generated report completes that application workspace item.
@@ -692,7 +741,7 @@ Latest verification run: 2026-07-09
 - Added Python 3.12 dev+AI dependency constraints and the `bootstrap_py312.sh` setup script.
 - Recreated `Backend/.venv` with Python 3.12.13 and verified tests, lint, compile, migration, golden evals, and `pip check`.
 - Added guarded local PDF compilation from generated LaTeX with `tectonic --untrusted` preference, `pdflatex -no-shell-escape` fallback, timeout limits, output-size limits, and no shell invocation.
-- Added `GET /reports/{report_id}/resume/pdf` in FastAPI and the matching Next.js `/api/reports/[reportId]/resume/pdf` proxy route.
+- Added `POST /reports/{report_id}/resume/pdf` in FastAPI and the matching Next.js `/api/reports/[reportId]/resume/pdf` proxy route.
 - Added a dashboard PDF download action beside Markdown and LaTeX exports.
 - Added compiler, API, and settings tests for PDF export success, missing compiler handling, command safety, and output-size enforcement.
 - Updated README files, MVP docs, security notes, testing docs, and this context file for the new PDF export behavior.
@@ -719,7 +768,7 @@ Latest verification run: 2026-07-09
 - Updated root/backend/frontend README files, MVP testing docs, and this context file with the CI scope and live/browser manual-gate boundary.
 - Verified the CI command set locally, including a fresh backend `.[dev]` venv and frontend `npm ci`.
 - Added evidence-backed DOCX resume generation from validated report, resume, and job data.
-- Added `GET /reports/{report_id}/resume/docx` in FastAPI and the matching Next.js `/api/reports/[reportId]/resume/docx` proxy route.
+- Added `POST /reports/{report_id}/resume/docx` in FastAPI and the matching Next.js `/api/reports/[reportId]/resume/docx` proxy route.
 - Added a dashboard DOCX download action beside Markdown, DOCX, LaTeX, and PDF exports.
 - Added renderer, API, and Playwright coverage for DOCX export package, headers, and link visibility.
 - Updated README files, MVP docs, security notes, testing docs, and this context file for editable DOCX export behavior.

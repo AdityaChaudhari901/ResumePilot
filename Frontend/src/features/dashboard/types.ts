@@ -118,6 +118,45 @@ export interface ApplicationListResponse {
   count: number;
 }
 
+export type TailoredResumeDraftStatus = "draft" | "reviewed" | "exported";
+export type TailoredResumeItemStatus = "pending" | "accepted" | "rejected";
+export type ReportExportFormat = "markdown" | "docx" | "latex" | "pdf";
+export type TailoredResumeExportFormat = Exclude<ReportExportFormat, "markdown">;
+
+export interface TailoredResumeItem {
+  id: string;
+  source_bullet: string;
+  suggested_bullet: string;
+  edited_bullet: string | null;
+  evidence_ids: string[];
+  evidence_labels: string[];
+  evidence_texts: string[];
+  jd_keywords_used: string[];
+  unsupported_claims: string[];
+  status: TailoredResumeItemStatus;
+  validation_warnings: ValidationWarning[];
+}
+
+export interface TailoredResumeDraft {
+  id: number;
+  application_id: number;
+  report_id: number;
+  status: TailoredResumeDraftStatus;
+  items: TailoredResumeItem[];
+  accepted_count: number;
+  rejected_count: number;
+  pending_count: number;
+  export_ready: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TailoredResumeItemUpdate {
+  status?: TailoredResumeItemStatus;
+  edited_bullet?: string;
+  reset_edited_bullet?: boolean;
+}
+
 export type AgentWorkflowMode = "deterministic_fallback" | "crewai";
 
 export type AgentStepName =

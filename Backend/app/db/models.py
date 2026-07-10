@@ -113,6 +113,25 @@ class ApplicationRecord(Base):
     user: Mapped["UserRecord"] = relationship(back_populates="applications")
 
 
+class TailoredResumeDraftRecord(Base):
+    __tablename__ = "tailored_resume_drafts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "application_id", name="uq_tailored_resume_user_application"),
+        Index("ix_tailored_resume_user_report", "user_id", "report_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"), index=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("analyses.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    items_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+    user: Mapped["UserRecord"] = relationship(back_populates="tailored_resume_drafts")
+
+
 class AuditEventRecord(Base):
     __tablename__ = "audit_events"
 
@@ -143,6 +162,9 @@ class UserRecord(Base):
     jobs: Mapped[list[JobRecord]] = relationship(back_populates="user")
     analyses: Mapped[list[AnalysisRecord]] = relationship(back_populates="user")
     applications: Mapped[list[ApplicationRecord]] = relationship(back_populates="user")
+    tailored_resume_drafts: Mapped[list[TailoredResumeDraftRecord]] = relationship(
+        back_populates="user"
+    )
     audit_events: Mapped[list[AuditEventRecord]] = relationship(back_populates="user")
     usage_events: Mapped[list["UsageEventRecord"]] = relationship(back_populates="user")
 

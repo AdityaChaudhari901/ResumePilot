@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AnalysisRecord, ApplicationRecord, JobRecord, ResumeRecord
 from app.repositories.applications import ApplicationRepository
 from app.repositories.resumes import ResumeRepository
+from app.repositories.tailored_resumes import TailoredResumeRepository
 from app.schemas.application import (
     ApplicationDraftRequest,
     ApplicationItem,
@@ -93,6 +94,7 @@ def record_application_analysis(
         status=ApplicationStatus.draft.value,
         reviewed_job_profile_json=(request.reviewed_job_profile or job.profile_json),
     )
+    previous_report_id = record.report_id
     profile_json = (
         request.reviewed_job_profile.model_dump(mode="json")
         if request.reviewed_job_profile
@@ -111,6 +113,8 @@ def record_application_analysis(
     record.match_score = analysis.match_score
     if record.id is None:
         repository.add(record)
+    elif previous_report_id != analysis.id:
+        TailoredResumeRepository(db).delete_by_application_id(record.id, user_id=current_user.id)
     saved = repository.save(record)
     record_audit_event(
         db,
@@ -184,7 +188,7 @@ def _validate_status_transition(
         and record.report_id is None
     ):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Generate a report before moving this application to that status.",
         )
 

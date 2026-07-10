@@ -6,6 +6,7 @@ import {
   resolveGatewayToken
 } from "@/lib/openclaw";
 import { authFailureResponse, getAuthSession } from "@/lib/auth";
+import { resolveAuthRuntimeConfig } from "@/lib/auth-runtime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,7 +17,20 @@ export async function GET(request: NextRequest) {
     return authFailureResponse(session);
   }
 
-  if (!isLoopbackGatewayUrl() && process.env.OPENCLAW_ALLOW_TOKEN_REDIRECT !== "true") {
+  const authRuntime = resolveAuthRuntimeConfig(process.env);
+  if (authRuntime.provider !== "local" || !authRuntime.isUsable) {
+    return Response.json(
+      { detail: "OpenClaw Control is available only in private local auth mode." },
+      {
+        status: 403,
+        headers: {
+          "Cache-Control": "no-store"
+        }
+      }
+    );
+  }
+
+  if (!isLoopbackGatewayUrl()) {
     return Response.json(
       { detail: "OpenClaw token redirect is only enabled for loopback gateways." },
       {

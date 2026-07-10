@@ -2,7 +2,7 @@
 
 import { ChevronDown, RefreshCcw } from "lucide-react";
 import type { ChangeEvent, FormEvent } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { ReportHistoryCard } from "@/features/dashboard/components/report-histor
 import { ReportViewer } from "@/features/dashboard/components/report-viewer";
 import { ResumeProfileReviewCard } from "@/features/dashboard/components/resume-profile-review-card";
 import { ResumeUploadCard } from "@/features/dashboard/components/resume-upload-card";
+import { TailoredResumeWorkspaceCard } from "@/features/dashboard/components/tailored-resume-workspace-card";
 import { UsageStatusCard } from "@/features/dashboard/components/usage-status-card";
 import {
   WorkflowProgress,
@@ -39,9 +40,13 @@ import type {
   OpenClawStatus,
   ReportHistoryItem,
   ReportHistoryResponse,
+  ReportExportFormat,
   ReportWorkflowTraceResponse,
   ResumeProfile,
   ResumeUploadResponse,
+  TailoredResumeDraft,
+  TailoredResumeExportFormat,
+  TailoredResumeItemUpdate,
   UsageSummaryResponse
 } from "@/features/dashboard/types";
 import { readApiError } from "@/features/dashboard/utils/api-error";
@@ -120,6 +125,19 @@ async function fetchResumeProfile(resumeId: number): Promise<ResumeProfile> {
   return (await response.json()) as ResumeProfile;
 }
 
+async function fetchTailoredResumeDraft(applicationId: number): Promise<TailoredResumeDraft> {
+  const response = await fetch(
+    `/api/applications/${encodeURIComponent(String(applicationId))}/tailored-resume`,
+    {
+      cache: "no-store"
+    }
+  );
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return (await response.json()) as TailoredResumeDraft;
+}
+
 interface DashboardShellProps {
   initialAuthSession: DashboardAuthSession;
 }
@@ -134,10 +152,15 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [file, setFile] = useState<File | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isExportingReport, setIsExportingReport] = useState<ReportExportFormat | null>(null);
+  const [isExportingTailoredResume, setIsExportingTailoredResume] =
+    useState<TailoredResumeExportFormat | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingApplications, setIsLoadingApplications] = useState(true);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isPreviewingJob, setIsPreviewingJob] = useState(false);
+  const [isLoadingTailoredResume, setIsLoadingTailoredResume] = useState(false);
+  const [isUpdatingTailoredResume, setIsUpdatingTailoredResume] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [jobPreview, setJobPreview] = useState<JobPreviewResponse | null>(null);
   const [jobUrl, setJobUrl] = useState("");
@@ -151,6 +174,21 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [workflowStep, setWorkflowStep] = useState<WorkflowStepId>("job");
   const [workflowTrace, setWorkflowTrace] = useState<AgentWorkflowTrace | null>(null);
   const [activeApplicationId, setActiveApplicationId] = useState<number | null>(null);
+  const [allowLiveAiProcessing, setAllowLiveAiProcessing] = useState(false);
+  const [tailoredResumeDraft, setTailoredResumeDraft] =
+    useState<TailoredResumeDraft | null>(null);
+  const workspaceRevisionRef = useRef(0);
+
+  function startWorkspaceRequest(): number {
+    workspaceRevisionRef.current += 1;
+    setIsLoadingTailoredResume(false);
+    setIsUpdatingTailoredResume(false);
+    return workspaceRevisionRef.current;
+  }
+
+  function isCurrentWorkspaceRequest(revision: number): boolean {
+    return workspaceRevisionRef.current === revision;
+  }
 
   const loadStatus = useCallback(async () => {
     setIsLoadingStatus(true);
@@ -194,6 +232,46 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadTailoredResumeDraft() {
+      if (!report || !activeApplicationId) {
+        setTailoredResumeDraft(null);
+        setIsLoadingTailoredResume(false);
+        return;
+      }
+
+      setIsLoadingTailoredResume(true);
+      try {
+        const draft = await fetchTailoredResumeDraft(activeApplicationId);
+        if (draft.application_id !== activeApplicationId || draft.report_id !== report.analysis_id) {
+          throw new Error("Tailored resume draft does not match the active report. Refresh and try again.");
+        }
+        if (isMounted) {
+          setTailoredResumeDraft(draft);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setTailoredResumeDraft(null);
+          setErrorMessage(
+            error instanceof Error ? error.message : "Tailored resume workspace failed to load"
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingTailoredResume(false);
+        }
+      }
+    }
+
+    void loadTailoredResumeDraft();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeApplicationId, report]);
+
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setErrorMessage(null);
     setFile(event.target.files?.[0] ?? null);
@@ -202,10 +280,12 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   function clearCurrentAnalysis() {
     setAnalysis(null);
     setReport(null);
+    setTailoredResumeDraft(null);
     setWorkflowTrace(null);
   }
 
   function handleJobUrlChange(value: string) {
+    startWorkspaceRequest();
     setJobUrl(value);
     setJobPreview(null);
     setReviewedJobProfile(null);
@@ -220,6 +300,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 
   async function handleJobContinue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestRevision = startWorkspaceRequest();
     const trimmedJobUrl = jobUrl.trim();
 
     if (!isHttpUrl(trimmedJobUrl)) {
@@ -247,7 +328,11 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         throw new Error(await readApiError(response));
       }
 
-      setJobPreview((await response.json()) as JobPreviewResponse);
+      const preview = (await response.json()) as JobPreviewResponse;
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      setJobPreview(preview);
       setWorkflowStep("jobReview");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Job preview failed");
@@ -262,6 +347,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       return;
     }
 
+    const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
     setIsUploading(true);
 
@@ -279,8 +365,15 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       }
 
       const nextResume = (await response.json()) as ResumeUploadResponse;
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
       setResume(nextResume);
-      setResumeProfile(await fetchResumeProfile(nextResume.resume_id));
+      const profile = await fetchResumeProfile(nextResume.resume_id);
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      setResumeProfile(profile);
       setAnalysis(null);
       setReport(null);
       setWorkflowTrace(null);
@@ -301,6 +394,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       return;
     }
 
+    const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
     setIsAnalyzing(true);
     setAnalysis(null);
@@ -341,7 +435,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
           job_url: trimmedJobUrl,
           company: null,
           role: null,
-          reviewed_job_profile: reviewedJobProfile
+          reviewed_job_profile: reviewedJobProfile,
+          allow_live_ai_processing: allowLiveAiProcessing
         })
       });
 
@@ -350,11 +445,24 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       }
 
       const nextAnalysis = (await response.json()) as JobAnalysisResponse;
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
       setAnalysis(nextAnalysis);
-      await loadReport(nextAnalysis.report_id);
-      setApplications(await fetchApplications());
-      setReportHistory(await fetchReportHistory());
-      setWorkflowStep("report");
+      const didLoadReport = await loadReport(nextAnalysis.report_id, requestRevision);
+      if (!didLoadReport || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      const [nextApplications, nextReportHistory] = await Promise.all([
+        fetchApplications(),
+        fetchReportHistory()
+      ]);
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      setApplications(nextApplications);
+      setReportHistory(nextReportHistory);
+      setWorkflowStep("draft");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Job analysis failed");
     } finally {
@@ -362,7 +470,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     }
   }
 
-  async function loadReport(reportId: number) {
+  async function loadReport(reportId: number, requestRevision?: number): Promise<boolean> {
     const [reportResponse, traceResponse, usageSummary] = await Promise.all([
       fetch(`/api/reports/${reportId}`, { cache: "no-store" }),
       fetch(`/api/reports/${reportId}/trace`, { cache: "no-store" }),
@@ -373,18 +481,25 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       throw new Error(await readApiError(reportResponse));
     }
 
-    setReport((await reportResponse.json()) as ApplicationReport);
-    setUsage(usageSummary);
-
-    if (traceResponse.ok) {
-      const tracePayload = (await traceResponse.json()) as ReportWorkflowTraceResponse;
-      setWorkflowTrace(tracePayload.trace);
-    } else {
-      setWorkflowTrace(null);
+    const nextReport = (await reportResponse.json()) as ApplicationReport;
+    const nextTrace = traceResponse.ok
+      ? ((await traceResponse.json()) as ReportWorkflowTraceResponse).trace
+      : null;
+    if (
+      requestRevision !== undefined &&
+      !isCurrentWorkspaceRequest(requestRevision)
+    ) {
+      return false;
     }
+
+    setReport(nextReport);
+    setUsage(usageSummary);
+    setWorkflowTrace(nextTrace);
+    return true;
   }
 
   async function handleSelectReport(item: ReportHistoryItem) {
+    const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
     const nextAnalysis: JobAnalysisResponse = {
       analysis_id: item.analysis_id,
@@ -410,16 +525,24 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     try {
       const [profile, nextApplications] = await Promise.all([
         fetchResumeProfile(item.resume_id),
-        fetchApplications(),
-        loadReport(item.report_id)
+        fetchApplications()
       ]);
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
       setResumeProfile(profile);
       setApplications(nextApplications);
       setActiveApplicationId(
         nextApplications.find((application) => application.report_id === item.report_id)?.id ?? null
       );
+      const didLoadReport = await loadReport(item.report_id, requestRevision);
+      if (!didLoadReport || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Report history load failed");
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setErrorMessage(error instanceof Error ? error.message : "Report history load failed");
+      }
     }
   }
 
@@ -431,6 +554,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const workflowSteps = buildWorkflowSteps({
     analysisReady: Boolean(analysis && report),
     currentStep: workflowStep,
+    draftReady: Boolean(tailoredResumeDraft?.export_ready),
     jobEvidenceReady: isJobEvidenceReady,
     jobReady: isJobUrlValid,
     resumeReady: isResumeReady
@@ -442,6 +566,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   }
 
   async function handleConfirmJobEvidence(profile: JobProfile) {
+    const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
     try {
       const response = await fetch("/api/applications", {
@@ -461,8 +586,15 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       }
 
       const application = (await response.json()) as ApplicationItem;
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
       setActiveApplicationId(application.id);
-      setApplications(await fetchApplications());
+      const nextApplications = await fetchApplications();
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      setApplications(nextApplications);
       setReviewedJobProfile(profile);
       clearCurrentAnalysis();
       setWorkflowStep(resume ? "ai" : "resume");
@@ -499,10 +631,17 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     }
   }
 
+  function handleViewDraftFromSummary() {
+    if (analysis) {
+      setWorkflowStep("draft");
+    }
+  }
+
   async function handleSelectApplication(application: ApplicationItem) {
     if (!application.report_id || !application.analysis_id || !application.resume_id) {
       return;
     }
+    const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
     setActiveApplicationId(application.id);
     setAnalysis({
@@ -513,15 +652,20 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     });
     setReport(null);
     setWorkflowTrace(null);
-    setWorkflowStep("report");
+    setWorkflowStep("draft");
     try {
       const [profile] = await Promise.all([
         fetchResumeProfile(application.resume_id),
-        loadReport(application.report_id)
+        loadReport(application.report_id, requestRevision)
       ]);
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
       setResumeProfile(profile);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Application load failed");
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setErrorMessage(error instanceof Error ? error.message : "Application load failed");
+      }
     }
   }
 
@@ -552,6 +696,158 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     }
   }
 
+  async function handleRefreshTailoredResumeDraft() {
+    if (!activeApplicationId) {
+      return;
+    }
+    const applicationId = activeApplicationId;
+    const requestRevision = workspaceRevisionRef.current;
+    setErrorMessage(null);
+    setIsLoadingTailoredResume(true);
+    try {
+      const draft = await fetchTailoredResumeDraft(applicationId);
+      if (
+        isCurrentWorkspaceRequest(requestRevision) &&
+        draft.application_id === applicationId &&
+        draft.report_id === report?.analysis_id
+      ) {
+        setTailoredResumeDraft(draft);
+      }
+    } catch (error) {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "Tailored resume workspace refresh failed"
+        );
+      }
+    } finally {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setIsLoadingTailoredResume(false);
+      }
+    }
+  }
+
+  async function handleUpdateTailoredResumeItem(
+    itemId: string,
+    update: TailoredResumeItemUpdate
+  ) {
+    if (!activeApplicationId) {
+      return;
+    }
+    const applicationId = activeApplicationId;
+    const requestRevision = workspaceRevisionRef.current;
+    setErrorMessage(null);
+    setIsUpdatingTailoredResume(true);
+    try {
+      const response = await fetch(
+        `/api/applications/${encodeURIComponent(
+          String(applicationId)
+        )}/tailored-resume/items/${encodeURIComponent(itemId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify(update)
+        }
+      );
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+      const draft = (await response.json()) as TailoredResumeDraft;
+      if (
+        isCurrentWorkspaceRequest(requestRevision) &&
+        draft.application_id === applicationId &&
+        draft.report_id === report?.analysis_id
+      ) {
+        setTailoredResumeDraft(draft);
+      }
+    } catch (error) {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setErrorMessage(error instanceof Error ? error.message : "Tailored resume update failed");
+      }
+    } finally {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setIsUpdatingTailoredResume(false);
+      }
+    }
+  }
+
+  async function handleReportExport(format: ReportExportFormat): Promise<void> {
+    if (!analysis) {
+      return;
+    }
+    const requestRevision = workspaceRevisionRef.current;
+    const reportId = analysis.report_id;
+    setErrorMessage(null);
+    setIsExportingReport(format);
+    try {
+      await downloadExport({
+        fallbackFilename: reportExportFilename(reportId, format),
+        path: reportExportPath(reportId, format)
+      });
+      const [nextApplications, nextUsage] = await Promise.all([
+        fetchApplications(),
+        fetchUsageSummary()
+      ]);
+      if (!isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      setApplications(nextApplications);
+      setUsage(nextUsage);
+    } catch (error) {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setErrorMessage(error instanceof Error ? error.message : "Report export failed");
+      }
+    } finally {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setIsExportingReport(null);
+      }
+    }
+  }
+
+  async function handleTailoredResumeExport(
+    format: TailoredResumeExportFormat
+  ): Promise<void> {
+    if (!activeApplicationId || !tailoredResumeDraft) {
+      return;
+    }
+    const applicationId = activeApplicationId;
+    const requestRevision = workspaceRevisionRef.current;
+    setErrorMessage(null);
+    setIsExportingTailoredResume(format);
+    try {
+      await downloadExport({
+        fallbackFilename: tailoredResumeExportFilename(applicationId, format),
+        path: `/api/applications/${encodeURIComponent(
+          String(applicationId)
+        )}/tailored-resume/${format}`
+      });
+      const [draft, nextApplications, nextUsage] = await Promise.all([
+        fetchTailoredResumeDraft(applicationId),
+        fetchApplications(),
+        fetchUsageSummary()
+      ]);
+      if (
+        !isCurrentWorkspaceRequest(requestRevision) ||
+        draft.application_id !== applicationId ||
+        draft.report_id !== tailoredResumeDraft.report_id
+      ) {
+        return;
+      }
+      setTailoredResumeDraft(draft);
+      setApplications(nextApplications);
+      setUsage(nextUsage);
+    } catch (error) {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setErrorMessage(error instanceof Error ? error.message : "Tailored resume export failed");
+      }
+    } finally {
+      if (isCurrentWorkspaceRequest(requestRevision)) {
+        setIsExportingTailoredResume(null);
+      }
+    }
+  }
+
   return (
     <main className="min-h-dvh px-4 py-4 sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
@@ -568,7 +864,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
                 Add a job listing URL, review the extracted job evidence, upload the resume,
-                then run ResumePilot&apos;s evidence-first AI services and review the validated report.
+                then run ResumePilot&apos;s evidence-first AI services and approve the tailored
+                resume draft before exporting.
               </p>
             </div>
             <Button
@@ -625,8 +922,10 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 
             {workflowStep === "ai" ? (
               <AiWorkflowCard
+                allowLiveAiProcessing={allowLiveAiProcessing}
                 canAnalyze={canAnalyze}
                 isAnalyzing={isAnalyzing}
+                onAllowLiveAiProcessingChange={setAllowLiveAiProcessing}
                 onSubmit={handleAnalyze}
                 usage={usage}
               />
@@ -635,8 +934,24 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             {workflowStep === "report" ? (
               <ReportViewer
                 analysis={analysis}
+                isExporting={isExportingReport}
+                onExport={handleReportExport}
                 report={report}
                 workflowTrace={workflowTrace}
+              />
+            ) : null}
+
+            {workflowStep === "draft" ? (
+              <TailoredResumeWorkspaceCard
+                applicationId={activeApplicationId}
+                draft={tailoredResumeDraft}
+                isExporting={isExportingTailoredResume}
+                isLoading={isLoadingTailoredResume}
+                isUpdating={isUpdatingTailoredResume}
+                onExport={handleTailoredResumeExport}
+                onRefresh={() => void handleRefreshTailoredResumeDraft()}
+                onUpdateItem={handleUpdateTailoredResumeItem}
+                onViewReport={handleViewReportFromSummary}
               />
             ) : null}
           </section>
@@ -645,6 +960,14 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             <ApplicationPipelineCard
               activeApplicationId={activeApplicationId}
               applications={applications}
+              isBusy={
+                isAnalyzing ||
+                isExportingReport !== null ||
+                isExportingTailoredResume !== null ||
+                isLoadingTailoredResume ||
+                isUpdatingTailoredResume ||
+                isUploading
+              }
               isLoading={isLoadingApplications}
               onSelectApplication={(application) => void handleSelectApplication(application)}
               onUpdateStatus={(application, status) =>
@@ -665,8 +988,10 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               onReviewJob={handleOpenJobEvidenceReview}
               onEditResume={handleEditResume}
               onRunAi={handleRunAiFromSummary}
+              onViewDraft={handleViewDraftFromSummary}
               onViewReport={handleViewReportFromSummary}
               resume={resume}
+              tailoredResumeDraft={tailoredResumeDraft}
               workflowTrace={workflowTrace}
             />
           </div>
@@ -685,6 +1010,14 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               <HealthStrip health={health} isLoading={isLoadingStatus} />
             </Panel>
             <ReportHistoryCard
+              isBusy={
+                isAnalyzing ||
+                isExportingReport !== null ||
+                isExportingTailoredResume !== null ||
+                isLoadingTailoredResume ||
+                isUpdatingTailoredResume ||
+                isUploading
+              }
               isLoading={isLoadingHistory}
               items={reportHistory}
               onSelectReport={(item) => void handleSelectReport(item)}
@@ -711,14 +1044,83 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 interface BuildWorkflowStepsInput {
   analysisReady: boolean;
   currentStep: WorkflowStepId;
+  draftReady: boolean;
   jobEvidenceReady: boolean;
   jobReady: boolean;
   resumeReady: boolean;
 }
 
+async function downloadExport({
+  fallbackFilename,
+  path
+}: {
+  fallbackFilename: string;
+  path: string;
+}): Promise<void> {
+  const response = await fetch(path, {
+    cache: "no-store",
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.download = filenameFromContentDisposition(
+    response.headers.get("content-disposition"),
+    fallbackFilename
+  );
+  anchor.href = objectUrl;
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+function reportExportPath(reportId: number, format: ReportExportFormat): string {
+  const encodedReportId = encodeURIComponent(String(reportId));
+  if (format === "markdown") {
+    return `/api/reports/${encodedReportId}/markdown`;
+  }
+  return `/api/reports/${encodedReportId}/resume/${format}`;
+}
+
+function reportExportFilename(reportId: number, format: ReportExportFormat): string {
+  return `resumepilot-report-${reportId}.${exportFileExtension(format)}`;
+}
+
+function tailoredResumeExportFilename(
+  applicationId: number,
+  format: TailoredResumeExportFormat
+): string {
+  return `resumepilot-application-${applicationId}.${exportFileExtension(format)}`;
+}
+
+function exportFileExtension(format: ReportExportFormat): string {
+  const extensions: Record<ReportExportFormat, string> = {
+    docx: "docx",
+    latex: "tex",
+    markdown: "md",
+    pdf: "pdf"
+  };
+  return extensions[format];
+}
+
+function filenameFromContentDisposition(
+  contentDisposition: string | null,
+  fallbackFilename: string
+): string {
+  const match = contentDisposition?.match(/filename="?([^";]+)"?/i);
+  return match?.[1] ? decodeURIComponent(match[1]) : fallbackFilename;
+}
+
 function buildWorkflowSteps({
   analysisReady,
   currentStep,
+  draftReady,
   jobEvidenceReady,
   jobReady,
   resumeReady
@@ -774,6 +1176,19 @@ function buildWorkflowSteps({
       id: "report",
       label: "Report",
       status: currentStep === "report" ? "active" : analysisReady ? "complete" : "locked"
+    },
+    {
+      detail: draftReady ? "Accepted bullets ready for export" : "Approve evidence-backed bullets",
+      id: "draft",
+      label: "Draft",
+      status:
+        currentStep === "draft"
+          ? "active"
+          : draftReady
+            ? "complete"
+            : analysisReady
+              ? "ready"
+              : "locked"
     }
   ];
 }

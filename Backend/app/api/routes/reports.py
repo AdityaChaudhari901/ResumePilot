@@ -2,10 +2,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
+from app.db.models import ApplicationRecord
 from app.schemas.agent import ReportWorkflowTraceResponse
 from app.schemas.auth import CurrentUser
 from app.schemas.privacy import ReportDeleteResponse
@@ -20,10 +22,9 @@ from app.services.analysis_service import (
     get_tailored_resume_pdf,
     list_report_history,
 )
-from app.services.application_service import mark_application_exported_for_report
-from app.services.audit_service import record_audit_event
+from app.services.audit_service import add_audit_event
 from app.services.privacy_service import delete_report
-from app.services.usage_service import enforce_export_limit, record_export_usage
+from app.services.usage_service import reserve_export_usage
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -47,24 +48,20 @@ def read_report(
     return get_report(db, report_id, current_user)
 
 
-@router.get("/{report_id}/markdown", response_class=PlainTextResponse)
+@router.post("/{report_id}/markdown", response_class=PlainTextResponse)
 def read_report_markdown(
     report_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> str:
     ensure_report_access(db, report_id, current_user)
-    enforce_export_limit(db, current_user)
     markdown = get_report_markdown(db, report_id, current_user)
-    record_audit_event(
-        db,
-        event_type="report.exported",
-        user_id=current_user.id,
-        payload={"report_id": report_id, "format": "markdown"},
+    _finalize_report_export(db, current_user, report_id, "markdown")
+    return PlainTextResponse(
+        content=markdown,
+        media_type="text/plain",
+        headers=_download_headers(f"resumepilot-report-{report_id}.md"),
     )
-    record_export_usage(db, current_user, report_id=report_id, export_format="markdown")
-    mark_application_exported_for_report(db, current_user, report_id=report_id)
-    return markdown
 
 
 @router.get("/{report_id}/trace", response_model=ReportWorkflowTraceResponse)
@@ -76,59 +73,39 @@ def read_report_trace(
     return get_report_trace(db, report_id, current_user)
 
 
-@router.get("/{report_id}/resume/latex", response_class=PlainTextResponse)
+@router.post("/{report_id}/resume/latex", response_class=PlainTextResponse)
 def read_tailored_resume_latex(
     report_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PlainTextResponse:
     ensure_report_access(db, report_id, current_user)
-    enforce_export_limit(db, current_user)
     latex = get_tailored_resume_latex(db, report_id, current_user)
-    record_audit_event(
-        db,
-        event_type="report.exported",
-        user_id=current_user.id,
-        payload={"report_id": report_id, "format": "latex"},
-    )
-    record_export_usage(db, current_user, report_id=report_id, export_format="latex")
-    mark_application_exported_for_report(db, current_user, report_id=report_id)
+    _finalize_report_export(db, current_user, report_id, "latex")
     return PlainTextResponse(
         content=latex,
         media_type="application/x-tex",
-        headers={
-            "Content-Disposition": f'attachment; filename="resumepilot-report-{report_id}.tex"'
-        },
+        headers=_download_headers(f"resumepilot-report-{report_id}.tex"),
     )
 
 
-@router.get("/{report_id}/resume/docx")
+@router.post("/{report_id}/resume/docx")
 def read_tailored_resume_docx(
     report_id: int,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Response:
     ensure_report_access(db, report_id, current_user)
-    enforce_export_limit(db, current_user)
     docx = get_tailored_resume_docx(db, report_id, current_user)
-    record_audit_event(
-        db,
-        event_type="report.exported",
-        user_id=current_user.id,
-        payload={"report_id": report_id, "format": "docx"},
-    )
-    record_export_usage(db, current_user, report_id=report_id, export_format="docx")
-    mark_application_exported_for_report(db, current_user, report_id=report_id)
+    _finalize_report_export(db, current_user, report_id, "docx")
     return Response(
         content=docx,
         media_type=DOCX_MEDIA_TYPE,
-        headers={
-            "Content-Disposition": f'attachment; filename="resumepilot-report-{report_id}.docx"'
-        },
+        headers=_download_headers(f"resumepilot-report-{report_id}.docx"),
     )
 
 
-@router.get("/{report_id}/resume/pdf")
+@router.post("/{report_id}/resume/pdf")
 def read_tailored_resume_pdf(
     report_id: int,
     db: Session = Depends(get_db),
@@ -136,23 +113,48 @@ def read_tailored_resume_pdf(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Response:
     ensure_report_access(db, report_id, current_user)
-    enforce_export_limit(db, current_user)
     pdf = get_tailored_resume_pdf(db, report_id, settings, current_user)
-    record_audit_event(
-        db,
-        event_type="report.exported",
-        user_id=current_user.id,
-        payload={"report_id": report_id, "format": "pdf"},
-    )
-    record_export_usage(db, current_user, report_id=report_id, export_format="pdf")
-    mark_application_exported_for_report(db, current_user, report_id=report_id)
+    _finalize_report_export(db, current_user, report_id, "pdf")
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="resumepilot-report-{report_id}.pdf"'
-        },
+        headers=_download_headers(f"resumepilot-report-{report_id}.pdf"),
     )
+
+
+def _finalize_report_export(
+    db: Session,
+    current_user: CurrentUser,
+    report_id: int,
+    export_format: str,
+) -> None:
+    application = db.scalar(
+        select(ApplicationRecord)
+        .where(
+            ApplicationRecord.report_id == report_id,
+            ApplicationRecord.user_id == current_user.id,
+        )
+        .with_for_update()
+    )
+    reserve_export_usage(db, current_user, report_id=report_id, export_format=export_format)
+    add_audit_event(
+        db,
+        event_type="report.exported",
+        user_id=current_user.id,
+        payload={"report_id": report_id, "format": export_format},
+    )
+    if application and application.status != "applied":
+        application.status = "exported"
+        db.add(application)
+    db.commit()
+
+
+def _download_headers(filename: str) -> dict[str, str]:
+    return {
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Content-Type-Options": "nosniff",
+    }
 
 
 @router.delete("/{report_id}", response_model=ReportDeleteResponse)

@@ -5,6 +5,14 @@ import {
 } from "@/lib/auth";
 
 const DEFAULT_BACKEND_BASE_URL = "http://127.0.0.1:8000";
+const PRIVATE_PROXY_CACHE_CONTROL = "private, no-store, max-age=0";
+const AUTHENTICATED_RESPONSE_VARY = [
+  "Authorization",
+  "Cookie",
+  "X-ResumePilot-Auth-User",
+  "X-ResumePilot-Auth-Email",
+  "X-ResumePilot-Auth-Name"
+].join(", ");
 
 export function getBackendBaseUrl(): string {
   const configuredUrl = process.env.RESUMEPILOT_API_BASE_URL ?? DEFAULT_BACKEND_BASE_URL;
@@ -23,6 +31,12 @@ export async function proxyBackendResponse(
 ): Promise<Response> {
   const requestHeaders = new Headers(init?.headers);
   const authRequired = options.authRequired ?? true;
+  const requestMethod = init?.method ?? options.request?.method;
+  const requestBody =
+    init?.body ??
+    (options.request && !["GET", "HEAD"].includes(options.request.method)
+      ? await options.request.arrayBuffer()
+      : undefined);
 
   if (authRequired) {
     const session = await getAuthSession(options.request);
@@ -30,24 +44,33 @@ export async function proxyBackendResponse(
       return authFailureResponse(session);
     }
     try {
-      signedBackendIdentityHeaders(session).forEach((value, key) => {
+      signedBackendIdentityHeaders(session, {
+        method: requestMethod ?? "GET",
+        path: path.split("?", 1)[0]
+      }).forEach((value, key) => {
         requestHeaders.set(key, value);
       });
-    } catch (error) {
+    } catch {
       return Response.json(
         {
-          detail:
-            error instanceof Error
-              ? error.message
-              : "Authenticated backend proxy is not configured."
+          detail: "Authenticated backend proxy is not configured."
         },
-        { status: 500 }
+        {
+          status: 500,
+          headers: {
+            "Cache-Control": PRIVATE_PROXY_CACHE_CONTROL,
+            "Vary": AUTHENTICATED_RESPONSE_VARY,
+            "X-Content-Type-Options": "nosniff"
+          }
+        }
       );
     }
   }
 
   const backendResponse = await fetch(`${getBackendBaseUrl()}${path}`, {
     ...init,
+    method: requestMethod,
+    body: requestBody,
     headers: requestHeaders,
     cache: "no-store"
   });
@@ -55,7 +78,10 @@ export async function proxyBackendResponse(
   const contentDisposition = backendResponse.headers.get("content-disposition");
   const responseBody = await backendResponse.arrayBuffer();
   const headers = new Headers({
-    "content-type": contentType
+    "Cache-Control": PRIVATE_PROXY_CACHE_CONTROL,
+    "content-type": contentType,
+    "Vary": AUTHENTICATED_RESPONSE_VARY,
+    "X-Content-Type-Options": "nosniff"
   });
 
   if (contentDisposition) {

@@ -93,6 +93,25 @@ def test_signed_identity_rejects_expired_timestamp(settings, sample_resume_text)
     assert response.json()["detail"] == "Invalid authenticated user signature"
 
 
+def test_signed_identity_cannot_be_replayed_on_a_different_operation(settings):
+    settings.auth_required = True
+    settings.auth_trusted_proxy_secret = AUTH_SECRET
+    app = create_app(settings)
+
+    with TestClient(app) as auth_client:
+        response = auth_client.get(
+            "/reports",
+            headers=_signed_headers(
+                external_id="signed-user",
+                email="signed@example.com",
+                display_name="Signed User",
+            ),
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid authenticated user signature"
+
+
 def _signed_headers(
     *,
     external_id: str,
@@ -112,5 +131,7 @@ def _signed_headers(
             email=email,
             display_name=display_name,
             timestamp=timestamp,
+            method="POST",
+            path="/resumes/upload",
         ),
     }

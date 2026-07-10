@@ -16,9 +16,10 @@ import {
   SearchCheck,
   ShieldCheck
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button-link";
+import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import type {
   AgentStepName,
@@ -26,18 +27,27 @@ import type {
   AgentWorkflowMode,
   AgentWorkflowTrace,
   ApplicationReport,
-  JobAnalysisResponse
+  JobAnalysisResponse,
+  ReportExportFormat
 } from "@/features/dashboard/types";
 import { formatEvidenceSource } from "@/features/dashboard/utils/evidence";
 import { formatScore, scoreLabel, scoreTone } from "@/features/dashboard/utils/report";
 
 interface ReportViewerProps {
   analysis: JobAnalysisResponse | null;
+  isExporting: ReportExportFormat | null;
+  onExport: (format: ReportExportFormat) => Promise<void>;
   report: ApplicationReport | null;
   workflowTrace: AgentWorkflowTrace | null;
 }
 
-export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerProps) {
+export function ReportViewer({
+  analysis,
+  isExporting,
+  onExport,
+  report,
+  workflowTrace
+}: ReportViewerProps) {
   if (!report || !analysis) {
     return (
       <Panel eyebrow="Step 05" title="Report">
@@ -62,56 +72,52 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
   const scoreBadgeLabel = hasUnclearJobRequirements
     ? "Needs job details"
     : scoreLabel(report.match_score);
-  const latexDownloadHref = `/api/reports/${encodeURIComponent(
-    String(analysis.report_id)
-  )}/resume/latex`;
-  const docxDownloadHref = `/api/reports/${encodeURIComponent(
-    String(analysis.report_id)
-  )}/resume/docx`;
-  const pdfDownloadHref = `/api/reports/${encodeURIComponent(
-    String(analysis.report_id)
-  )}/resume/pdf`;
-  const markdownDownloadHref = `/api/reports/${encodeURIComponent(
-    String(analysis.report_id)
-  )}/markdown`;
   const topKeywords = report.ats_keywords.slice(0, 10);
 
   return (
     <Panel
       action={
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <ButtonLink
-            download={`resumepilot-report-${analysis.report_id}.md`}
-            href={markdownDownloadHref}
+          <ReportExportButton
             icon={<Download className="h-4 w-4" aria-hidden="true" />}
+            isExporting={isExporting === "markdown"}
+            isUnavailable={Boolean(isExporting)}
+            label="Markdown"
+            onClick={() => void onExport("markdown")}
             variant="secondary"
           >
             Markdown
-          </ButtonLink>
-          <ButtonLink
-            download={`resumepilot-report-${analysis.report_id}.docx`}
-            href={docxDownloadHref}
+          </ReportExportButton>
+          <ReportExportButton
             icon={<FileText className="h-4 w-4" aria-hidden="true" />}
+            isExporting={isExporting === "docx"}
+            isUnavailable={Boolean(isExporting)}
+            label="DOCX"
+            onClick={() => void onExport("docx")}
             variant="secondary"
           >
             DOCX
-          </ButtonLink>
-          <ButtonLink
-            download={`resumepilot-report-${analysis.report_id}.tex`}
-            href={latexDownloadHref}
+          </ReportExportButton>
+          <ReportExportButton
             icon={<FileCode2 className="h-4 w-4" aria-hidden="true" />}
+            isExporting={isExporting === "latex"}
+            isUnavailable={Boolean(isExporting)}
+            label="LaTeX"
+            onClick={() => void onExport("latex")}
             variant="secondary"
           >
             LaTeX
-          </ButtonLink>
-          <ButtonLink
-            download={`resumepilot-report-${analysis.report_id}.pdf`}
-            href={pdfDownloadHref}
+          </ReportExportButton>
+          <ReportExportButton
             icon={<FileDown className="h-4 w-4" aria-hidden="true" />}
+            isExporting={isExporting === "pdf"}
+            isUnavailable={Boolean(isExporting)}
+            label="PDF"
+            onClick={() => void onExport("pdf")}
             variant="primary"
           >
             PDF
-          </ButtonLink>
+          </ReportExportButton>
         </div>
       }
       eyebrow={`Report ${analysis.report_id}`}
@@ -354,6 +360,36 @@ export function ReportViewer({ analysis, report, workflowTrace }: ReportViewerPr
         ) : null}
       </div>
     </Panel>
+  );
+}
+
+function ReportExportButton({
+  children,
+  icon,
+  isExporting,
+  isUnavailable,
+  label,
+  onClick,
+  variant
+}: {
+  children: string;
+  icon: ReactNode;
+  isExporting: boolean;
+  isUnavailable: boolean;
+  label: string;
+  onClick: () => void;
+  variant: "primary" | "secondary";
+}) {
+  return (
+    <Button
+      aria-label={`Download ${label}`}
+      disabled={isUnavailable}
+      icon={icon}
+      onClick={onClick}
+      variant={variant}
+    >
+      {isExporting ? "Preparing…" : children}
+    </Button>
   );
 }
 

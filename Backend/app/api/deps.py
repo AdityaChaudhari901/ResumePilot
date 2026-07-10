@@ -123,6 +123,8 @@ def _verify_authenticated_user_headers(
             timestamp=timestamp,
             signature=signature,
             max_age_seconds=settings.auth_signature_ttl_seconds,
+            method=request.method,
+            path=request.url.path,
         ):
             raise unauthorized("Invalid authenticated user signature")
         return

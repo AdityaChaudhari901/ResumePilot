@@ -15,6 +15,8 @@ def sign_identity(
     email: str | None,
     display_name: str | None,
     timestamp: str,
+    method: str,
+    path: str,
 ) -> str:
     return hmac.new(
         secret.encode("utf-8"),
@@ -23,6 +25,8 @@ def sign_identity(
             email=email,
             display_name=display_name,
             timestamp=timestamp,
+            method=method,
+            path=path,
         ).encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -37,6 +41,8 @@ def verify_identity_signature(
     timestamp: str | None,
     signature: str | None,
     max_age_seconds: int,
+    method: str,
+    path: str,
     now: datetime | None = None,
 ) -> bool:
     if not timestamp or not signature:
@@ -56,6 +62,8 @@ def verify_identity_signature(
         email=email,
         display_name=display_name,
         timestamp=timestamp,
+        method=method,
+        path=path,
     )
     return hmac.compare_digest(expected_signature, signature)
 
@@ -66,5 +74,9 @@ def _identity_payload(
     email: str | None,
     display_name: str | None,
     timestamp: str,
+    method: str,
+    path: str,
 ) -> str:
-    return "\n".join([external_id, email or "", display_name or "", timestamp])
+    return "\n".join(
+        [external_id, email or "", display_name or "", timestamp, method.upper(), path]
+    )

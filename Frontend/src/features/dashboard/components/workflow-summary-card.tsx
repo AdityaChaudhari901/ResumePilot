@@ -1,4 +1,4 @@
-import { Bot, BriefcaseBusiness, ClipboardList, FileText } from "lucide-react";
+import { Bot, BriefcaseBusiness, ClipboardList, FileCheck2, FileText } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,8 @@ import type {
   AgentWorkflowTrace,
   JobAnalysisResponse,
   JobPreviewResponse,
-  ResumeUploadResponse
+  ResumeUploadResponse,
+  TailoredResumeDraft
 } from "@/features/dashboard/types";
 
 interface WorkflowSummaryCardProps {
@@ -19,11 +20,13 @@ interface WorkflowSummaryCardProps {
   jobPreview: JobPreviewResponse | null;
   jobUrl: string;
   resume: ResumeUploadResponse | null;
+  tailoredResumeDraft: TailoredResumeDraft | null;
   workflowTrace: AgentWorkflowTrace | null;
   onEditJob: () => void;
   onEditResume: () => void;
   onReviewJob: () => void;
   onRunAi: () => void;
+  onViewDraft: () => void;
   onViewReport: () => void;
 }
 
@@ -38,8 +41,10 @@ export function WorkflowSummaryCard({
   onEditResume,
   onReviewJob,
   onRunAi,
+  onViewDraft,
   onViewReport,
   resume,
+  tailoredResumeDraft,
   workflowTrace
 }: WorkflowSummaryCardProps) {
   const resumeDetail = getResumeDetail(resume, isJobEvidenceReady);
@@ -102,10 +107,21 @@ export function WorkflowSummaryCard({
           statusLabel={analysis ? "Generated" : "Pending"}
           onAction={onViewReport}
         />
+        <SummaryRow
+          actionLabel="Open"
+          actionName="Open tailored resume draft"
+          detail={formatDraftDetail(tailoredResumeDraft, analysis)}
+          icon={<FileCheck2 className="h-4 w-4 text-primary" aria-hidden="true" />}
+          isActionDisabled={!analysis}
+          label="Tailored resume"
+          status={tailoredResumeDraft?.export_ready ? "ready" : "pending"}
+          statusLabel={tailoredResumeDraft?.export_ready ? "Export ready" : "Needs review"}
+          onAction={onViewDraft}
+        />
       </div>
       <p className="mt-4 rounded-md border border-border bg-surface p-3 text-xs leading-5 text-muted-foreground">
-        Inputs are reviewed first. Analysis runs only after the job evidence and resume evidence
-        are ready.
+        Inputs are reviewed first. Exports should use accepted draft bullets, not unreviewed
+        suggestions.
       </p>
     </Panel>
   );
@@ -195,4 +211,17 @@ function formatJobEvidenceDetail(preview: JobPreviewResponse | null): string {
 
 function workflowModeLabel(mode: AgentWorkflowTrace["mode"]): string {
   return mode === "crewai" ? "Live CrewAI completed" : "Deterministic fallback completed";
+}
+
+function formatDraftDetail(
+  draft: TailoredResumeDraft | null,
+  analysis: JobAnalysisResponse | null
+): string {
+  if (!analysis) {
+    return "No report generated yet";
+  }
+  if (!draft) {
+    return "Draft loading after report";
+  }
+  return `${draft.accepted_count} accepted · ${draft.pending_count} pending`;
 }

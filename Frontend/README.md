@@ -12,11 +12,13 @@ Next.js dashboard for the local ResumePilot MVP.
 
 ## Current dashboard capabilities
 
-- Guided five-step workflow: job listing URL, reviewed job evidence, resume upload, AI services, validated report.
+- Guided six-step workflow: job listing URL, reviewed job evidence, resume upload, AI services, validated report, and tailored resume draft approval.
 - Application pipeline workspace backed by `/api/applications`, with saved reviewed drafts and `reviewed`, `analyzed`, `exported`, and `applied` statuses.
 - Job preview through `/api/jobs/preview` so users can inspect and edit extracted role, company, skills, responsibilities, and extraction quality before upload.
 - Resume upload through the same-origin `/api/resumes/upload` proxy after the job evidence is reviewed.
 - Job analysis through `/api/jobs/analyze` using the saved reviewed job profile from the public listing URL, not a silent second parse.
+- Per-analysis live AI consent for eligible plans; deterministic processing remains the default and provider prompts exclude candidate contact details.
+- Tailored resume workspace through `/api/applications/[applicationId]/tailored-resume` where users edit, accept, or reject evidence-backed bullets before final DOCX, LaTeX, or PDF export.
 - Report viewing with JSON, Markdown, workflow trace timings/runtime metadata, provider token/cost estimates, DOCX, LaTeX `.tex`, and PDF downloads.
 - Collapsed workspace review for report history, parsed resume evidence, account/session state, usage limits, OpenClaw Gateway/provider readiness, and validation boundaries.
 
@@ -55,36 +57,42 @@ Run the dashboard browser smoke:
 npm run test:e2e
 ```
 
-The smoke command builds the frontend, starts FastAPI on `127.0.0.1:8040`,
-starts the production Next.js server on `127.0.0.1:3040`, captures the sample
+Playwright builds the frontend on every run, starts FastAPI on `127.0.0.1:8040`,
+starts a fresh production Next.js server on `127.0.0.1:3040`, captures the sample
 job listing URL, verifies the job evidence review gate, uploads the backend
 sample resume, runs the AI workflow, verifies the job URL request contract,
 checks the reviewed job profile and application-id analysis payload, workflow
-trace timing, Markdown/DOCX/LaTeX/PDF exports, application status transitions,
-and captures desktop/mobile screenshots under
+trace timing, Markdown/DOCX/LaTeX/PDF report exports, accepted-draft
+DOCX/LaTeX/PDF exports, application status transitions, security headers, and
+the automated WCAG A/AA baseline. It captures
+desktop/mobile screenshots under
 `Frontend/.local/playwright-results`.
 
 Override ports with `RESUMEPILOT_E2E_BACKEND_PORT` and
 `RESUMEPILOT_E2E_FRONTEND_PORT` if those defaults are occupied.
+Playwright refuses to reuse listeners on the selected ports so an old Next.js
+build cannot satisfy the smoke test.
 
 ## CI
 
-The GitHub Actions frontend job uses Node.js 24 and runs the static checks that
-do not require browser services:
+The GitHub Actions frontend job uses Node.js 24 and runs:
 
 ```bash
 npm ci
+npm run security:audit
 npm run lint
 npm run typecheck
+npm run test:auth-runtime
+npm run build
 ```
 
-Playwright remains a local/manual smoke gate for now because it starts FastAPI,
-builds the production Next.js server, verifies export endpoints, and captures
-screenshots.
+The browser job installs the constrained backend runtime, a checksum-verified
+Tectonic binary, and Playwright Chromium. It then runs `npm run test:e2e` and
+uploads the HTML report, traces, screenshots, and failure evidence for 14 days.
 
 ## OpenClaw WebChat / dashboard path
 
-The dashboard is aligned with the OpenClaw local Gateway flow:
+The dashboard supports this OpenClaw flow only in private local auth mode:
 
 ```bash
 openclaw models set google-vertex/<model-id>

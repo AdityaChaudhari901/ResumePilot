@@ -10,23 +10,11 @@ from app.schemas.report import (
     TailoredBullet,
 )
 from app.schemas.resume import ResumeFact, ResumeProfile
+from app.services.resume_evidence import has_dangling_fact_ending, starts_with_resume_action_verb
 
 TAILORED_BULLET_LIMIT = 5
 TAILORED_BULLET_SOURCE_SECTIONS = {"experience", "projects"}
 MIN_TAILORED_FACT_WORDS = 5
-
-ACTION_VERBS = {
-    "built",
-    "created",
-    "designed",
-    "developed",
-    "implemented",
-    "improved",
-    "launched",
-    "optimized",
-    "owned",
-    "shipped",
-}
 
 
 def generate_report(
@@ -225,7 +213,9 @@ def _is_tailored_fact_candidate(fact: ResumeFact | None) -> bool:
     text = _clean_fact_text(fact.text)
     if len(text.split()) < MIN_TAILORED_FACT_WORDS:
         return False
-    return bool(_starts_with_action_verb(text) or _contains_action_verb(text))
+    if has_dangling_fact_ending(text):
+        return False
+    return starts_with_resume_action_verb(text)
 
 
 def _rewrite_fact_as_bullet(fact: ResumeFact, skills: list[str]) -> str:
@@ -255,16 +245,6 @@ def _ensure_sentence(value: str) -> str:
     if text.endswith((".", "!", "?")):
         return text
     return f"{text}."
-
-
-def _starts_with_action_verb(value: str) -> bool:
-    first_word = re.match(r"[A-Za-z]+", value)
-    return bool(first_word and first_word.group(0).casefold() in ACTION_VERBS)
-
-
-def _contains_action_verb(value: str) -> bool:
-    tokens = {token.casefold() for token in re.findall(r"[A-Za-z]+", value)}
-    return bool(tokens & ACTION_VERBS)
 
 
 def _ats_keywords(match: MatchResult) -> list[AtsKeywordSuggestion]:

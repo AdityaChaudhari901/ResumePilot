@@ -6,6 +6,7 @@ import type { ReportHistoryItem } from "@/features/dashboard/types";
 import { formatScore, scoreTone } from "@/features/dashboard/utils/report";
 
 interface ReportHistoryCardProps {
+  isBusy: boolean;
   isLoading: boolean;
   items: ReportHistoryItem[];
   selectedReportId: number | null;
@@ -13,6 +14,7 @@ interface ReportHistoryCardProps {
 }
 
 export function ReportHistoryCard({
+  isBusy,
   isLoading,
   items,
   onSelectReport,
@@ -43,6 +45,7 @@ export function ReportHistoryCard({
               <button
                 aria-current={isSelected ? "true" : undefined}
                 className="w-full rounded-md border border-border bg-surface p-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 aria-current:border-primary/40 aria-current:bg-primary/5"
+                disabled={isBusy}
                 key={item.report_id}
                 onClick={() => onSelectReport(item)}
                 type="button"

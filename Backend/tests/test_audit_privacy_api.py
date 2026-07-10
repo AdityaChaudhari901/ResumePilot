@@ -7,7 +7,7 @@ def test_audit_events_are_recorded_without_raw_resume_or_job_text(
     client, sample_resume_text, sample_job_text
 ):
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
-    markdown_response = client.get(f"/reports/{body['report_id']}/markdown")
+    markdown_response = client.post(f"/reports/{body['report_id']}/markdown")
     assert markdown_response.status_code == 200
 
     events_response = client.get("/audit/events")

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test, type TestInfo } from "@playwright/test";
 
 const RESUME_FIXTURE = path.resolve(
@@ -11,12 +12,45 @@ const BACKEND_PLATFORM_JOB_PATH = "/backend-platform-job.html";
 const DATA_API_JOB_PATH = "/data-api-job.html";
 const UNCLEAR_JOB_POSTING_PATH = "/unclear-job-posting.html";
 
+test("dashboard enforces browser security headers and an accessibility baseline", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const response = await page.goto("/");
+  if (!response) {
+    throw new Error("Dashboard navigation completed without an HTTP response.");
+  }
+
+  expect(response.status()).toBe(200);
+  expect(response.headers()["x-content-type-options"]).toBe("nosniff");
+  expect(response.headers()["x-frame-options"]).toBe("DENY");
+  expect(response.headers()["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+  expect(response.headers()["permissions-policy"]).toBe(
+    "camera=(), geolocation=(), microphone=()"
+  );
+
+  await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  const accessibilityScan = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  const violations = accessibilityScan.violations.map((violation) => ({
+    help: violation.help,
+    id: violation.id,
+    impact: violation.impact,
+    targets: violation.nodes.flatMap((node) => node.target)
+  }));
+
+  expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+});
+
 test("dashboard demo flow renders report and validates exports", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
-  const reportId = await completeDashboardDemoFlow(page);
+  const { applicationId, reportId } = await completeDashboardDemoFlow(page);
 
   await expectReportExport(page, `/api/reports/${reportId}/markdown`, {
-    contentDisposition: null,
+    contentDisposition: `attachment; filename="resumepilot-report-${reportId}.md"`,
     contentType: "text/plain",
     prefix: "# Job Fit Report"
   });
@@ -35,6 +69,21 @@ test("dashboard demo flow renders report and validates exports", async ({ page }
     contentType: "application/pdf",
     prefix: "%PDF-"
   });
+  await expectReportExport(page, `/api/applications/${applicationId}/tailored-resume/latex`, {
+    contentDisposition: `attachment; filename="resumepilot-application-${applicationId}.tex"`,
+    contentType: "application/x-tex",
+    prefix: "%-------------------------"
+  });
+  await expectReportExport(page, `/api/applications/${applicationId}/tailored-resume/docx`, {
+    contentDisposition: `attachment; filename="resumepilot-application-${applicationId}.docx"`,
+    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    prefix: "PK"
+  });
+  await expectReportExport(page, `/api/applications/${applicationId}/tailored-resume/pdf`, {
+    contentDisposition: `attachment; filename="resumepilot-application-${applicationId}.pdf"`,
+    contentType: "application/pdf",
+    prefix: "%PDF-"
+  });
 
   await captureDashboardScreenshot(page, testInfo, "dashboard-desktop.png");
 });
@@ -43,10 +92,10 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   await page.setViewportSize({ width: 390, height: 1200 });
   await completeDashboardDemoFlow(page);
 
-  await expect(page.getByRole("link", { name: "Markdown" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "DOCX" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "LaTeX" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "PDF" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download Markdown" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download DOCX" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download LaTeX" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
 
   await captureDashboardScreenshot(page, testInfo, "dashboard-mobile.png");
 });
@@ -143,6 +192,7 @@ test("dashboard sends a job posting URL analysis request", async ({ page }) => {
 
 test("dashboard flags unclear job requirement extraction", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
+  await mockFixtureJobPreviews(page);
   await page.goto("/");
 
   await page.getByRole("textbox", { name: "Job listing URL" }).fill(
@@ -166,13 +216,14 @@ test("dashboard flags unclear job requirement extraction", async ({ page }) => {
 
 test("report ledger reopens the selected saved report accurately", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
+  await mockFixtureJobPreviews(page);
   await page.goto("/");
 
   await enterJobListing(page, {
     url: jobPostingUrl(page, BACKEND_PLATFORM_JOB_PATH)
   });
   await uploadResume(page);
-  const firstReportId = await runAiAnalysis(page);
+  const firstReportId = (await runAiAnalysis(page)).reportId;
 
   const secondReportId = await analyzeJob(page, {
     url: jobPostingUrl(page, DATA_API_JOB_PATH)
@@ -191,13 +242,27 @@ test("report ledger reopens the selected saved report accurately", async ({ page
     "aria-current",
     "true"
   );
-  await expect(page.getByRole("link", { name: "LaTeX" })).toHaveAttribute(
-    "href",
-    `/api/reports/${firstReportId}/resume/latex`
+  const exportResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/api/reports/${firstReportId}/resume/latex`)
   );
+  await page.getByRole("button", { name: "Download LaTeX" }).click();
+  expect((await exportResponsePromise).status()).toBe(200);
 });
 
-async function completeDashboardDemoFlow(page: Page): Promise<string> {
+interface CompletedDashboardFlow {
+  applicationId: string;
+  reportId: string;
+}
+
+interface RunAiAnalysisResult {
+  applicationId: string | null;
+  reportId: string;
+}
+
+async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboardFlow> {
+  await mockFixtureJobPreviews(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Application workflow" })).toBeVisible();
@@ -219,7 +284,7 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
   );
   await page.getByRole("button", { name: "Review job evidence" }).click();
   await expect(page.getByRole("heading", { name: "Review job evidence" })).toBeVisible();
-  await expect(page.getByText("Required skills")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Required skills" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "required skill name" }).first()).toHaveValue(
     "Python"
   );
@@ -240,10 +305,8 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
   await expect(page.getByRole("heading", { name: "Parsed skills" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Evidence ledger" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Run AI analysis" }).click();
-  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
-    timeout: 30_000
-  });
+  const result = await runAiAnalysis(page, { acceptFirstDraft: true });
+
   await expect(page.getByText("Match score")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Matched skills" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Missing or weak" })).toBeVisible();
@@ -268,8 +331,13 @@ async function completeDashboardDemoFlow(page: Page): Promise<string> {
   expect(pageText).not.toMatch(/(?:summary|skills)_\d{3} ·/);
   expect(pageText).toMatch(/(?:Project evidence|Work evidence|Resume summary|Skills section) #\d+/);
 
-  const latexHref = await page.getByRole("link", { name: "LaTeX" }).getAttribute("href");
-  return extractReportId(latexHref);
+  if (!result.applicationId) {
+    throw new Error("Accepted draft flow did not expose an application export action.");
+  }
+  return {
+    applicationId: result.applicationId,
+    reportId: result.reportId
+  };
 }
 
 interface AnalyzeJobInput {
@@ -278,7 +346,7 @@ interface AnalyzeJobInput {
 
 async function analyzeJob(page: Page, input: AnalyzeJobInput): Promise<string> {
   await enterJobListing(page, input);
-  return runAiAnalysis(page);
+  return (await runAiAnalysis(page)).reportId;
 }
 
 async function enterJobListing(page: Page, input: AnalyzeJobInput): Promise<void> {
@@ -302,14 +370,172 @@ async function uploadResume(page: Page): Promise<void> {
   });
 }
 
-async function runAiAnalysis(page: Page): Promise<string> {
+interface FixtureJobPreview {
+  company: string | null;
+  preferredSkills: string[];
+  requiredSkills: string[];
+  responsibilities: string[];
+  role: string | null;
+  unclearItems?: string[];
+}
+
+const FIXTURE_JOB_PREVIEWS: Record<string, FixtureJobPreview> = {
+  [SAMPLE_JOB_POSTING_PATH]: {
+    company: "NovaHire AI",
+    preferredSkills: ["Pytest"],
+    requiredSkills: ["Python", "FastAPI", "SQL"],
+    responsibilities: [
+      "Build REST APIs for hiring workflows.",
+      "Write reliable tests and validation gates for user-facing reports."
+    ],
+    role: "Backend Engineer"
+  },
+  [BACKEND_PLATFORM_JOB_PATH]: {
+    company: "Ledger Labs",
+    preferredSkills: [],
+    requiredSkills: ["Python", "FastAPI", "SQL"],
+    responsibilities: [
+      "Build REST APIs for internal application workflows.",
+      "Improve test coverage for backend services."
+    ],
+    role: "Backend Platform Engineer"
+  },
+  [DATA_API_JOB_PATH]: {
+    company: "Insight Works",
+    preferredSkills: ["Pytest"],
+    requiredSkills: ["Python", "REST API"],
+    responsibilities: [
+      "Build API integrations for analytics workflows.",
+      "Work with SQL-backed datasets."
+    ],
+    role: "Data API Engineer"
+  },
+  [UNCLEAR_JOB_POSTING_PATH]: {
+    company: null,
+    preferredSkills: [],
+    requiredSkills: [],
+    responsibilities: ["Collaborate with product teams on customer-facing software."],
+    role: null,
+    unclearItems: ["Required and preferred technical skills are not explicit."]
+  }
+};
+
+async function mockFixtureJobPreviews(page: Page): Promise<void> {
+  await page.route("**/api/jobs/preview", async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? "{}") as { job_url?: unknown };
+    if (typeof payload.job_url !== "string") {
+      await route.fallback();
+      return;
+    }
+
+    const fixture = FIXTURE_JOB_PREVIEWS[new URL(payload.job_url).pathname];
+    if (!fixture) {
+      await route.fallback();
+      return;
+    }
+
+    const hasRequirements =
+      fixture.requiredSkills.length > 0 || fixture.preferredSkills.length > 0;
+    const jobSkills = (skills: string[], importance: "preferred" | "required") =>
+      skills.map((name, index) => ({
+        confidence: "high",
+        evidence_text: `${importance === "required" ? "Required" : "Preferred"} ${name} experience.`,
+        id: `job_${importance}_${String(index + 1).padStart(3, "0")}`,
+        importance,
+        name
+      }));
+
+    await route.fulfill({
+      body: JSON.stringify({
+        job_url: payload.job_url,
+        parser: "playwright_fixture",
+        profile: {
+          benefits: [],
+          company: fixture.company,
+          employment_type: null,
+          experience_level: null,
+          job_id: 0,
+          keywords: [...fixture.requiredSkills, ...fixture.preferredSkills],
+          location: null,
+          preferred_skills: jobSkills(fixture.preferredSkills, "preferred"),
+          required_skills: jobSkills(fixture.requiredSkills, "required"),
+          responsibilities: fixture.responsibilities,
+          role_title: fixture.role,
+          unclear_items: fixture.unclearItems ?? [],
+          warnings: hasRequirements
+            ? []
+            : [
+                {
+                  code: "required_skills_unclear",
+                  evidence_ids: [],
+                  message: "Required and preferred technical skills are not explicit."
+                }
+              ]
+        },
+        quality_checks: [
+          {
+            code: "required_or_preferred_skills",
+            message: hasRequirements
+              ? "Required or preferred skills were extracted."
+              : "Required and preferred skills were not explicit.",
+            status: hasRequirements ? "pass" : "fail"
+          }
+        ],
+        raw_text_char_count: hasRequirements ? 480 : 180,
+        status: hasRequirements ? "ready" : "missing_requirements"
+      }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+}
+
+async function runAiAnalysis(
+  page: Page,
+  options: { acceptFirstDraft?: boolean } = {}
+): Promise<RunAiAnalysisResult> {
   await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible();
   await page.getByRole("button", { name: "Run AI analysis" }).click();
-  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toBeVisible({
     timeout: 30_000
   });
-  const latexHref = await page.getByRole("link", { name: "LaTeX" }).getAttribute("href");
-  return extractReportId(latexHref);
+
+  const draftWorkspace = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Tailored resume workspace" })
+  });
+  let applicationId: string | null = null;
+
+  if (options.acceptFirstDraft) {
+    await expect(draftWorkspace.getByText("Export locked")).toBeVisible();
+    const acceptedDraftResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        response.url().includes("/tailored-resume/items/")
+    );
+    await draftWorkspace.getByRole("button", { name: "Accept" }).first().click();
+    const acceptedDraftResponse = await acceptedDraftResponsePromise;
+    expect(acceptedDraftResponse.status()).toBe(200);
+    applicationId = String((await acceptedDraftResponse.json()).application_id);
+    await expect(draftWorkspace.getByRole("button", { name: "Download DOCX" })).toBeVisible();
+  }
+
+  await draftWorkspace.getByRole("button", { name: "View report" }).click();
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
+    timeout: 15_000
+  });
+  const reportLabel = await page
+    .locator('section[aria-label="Active workflow step"]')
+    .getByText(/^Report \d+$/)
+    .first()
+    .textContent();
+  const reportId = reportLabel?.match(/\d+/)?.[0];
+  if (!reportId) {
+    throw new Error(`Could not parse the active report id from: ${reportLabel ?? "missing label"}`);
+  }
+  return {
+    applicationId,
+    reportId
+  };
 }
 
 function jobPostingUrl(page: Page, pathName: string): string {
@@ -328,18 +554,13 @@ async function expectReportExport(
   expected: ExpectedExport
 ): Promise<void> {
   const exportUrl = new URL(exportPath, page.url()).toString();
-  const response = await page.request.get(exportUrl);
+  const response = await page.request.post(exportUrl);
 
   expect(response.status(), exportPath).toBe(200);
   expect(response.headers()["content-type"], exportPath).toContain(expected.contentType);
 
-  if (expected.contentDisposition) {
-    expect(response.headers()["content-disposition"], exportPath).toBe(
-      expected.contentDisposition
-    );
-  } else {
-    expect(response.headers()["content-disposition"], exportPath).toBeUndefined();
-  }
+  expect(response.headers()["content-disposition"], exportPath).toBe(expected.contentDisposition);
+  expect(response.headers()["cache-control"], exportPath).toContain("private, no-store");
 
   const body = await response.body();
   expect(body.subarray(0, expected.prefix.length).toString("latin1"), exportPath).toBe(
@@ -356,17 +577,4 @@ async function captureDashboardScreenshot(
     fullPage: true,
     path: testInfo.outputPath(fileName)
   });
-}
-
-function extractReportId(latexHref: string | null): string {
-  if (!latexHref) {
-    throw new Error("LaTeX export link did not include an href.");
-  }
-
-  const match = latexHref.match(/^\/api\/reports\/(\d+)\/resume\/latex$/);
-  if (!match?.[1]) {
-    throw new Error(`Unexpected LaTeX export href: ${latexHref}`);
-  }
-
-  return match[1];
 }

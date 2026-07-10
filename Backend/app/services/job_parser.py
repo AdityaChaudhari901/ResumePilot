@@ -1,8 +1,10 @@
+import ipaddress
 import json
 import re
+import socket
 from contextlib import suppress
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -22,6 +24,11 @@ PREFERRED_MARKERS = ("preferred", "nice to have", "bonus", "plus", "good to have
 RESPONSIBILITY_MARKERS = ("responsibilities", "what you will do", "you will", "role includes")
 BENEFIT_MARKERS = ("benefits", "perks", "compensation")
 MIN_FETCHED_TEXT_CHARS = 40
+MAX_FETCHED_JOB_BYTES = 2 * 1024 * 1024
+MAX_JOB_REDIRECTS = 3
+JOB_FETCH_TIMEOUT = (3.0, 7.0)
+REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
+ALLOWED_JOB_CONTENT_TYPES = {"application/xhtml+xml", "text/html", "text/plain"}
 
 
 class JobParseError(ValueError):
@@ -33,28 +40,57 @@ class BrowserFallbackUnavailable(RuntimeError):
 
 
 def fetch_job_text(job_url: str, *, settings: "Settings | None" = None) -> str:
+    current_url = job_url
     try:
-        response = requests.get(
-            job_url,
-            timeout=10,
-            headers={"User-Agent": "ResumePilot/0.1 (+local job analysis)"},
-        )
-        if response.status_code in {401, 403, 429}:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=(
-                    "Job URL is blocked, private, or rate limited. "
-                    "Paste the job description text instead."
-                ),
+        for redirect_count in range(MAX_JOB_REDIRECTS + 1):
+            allowed_ips = _assert_public_job_url(current_url)
+            response = requests.get(
+                current_url,
+                timeout=JOB_FETCH_TIMEOUT,
+                headers={
+                    "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
+                    "User-Agent": "ResumePilot/0.1 (+local job analysis)",
+                },
+                allow_redirects=False,
+                stream=True,
             )
-        response.raise_for_status()
+            try:
+                _assert_public_peer(response, allowed_ips)
+                if response.status_code in REDIRECT_STATUS_CODES:
+                    if redirect_count == MAX_JOB_REDIRECTS:
+                        raise JobParseError("Job URL redirected too many times")
+                    location = response.headers.get("location")
+                    if not location:
+                        raise JobParseError("Job URL returned an invalid redirect")
+                    current_url = urljoin(current_url, location)
+                    continue
+                if response.status_code in {401, 403, 429}:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail=(
+                            "Job URL is blocked, private, or rate limited. "
+                            "Paste the job description text instead."
+                        ),
+                    )
+                response.raise_for_status()
+                html = _read_bounded_job_response(response)
+                break
+            finally:
+                response.close()
+        else:  # pragma: no cover - loop always exits or raises
+            raise JobParseError("Job URL could not be fetched")
+    except JobParseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{exc}. Paste the job description text instead.",
+        ) from exc
     except requests.RequestException as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Could not fetch job URL. Paste the job description text instead.",
         ) from exc
 
-    text = _html_to_job_text(response.text, job_url)
+    text = _html_to_job_text(html, current_url)
     if len(text) < MIN_FETCHED_TEXT_CHARS:
         if settings and settings.enable_job_browser_fallback:
             try:
@@ -75,6 +111,75 @@ def fetch_job_text(job_url: str, *, settings: "Settings | None" = None) -> str:
             ),
         )
     return text
+
+
+def _assert_public_job_url(
+    job_url: str,
+) -> frozenset[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    parsed = urlparse(job_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise JobParseError("Job URL must use public HTTP or HTTPS")
+    if parsed.username or parsed.password:
+        raise JobParseError("Job URL credentials are not allowed")
+
+    hostname = parsed.hostname.rstrip(".").casefold()
+    if hostname == "localhost" or hostname.endswith(
+        (".localhost", ".local", ".internal", ".home.arpa")
+    ):
+        raise JobParseError("Job URL must not target a private host")
+
+    try:
+        resolved = {
+            ipaddress.ip_address(result[4][0])
+            for result in socket.getaddrinfo(
+                hostname,
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        }
+    except (OSError, ValueError) as exc:
+        raise JobParseError("Job URL hostname could not be resolved") from exc
+    if not resolved or any(not address.is_global for address in resolved):
+        raise JobParseError("Job URL must not resolve to a private or reserved address")
+    return frozenset(resolved)
+
+
+def _assert_public_peer(
+    response: requests.Response,
+    allowed_ips: frozenset[ipaddress.IPv4Address | ipaddress.IPv6Address],
+) -> None:
+    connection = getattr(response.raw, "_connection", None)
+    socket_connection = getattr(connection, "sock", None)
+    if socket_connection is None:
+        raise JobParseError("Job URL connection could not be verified")
+    try:
+        peer_address = ipaddress.ip_address(socket_connection.getpeername()[0])
+    except (OSError, ValueError, TypeError) as exc:
+        raise JobParseError("Job URL connection could not be verified") from exc
+    if not peer_address.is_global or peer_address not in allowed_ips:
+        raise JobParseError("Job URL connection changed to an untrusted address")
+
+
+def _read_bounded_job_response(response: requests.Response) -> str:
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type and content_type not in ALLOWED_JOB_CONTENT_TYPES:
+        raise JobParseError("Job URL did not return readable HTML or text")
+    content_length = response.headers.get("content-length")
+    if content_length:
+        try:
+            parsed_content_length = int(content_length)
+        except ValueError as exc:
+            raise JobParseError("Job URL returned an invalid content length") from exc
+        if parsed_content_length > MAX_FETCHED_JOB_BYTES:
+            raise JobParseError("Job page is too large")
+
+    content = bytearray()
+    for chunk in response.iter_content(chunk_size=64 * 1024):
+        content.extend(chunk)
+        if len(content) > MAX_FETCHED_JOB_BYTES:
+            raise JobParseError("Job page is too large")
+    encoding = response.encoding or "utf-8"
+    return bytes(content).decode(encoding, errors="replace")
 
 
 def _html_to_job_text(html: str, job_url: str) -> str:
@@ -225,8 +330,24 @@ def _fetch_job_text_with_playwright(job_url: str, *, timeout_ms: int) -> str:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             try:
-                page = browser.new_page()
+                context = browser.new_context(service_workers="block")
+                page = context.new_page()
+
+                def guard_request(route) -> None:
+                    request_url = route.request.url
+                    if urlparse(request_url).scheme in {"blob", "data"}:
+                        route.continue_()
+                        return
+                    try:
+                        _assert_public_job_url(request_url)
+                    except JobParseError:
+                        route.abort("blockedbyclient")
+                        return
+                    route.continue_()
+
+                page.route("**/*", guard_request)
                 page.goto(job_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                _assert_public_job_url(page.url)
                 with suppress(PlaywrightError):
                     page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 5000))
                 body_text = page.locator("body").inner_text(timeout=timeout_ms)

@@ -15,9 +15,11 @@ import { Panel } from "@/components/ui/panel";
 import type { UsageSummaryResponse } from "@/features/dashboard/types";
 
 interface AiWorkflowCardProps {
+  allowLiveAiProcessing: boolean;
   canAnalyze: boolean;
   isAnalyzing: boolean;
   usage: UsageSummaryResponse | null;
+  onAllowLiveAiProcessingChange: (enabled: boolean) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
@@ -45,8 +47,10 @@ const WORKFLOW_ITEMS = [
 ];
 
 export function AiWorkflowCard({
+  allowLiveAiProcessing,
   canAnalyze,
   isAnalyzing,
+  onAllowLiveAiProcessingChange,
   onSubmit,
   usage
 }: AiWorkflowCardProps) {
@@ -99,10 +103,31 @@ export function AiWorkflowCard({
           })}
         </ol>
 
+        {usage?.live_crewai_enabled ? (
+          <label className="flex items-start gap-3 rounded-md border border-border bg-surface p-3 text-sm">
+            <input
+              checked={allowLiveAiProcessing}
+              className="mt-1 h-4 w-4"
+              disabled={isAnalyzing}
+              onChange={(event) => onAllowLiveAiProcessingChange(event.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              <span className="block font-semibold text-foreground">
+                Allow live AI processing for this analysis
+              </span>
+              <span className="mt-1 block leading-5 text-muted-foreground">
+                Sends job content and evidence facts to the configured provider. Resume name,
+                email, phone, links, and the deterministic cover letter are excluded.
+              </span>
+            </span>
+          </label>
+        ) : null}
+
         <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-5 text-muted-foreground">
-            The backend decides whether to use live CrewAI or deterministic fallback based on plan,
-            provider readiness, and validation safety.
+            Live processing requires your consent for each analysis. Otherwise ResumePilot uses
+            the deterministic evidence workflow.
           </p>
           <Button
             disabled={!canAnalyze}

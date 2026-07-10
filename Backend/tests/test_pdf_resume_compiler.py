@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.services.pdf_resume_compiler import (
+    PdfCompilerBusy,
     PdfCompilerUnavailable,
     PdfOutputTooLarge,
     compile_latex_to_pdf,
@@ -17,6 +18,25 @@ MINIMAL_LATEX = r"""
 ResumePilot
 \end{document}
 """
+
+
+def test_compile_latex_to_pdf_rejects_when_compiler_slot_is_busy(monkeypatch):
+    class BusySlot:
+        def acquire(self, *, timeout: float) -> bool:
+            assert timeout == 1.0
+            return False
+
+        def release(self) -> None:
+            raise AssertionError("unacquired slot must not be released")
+
+    monkeypatch.setattr("app.services.pdf_resume_compiler._PDF_COMPILE_SLOT", BusySlot())
+
+    with pytest.raises(PdfCompilerBusy):
+        compile_latex_to_pdf(
+            MINIMAL_LATEX,
+            timeout_seconds=7,
+            max_output_bytes=1024,
+        )
 
 
 def test_compile_latex_to_pdf_uses_tectonic_untrusted(monkeypatch):

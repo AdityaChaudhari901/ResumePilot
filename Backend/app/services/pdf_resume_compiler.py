@@ -4,13 +4,17 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 
 INPUT_FILENAME = "resume.tex"
 OUTPUT_FILENAME = "resume.pdf"
 MAX_LOG_EXCERPT_CHARS = 4000
 SOURCE_DATE_EPOCH = "1704067200"
+PDF_COMPILE_ACQUIRE_TIMEOUT_SECONDS = 1.0
+_PDF_COMPILE_SLOT = threading.BoundedSemaphore(value=1)
 
 
 class PdfCompilationError(RuntimeError):
@@ -37,12 +41,31 @@ class PdfOutputTooLarge(PdfCompilationError):
     """Raised when the generated PDF exceeds the configured size limit."""
 
 
+class PdfCompilerBusy(PdfCompilationError):
+    """Raised when the bounded local compiler slot is already occupied."""
+
+
 @dataclass(frozen=True)
 class CompilerSpec:
     name: str
     executable: str
 
 
+def _bounded_pdf_compilation(function):
+    @wraps(function)
+    def guarded(*args, **kwargs):
+        acquired = _PDF_COMPILE_SLOT.acquire(timeout=PDF_COMPILE_ACQUIRE_TIMEOUT_SECONDS)
+        if not acquired:
+            raise PdfCompilerBusy("PDF compiler is busy. Retry the export shortly.")
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _PDF_COMPILE_SLOT.release()
+
+    return guarded
+
+
+@_bounded_pdf_compilation
 def compile_latex_to_pdf(
     latex_source: str,
     *,

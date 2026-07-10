@@ -22,8 +22,14 @@ def validate_production_settings(settings: Settings) -> None:
         errors.append("AUTH_REQUIRED must be true in production")
     if not settings.auth_trusted_proxy_secret:
         errors.append("AUTH_TRUSTED_PROXY_SECRET is required in production")
+    elif _is_unsafe_secret(settings.auth_trusted_proxy_secret):
+        errors.append(
+            "AUTH_TRUSTED_PROXY_SECRET must be a generated secret of at least 32 characters"
+        )
     if not settings.jobcopilot_api_token:
         errors.append("JOBCOPILOT_API_TOKEN is required in production")
+    elif _is_unsafe_secret(settings.jobcopilot_api_token):
+        errors.append("JOBCOPILOT_API_TOKEN must be a generated secret of at least 32 characters")
     if settings.create_db_schema_on_startup:
         errors.append("AUTO_CREATE_DB_SCHEMA must be false in production")
     if not settings.check_db_migrations_on_readiness:
@@ -31,3 +37,8 @@ def validate_production_settings(settings: Settings) -> None:
 
     if errors:
         raise ProductionConfigError("Unsafe production configuration: " + "; ".join(sorted(errors)))
+
+
+def _is_unsafe_secret(value: str) -> bool:
+    normalized = value.strip().casefold()
+    return len(value.strip()) < 32 or normalized.startswith(("change-me", "changeme", "replace-me"))

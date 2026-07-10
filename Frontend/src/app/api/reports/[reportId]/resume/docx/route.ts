@@ -8,7 +8,7 @@ interface ReportDocxRouteContext {
   }>;
 }
 
-export async function GET(request: Request, context: ReportDocxRouteContext) {
+export async function POST(request: Request, context: ReportDocxRouteContext) {
   const { reportId } = await context.params;
   return proxyBackendResponse(`/reports/${encodeURIComponent(reportId)}/resume/docx`, undefined, {
     request

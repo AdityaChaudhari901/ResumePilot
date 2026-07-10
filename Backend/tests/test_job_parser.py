@@ -2,17 +2,46 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.config import Settings
-from app.services.job_parser import fetch_job_text, parse_job_profile
+from app.services.job_parser import JobParseError, fetch_job_text, parse_job_profile
 
 
 class FakeResponse:
-    def __init__(self, *, status_code: int = 200, text: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        status_code: int = 200,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status_code = status_code
         self.text = text
+        self.content = text.encode()
+        self.encoding = "utf-8"
+        self.headers = headers or {"content-type": "text/html"}
+        self.raw = None
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise RuntimeError("request failed")
+
+    def iter_content(self, chunk_size: int):
+        del chunk_size
+        yield self.content
+
+    def close(self) -> None:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def public_job_url(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.job_parser._assert_public_job_url",
+        lambda _url: frozenset(),
+    )
+    monkeypatch.setattr(
+        "app.services.job_parser._assert_public_peer",
+        lambda _response, _allowed_ips: None,
+    )
 
 
 def test_fetch_job_text_rejects_blocked_pages(monkeypatch):
@@ -38,6 +67,59 @@ def test_fetch_job_text_rejects_blocked_pages(monkeypatch):
     assert exc_info.value.status_code == 422
     assert "Paste the job description" in exc_info.value.detail
     assert fallback_called is False
+
+
+def test_fetch_job_text_rejects_private_and_credentialed_urls(monkeypatch):
+    monkeypatch.undo()
+    from app.services.job_parser import _assert_public_job_url
+
+    for job_url in (
+        "http://127.0.0.1/admin",
+        "http://169.254.169.254/latest/meta-data",
+        "http://user:secret@example.com/jobs/1",
+        "file:///etc/passwd",
+    ):
+        with pytest.raises(Exception, match="private|credentials|public HTTP"):
+            _assert_public_job_url(job_url)
+
+
+def test_fetch_job_text_validates_redirect_target(monkeypatch):
+    responses = [FakeResponse(status_code=302, headers={"location": "http://127.0.0.1/admin"})]
+    checked_urls: list[str] = []
+
+    def validate_url(url: str):
+        checked_urls.append(url)
+        if "127.0.0.1" in url:
+            raise JobParseError("private redirect")
+        return frozenset()
+
+    monkeypatch.setattr("app.services.job_parser._assert_public_job_url", validate_url)
+    monkeypatch.setattr(
+        "app.services.job_parser.requests.get", lambda *args, **kwargs: responses.pop(0)
+    )
+
+    with pytest.raises(HTTPException, match="private redirect"):
+        fetch_job_text("https://example.com/jobs/redirect")
+
+    assert checked_urls == ["https://example.com/jobs/redirect", "http://127.0.0.1/admin"]
+
+
+def test_fetch_job_text_rejects_oversized_response(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.job_parser.requests.get",
+        lambda *args, **kwargs: FakeResponse(
+            headers={
+                "content-length": str(2 * 1024 * 1024 + 1),
+                "content-type": "text/html",
+            }
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        fetch_job_text("https://example.com/jobs/large")
+
+    assert exc_info.value.status_code == 422
+    assert "too large" in exc_info.value.detail
 
 
 def test_fetch_job_text_uses_playwright_fallback_for_short_public_pages(monkeypatch):

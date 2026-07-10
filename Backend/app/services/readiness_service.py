@@ -36,11 +36,11 @@ def _check_database_connection(engine: Engine) -> ReadinessCheck:
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-    except Exception as exc:
+    except Exception:
         return ReadinessCheck(
             name="database",
             status="failed",
-            detail=f"{type(exc).__name__}: {exc}",
+            detail="Database connection failed.",
         )
     return ReadinessCheck(name="database", status="ok", detail="Database connection succeeded.")
 
@@ -59,11 +59,11 @@ def _check_migration_state(engine: Engine, settings: Settings) -> ReadinessCheck
         with engine.connect() as connection:
             context = MigrationContext.configure(connection)
             current_heads = set(context.get_current_heads())
-    except Exception as exc:
+    except Exception:
         return ReadinessCheck(
             name="migrations",
             status="failed",
-            detail=f"{type(exc).__name__}: {exc}",
+            detail="Migration state could not be verified.",
         )
 
     if current_heads == expected_heads and expected_heads:

@@ -29,7 +29,7 @@ npm run test:e2e:install
 npm run test:e2e
 ```
 
-## Production-Like Docker Stack
+## Production Docker Baseline
 
 Copy the example env file, replace every placeholder secret, then start the
 PostgreSQL-backed stack:
@@ -44,6 +44,10 @@ readiness. The backend refuses unsafe production startup, including SQLite,
 missing signed-proxy auth, missing OpenClaw token, schema auto-creation, or
 disabled migration checks.
 
+The example binds FastAPI and Next.js to loopback and defaults to Clerk auth.
+Put an HTTPS reverse proxy in front of Next.js, keep FastAPI private, and follow
+the remaining release boundaries in the deployment runbook.
+
 Read [Docs/DEPLOYMENT.md](Docs/DEPLOYMENT.md) before using this outside local
 development.
 
@@ -52,14 +56,17 @@ development.
 GitHub Actions runs `.github/workflows/ci.yml` on pushes and pull requests to
 `main`.
 
-- Backend job: Python 3.12, pip constrained install, ruff format/check, pytest,
-  compileall, golden evals, deterministic backend quality gate, and backend
-  quality-gate artifact upload.
-- Frontend job: Node.js 24, `npm ci`, ESLint, and TypeScript typecheck.
+- Backend job: Python 3.12, hash-locked production dependency audit, Ruff,
+  pytest, compileall, golden evals, and the deterministic quality gate.
+- Frontend job: Node.js 24, `npm ci`, dependency audit, ESLint, typecheck,
+  auth-runtime checks, and a production build.
+- Browser job: a clean Next.js build, Chromium workflow/export coverage,
+  security-header assertions, WCAG A/AA checks, and retained failure evidence.
+- Deployment job: Compose validation plus backend/frontend container builds.
 
-Live Vertex/CrewAI smokes and Playwright browser screenshots remain explicit
-local/manual gates until provider secrets and browser artifacts are configured
-for CI.
+Live Vertex/CrewAI smokes remain local/manual because CI has no provider secret.
+The default production image excludes the CrewAI/ChromaDB dependency tree while
+ChromaDB `CVE-2026-45829` has no patched release.
 
 The backend runtime is standardized on Python 3.12 because live CrewAI execution
 does not currently support Python 3.14.

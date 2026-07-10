@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.schemas.agent import (
@@ -11,7 +13,11 @@ from app.schemas.agent import (
 )
 from app.schemas.report import InterviewQuestionGroup
 from app.services.agent_workflow import run_application_agent_workflow
-from app.services.crewai_workflow import CrewAIWorkflowSections, CrewAIWorkflowUnavailable
+from app.services.crewai_workflow import (
+    CrewAIWorkflowRunner,
+    CrewAIWorkflowSections,
+    CrewAIWorkflowUnavailable,
+)
 from app.services.job_parser import parse_job_profile
 from app.services.matcher import match_resume_to_job
 from app.services.resume_parser import parse_resume_profile
@@ -52,6 +58,39 @@ def test_agent_workflow_generates_validated_report_sections(sample_resume_text, 
     assert result.trace.token_usage is None
     assert result.trace.cost_estimate_usd is None
     assert result.trace.runtime_metadata == {}
+
+
+def test_crewai_prompt_excludes_candidate_contact_data_and_deterministic_letter(
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    resume = parse_resume_profile(sample_resume_text, resume_id=1)
+    job = parse_job_profile(sample_job_text, job_id=1)
+    match = match_resume_to_job(resume, job)
+    deterministic = run_application_agent_workflow(
+        analysis_id=1,
+        resume=resume,
+        job=job,
+        match=match,
+    )
+
+    prompt = CrewAIWorkflowRunner(settings)._prompt(
+        "privacy check",
+        [],
+        resume=resume,
+        job=job,
+        match=match,
+        deterministic_report=deterministic.report,
+    )
+    payload = json.loads(prompt)
+
+    assert "candidate" not in payload["resume"]
+    assert "cover_letter" not in payload["deterministic_report"]
+    assert "resume_candidate_name" not in payload["deterministic_report"]
+    assert "aarav@example.com" not in prompt
+    assert "https://github.com/aarav" not in prompt
+    assert "Aarav Sharma" not in prompt
 
 
 def test_agent_workflow_trace_accepts_legacy_payload_without_timings():

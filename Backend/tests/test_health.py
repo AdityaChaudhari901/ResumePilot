@@ -1,3 +1,4 @@
+import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
@@ -109,8 +110,22 @@ def test_production_config_accepts_safe_runtime_settings(tmp_path):
         DATABASE_URL="postgresql+psycopg://user:password@example.com:5432/resumepilot",
         RESUMEPILOT_DATA_DIR=tmp_path / "data",
         AUTH_REQUIRED=True,
-        AUTH_TRUSTED_PROXY_SECRET="proxy-secret",
-        JOBCOPILOT_API_TOKEN="jobcopilot-token",
+        AUTH_TRUSTED_PROXY_SECRET="proxy-secret-with-at-least-32-characters",
+        JOBCOPILOT_API_TOKEN="jobcopilot-token-with-at-least-32-characters",
     )
 
     validate_production_settings(settings)
+
+
+def test_production_config_rejects_placeholder_secrets(tmp_path):
+    settings = Settings(
+        APP_ENV="production",
+        DATABASE_URL="postgresql+psycopg://user:password@example.com:5432/resumepilot",
+        RESUMEPILOT_DATA_DIR=tmp_path / "data",
+        AUTH_REQUIRED=True,
+        AUTH_TRUSTED_PROXY_SECRET="change-me-generate-a-long-random-shared-secret",
+        JOBCOPILOT_API_TOKEN="change-me-generate-a-long-random-openclaw-token",
+    )
+
+    with pytest.raises(ProductionConfigError, match="generated secret"):
+        validate_production_settings(settings)

@@ -51,13 +51,15 @@ services:
       retries: 5
       start_period: 20s
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "${BACKEND_BIND_HOST:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
     volumes:
       - resumepilot-data:/data
 
   frontend:
     build:
       context: ./Frontend
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
     restart: unless-stopped
     depends_on:
       backend:
@@ -65,9 +67,11 @@ services:
     environment:
       NODE_ENV: production
       RESUMEPILOT_API_BASE_URL: http://backend:8000
-      RESUMEPILOT_AUTH_PROVIDER: ${RESUMEPILOT_AUTH_PROVIDER:-local}
-      RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION: ${RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION:-true}
+      RESUMEPILOT_AUTH_PROVIDER: ${RESUMEPILOT_AUTH_PROVIDER:?Set RESUMEPILOT_AUTH_PROVIDER to clerk, trusted_headers, or local for a private stack}
+      RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION: ${RESUMEPILOT_ALLOW_LOCAL_AUTH_IN_PRODUCTION:-false}
       AUTH_TRUSTED_PROXY_SECRET: ${AUTH_TRUSTED_PROXY_SECRET:?Set AUTH_TRUSTED_PROXY_SECRET in .env.production}
+      RESUMEPILOT_TRUSTED_HEADER_SECRET: ${RESUMEPILOT_TRUSTED_HEADER_SECRET:-}
+      RESUMEPILOT_TRUSTED_HEADER_TTL_SECONDS: ${RESUMEPILOT_TRUSTED_HEADER_TTL_SECONDS:-300}
       DEV_USER_EXTERNAL_ID: ${DEV_USER_EXTERNAL_ID:-local-production-user}
       DEV_USER_EMAIL: ${DEV_USER_EMAIL:-}
       DEV_USER_DISPLAY_NAME: ${DEV_USER_DISPLAY_NAME:-Local Production User}
@@ -80,7 +84,7 @@ services:
       retries: 5
       start_period: 20s
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${FRONTEND_BIND_HOST:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
 
 volumes:
   postgres-data:

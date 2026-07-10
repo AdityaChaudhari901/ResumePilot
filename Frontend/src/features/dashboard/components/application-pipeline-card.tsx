@@ -17,6 +17,7 @@ import type {
 interface ApplicationPipelineCardProps {
   activeApplicationId: number | null;
   applications: ApplicationItem[];
+  isBusy: boolean;
   isLoading: boolean;
   onSelectApplication: (application: ApplicationItem) => void;
   onUpdateStatus: (application: ApplicationItem, status: ApplicationStatus) => void;
@@ -25,6 +26,7 @@ interface ApplicationPipelineCardProps {
 export function ApplicationPipelineCard({
   activeApplicationId,
   applications,
+  isBusy,
   isLoading,
   onSelectApplication,
   onUpdateStatus
@@ -48,6 +50,7 @@ export function ApplicationPipelineCard({
           <ApplicationPipelineRow
             application={application}
             isActive={application.id === activeApplicationId}
+            isBusy={isBusy}
             key={application.id}
             onSelect={() => onSelectApplication(application)}
             onUpdateStatus={(status) => onUpdateStatus(application, status)}
@@ -61,6 +64,7 @@ export function ApplicationPipelineCard({
 interface ApplicationPipelineRowProps {
   application: ApplicationItem;
   isActive: boolean;
+  isBusy: boolean;
   onSelect: () => void;
   onUpdateStatus: (status: ApplicationStatus) => void;
 }
@@ -68,6 +72,7 @@ interface ApplicationPipelineRowProps {
 function ApplicationPipelineRow({
   application,
   isActive,
+  isBusy,
   onSelect,
   onUpdateStatus
 }: ApplicationPipelineRowProps) {
@@ -109,7 +114,7 @@ function ApplicationPipelineRow({
       <div className="mt-3 flex flex-wrap justify-end gap-2">
         <Button
           className="h-8 px-3 text-xs"
-          disabled={!hasReport}
+          disabled={!hasReport || isBusy}
           icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
           onClick={onSelect}
           variant="secondary"
@@ -118,7 +123,12 @@ function ApplicationPipelineRow({
         </Button>
         <Button
           className="h-8 px-3 text-xs"
-          disabled={!hasReport || application.status === "exported" || application.status === "applied"}
+          disabled={
+            isBusy ||
+            !hasReport ||
+            application.status === "exported" ||
+            application.status === "applied"
+          }
           icon={<FileCheck2 className="h-3.5 w-3.5" aria-hidden="true" />}
           onClick={() => onUpdateStatus("exported")}
           variant="secondary"
@@ -127,7 +137,7 @@ function ApplicationPipelineRow({
         </Button>
         <Button
           className="h-8 px-3 text-xs"
-          disabled={!hasReport || application.status === "applied"}
+          disabled={isBusy || !hasReport || application.status === "applied"}
           icon={<Send className="h-3.5 w-3.5" aria-hidden="true" />}
           onClick={() => onUpdateStatus("applied")}
           variant="secondary"

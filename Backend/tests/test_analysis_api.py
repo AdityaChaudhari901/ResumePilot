@@ -18,6 +18,18 @@ from app.services.crewai_workflow import CrewAIWorkflowSections, CrewAIWorkflowU
 from app.services.pdf_resume_compiler import PdfCompilerUnavailable
 
 
+@pytest.fixture(autouse=True)
+def public_job_fetch(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.job_parser._assert_public_job_url",
+        lambda _url: frozenset(),
+    )
+    monkeypatch.setattr(
+        "app.services.job_parser._assert_public_peer",
+        lambda _response, _allowed_ips: None,
+    )
+
+
 def test_job_preview_parses_public_url_without_creating_report(client, monkeypatch):
     monkeypatch.setattr(
         "app.services.job_parser.requests.get",
@@ -80,6 +92,47 @@ def test_job_preview_marks_unclear_requirements_for_review(client, monkeypatch):
     assert body["profile"]["required_skills"] == []
     assert "required_skills_unclear" in {warning["code"] for warning in body["profile"]["warnings"]}
     assert any(check["code"] == "required_or_preferred_skills" for check in body["quality_checks"])
+
+
+@pytest.mark.parametrize(
+    ("filename", "content", "content_type", "expected_detail"),
+    [
+        ("resume.pdf", b"not a pdf", "application/pdf", "valid PDF signature"),
+        (
+            "resume.docx",
+            b"not an office archive",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "valid Office document",
+        ),
+        ("resume.txt", b"Aarav\x00Sharma", "text/plain", "invalid binary data"),
+    ],
+)
+def test_resume_upload_rejects_mismatched_or_unsafe_content(
+    client,
+    settings,
+    filename,
+    content,
+    content_type,
+    expected_detail,
+):
+    response = client.post(
+        "/resumes/upload",
+        files={"file": (filename, content, content_type)},
+    )
+
+    assert response.status_code == 400
+    assert expected_detail in response.json()["detail"]
+    assert list(settings.upload_dir.glob("users/*/*")) == []
+
+
+def test_resume_upload_does_not_persist_a_pdf_that_fails_parsing(client, settings):
+    response = client.post(
+        "/resumes/upload",
+        files={"file": ("resume.pdf", b"%PDF-invalid", "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    assert list(settings.upload_dir.glob("users/*/*")) == []
 
 
 def test_analyze_uses_reviewed_job_profile_without_refetching(
@@ -184,11 +237,11 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert report["tailored_bullets"]
     assert all(item["evidence_ids"] for item in report["tailored_bullets"])
 
-    markdown_response = client.get(f"/reports/{body['report_id']}/markdown")
+    markdown_response = client.post(f"/reports/{body['report_id']}/markdown")
     assert markdown_response.status_code == 200
     assert "# Job Fit Report" in markdown_response.text
 
-    latex_response = client.get(f"/reports/{body['report_id']}/resume/latex")
+    latex_response = client.post(f"/reports/{body['report_id']}/resume/latex")
     assert latex_response.status_code == 200
     assert latex_response.headers["content-type"].startswith("application/x-tex")
     assert (
@@ -200,7 +253,7 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert "Python" in latex_response.text
     assert "Docker" not in latex_response.text
 
-    docx_response = client.get(f"/reports/{body['report_id']}/resume/docx")
+    docx_response = client.post(f"/reports/{body['report_id']}/resume/docx")
     assert docx_response.status_code == 200
     assert docx_response.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -256,7 +309,7 @@ def test_read_tailored_resume_pdf_download(
     )
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
 
-    pdf_response = client.get(f"/reports/{body['report_id']}/resume/pdf")
+    pdf_response = client.post(f"/reports/{body['report_id']}/resume/pdf")
 
     assert pdf_response.status_code == 200
     assert pdf_response.headers["content-type"].startswith("application/pdf")
@@ -284,7 +337,7 @@ def test_read_tailored_resume_pdf_reports_missing_compiler(
     )
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
 
-    pdf_response = client.get(f"/reports/{body['report_id']}/resume/pdf")
+    pdf_response = client.post(f"/reports/{body['report_id']}/resume/pdf")
 
     assert pdf_response.status_code == 503
     assert (
@@ -326,6 +379,38 @@ def test_crewai_fallback_trace_is_persisted(
     assert trace["cost_estimate_usd"] is None
     assert trace["runtime_metadata"]["runtime_status"] == "failed"
     assert "crewai_unavailable" in trace["validation_warning_codes"]
+
+
+def test_premium_plan_does_not_run_live_ai_without_per_analysis_consent(
+    client,
+    monkeypatch,
+    sample_resume_text,
+    sample_job_text,
+    settings,
+):
+    settings.agent_workflow_mode = AgentWorkflowMode.crewai
+
+    def unexpected_runner(_settings):
+        raise AssertionError("Live AI must not run without explicit analysis consent")
+
+    monkeypatch.setattr(
+        "app.services.agent_workflow.build_crewai_workflow_runner",
+        unexpected_runner,
+    )
+
+    body = _upload_and_analyze(
+        client,
+        sample_resume_text,
+        sample_job_text,
+        plan="premium",
+        allow_live_ai_processing=False,
+    )
+
+    trace = client.get(f"/reports/{body['report_id']}/trace").json()["trace"]
+    usage = client.get("/usage/summary").json()
+    crewai_limit = next(item for item in usage["limits"] if item["metric"] == "crewai_runs")
+    assert trace["mode"] == AgentWorkflowMode.deterministic_fallback
+    assert crewai_limit["used"] == 0
 
 
 def test_crewai_success_trace_is_persisted(
@@ -428,6 +513,7 @@ def _upload_and_analyze(
     job_text: str,
     *,
     plan: str = "free",
+    allow_live_ai_processing: bool | None = None,
 ) -> dict:
     upload_response = client.post(
         "/resumes/upload",
@@ -441,7 +527,13 @@ def _upload_and_analyze(
 
     analyze_response = client.post(
         "/jobs/analyze",
-        json={"resume_id": resume_id, "job_text": job_text},
+        json={
+            "resume_id": resume_id,
+            "job_text": job_text,
+            "allow_live_ai_processing": (
+                plan == "premium" if allow_live_ai_processing is None else allow_live_ai_processing
+            ),
+        },
     )
 
     assert analyze_response.status_code == 200
@@ -466,6 +558,17 @@ class _FakeJobFetchResponse:
 
     def __init__(self, text: str) -> None:
         self.text = text
+        self.content = text.encode()
+        self.encoding = "utf-8"
+        self.headers = {"content-type": "text/html"}
+        self.raw = None
 
     def raise_for_status(self) -> None:
+        return None
+
+    def iter_content(self, chunk_size: int):
+        del chunk_size
+        yield self.content
+
+    def close(self) -> None:
         return None

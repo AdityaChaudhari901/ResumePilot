@@ -5,9 +5,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import UsageEventRecord
+from app.db.models import UsageEventRecord, UserRecord
 from app.repositories.usage_events import UsageEventRepository
 from app.schemas.auth import CurrentUser
 from app.schemas.usage import (
@@ -97,6 +98,37 @@ def record_analysis_usage(
     )
 
 
+def reserve_analysis_usage(db: Session, current_user: CurrentUser) -> UsageEventRecord:
+    """Reserve analysis quota before remote parsing or model work begins."""
+    _lock_user_for_usage(db, current_user.id)
+    enforce_analysis_limit(db, current_user)
+    return record_usage_event(
+        db,
+        current_user=current_user,
+        event_type=UsageEventType.analysis_created,
+        metadata={"status": "reserved"},
+    )
+
+
+def finalize_analysis_usage(
+    db: Session,
+    record: UsageEventRecord,
+    *,
+    analysis_id: int,
+    report_id: int,
+    workflow_mode: str,
+    runtime_status: str = "completed",
+) -> None:
+    record.metadata_json = {
+        "status": runtime_status,
+        "analysis_id": analysis_id,
+        "report_id": report_id,
+        "workflow_mode": workflow_mode,
+    }
+    db.add(record)
+    db.commit()
+
+
 def record_export_usage(
     db: Session,
     current_user: CurrentUser,
@@ -104,17 +136,35 @@ def record_export_usage(
     report_id: int,
     export_format: str,
 ) -> UsageEventRecord:
-    event_type_by_format = {
-        "markdown": UsageEventType.markdown_exported,
-        "latex": UsageEventType.latex_exported,
-        "docx": UsageEventType.docx_exported,
-        "pdf": UsageEventType.pdf_exported,
-    }
-    event_type = event_type_by_format[export_format]
+    event_type = _export_event_type(export_format)
     return record_usage_event(
         db,
         current_user=current_user,
         event_type=event_type,
+        metadata={"report_id": report_id, "format": export_format},
+    )
+
+
+def reserve_export_usage(
+    db: Session,
+    current_user: CurrentUser,
+    *,
+    report_id: int,
+    export_format: str,
+) -> UsageEventRecord:
+    """Allocate one export inside the caller's transaction.
+
+    The user row lock serializes quota decisions on PostgreSQL. Callers must
+    commit or roll back the surrounding transaction after their audit/state
+    updates are staged.
+    """
+
+    _lock_user_for_usage(db, current_user.id)
+    enforce_export_limit(db, current_user)
+    return add_usage_event(
+        db,
+        current_user=current_user,
+        event_type=_export_event_type(export_format),
         metadata={"report_id": report_id, "format": export_format},
     )
 
@@ -135,7 +185,55 @@ def record_crewai_usage(
     )
 
 
+def reserve_crewai_usage(db: Session, current_user: CurrentUser) -> UsageEventRecord:
+    """Reserve live-provider quota before a potentially billable call."""
+    _lock_user_for_usage(db, current_user.id)
+    enforce_crewai_limit(db, current_user)
+    return record_usage_event(
+        db,
+        current_user=current_user,
+        event_type=UsageEventType.crewai_run,
+        metadata={"status": "reserved"},
+    )
+
+
+def finalize_crewai_usage(
+    db: Session,
+    record: UsageEventRecord,
+    *,
+    analysis_id: int,
+    runtime_status: str,
+    cost_estimate_usd: float | None,
+) -> None:
+    record.metadata_json = {"status": runtime_status, "analysis_id": analysis_id}
+    record.cost_estimate_usd = cost_estimate_usd
+    db.add(record)
+    db.commit()
+
+
 def record_usage_event(
+    db: Session,
+    *,
+    current_user: CurrentUser,
+    event_type: UsageEventType,
+    quantity: int = 1,
+    cost_estimate_usd: float | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> UsageEventRecord:
+    record = add_usage_event(
+        db,
+        current_user=current_user,
+        event_type=event_type,
+        quantity=quantity,
+        cost_estimate_usd=cost_estimate_usd,
+        metadata=metadata,
+    )
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def add_usage_event(
     db: Session,
     *,
     current_user: CurrentUser,
@@ -153,8 +251,6 @@ def record_usage_event(
     )
     repository = UsageEventRepository(db)
     repository.add(record)
-    db.commit()
-    db.refresh(record)
     return record
 
 
@@ -243,6 +339,22 @@ def _enforce_metric_limit(
             ),
         },
     )
+
+
+def _export_event_type(export_format: str) -> UsageEventType:
+    event_type_by_format = {
+        "markdown": UsageEventType.markdown_exported,
+        "latex": UsageEventType.latex_exported,
+        "docx": UsageEventType.docx_exported,
+        "pdf": UsageEventType.pdf_exported,
+    }
+    return event_type_by_format[export_format]
+
+
+def _lock_user_for_usage(db: Session, user_id: int) -> None:
+    user = db.scalar(select(UserRecord).where(UserRecord.id == user_id).with_for_update())
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 
 def _plan_for_user(current_user: CurrentUser) -> PlanDefinition:

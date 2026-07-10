@@ -58,6 +58,33 @@ B.Tech Computer Science
 """
 
 
+PDF_WRAPPED_RESUME_TEXT = """Aditya Chaudhari
+aditya@example.com
+
+Summary
+Built web products and APIs using Python and FastAPI.
+
+Skills
+Python, FastAPI, PostgreSQL, SQLAlchemy, Pytest
+
+Projects
+• Built a job-tracking REST API with Python and
+  FastAPI, PostgreSQL, and SQLAlchemy for reliable application workflows.
+• Implemented pytest coverage for API failure paths and validation.
+"""
+
+
+DANGLING_PROJECT_FACT_RESUME_TEXT = """Aditya Chaudhari
+aditya@example.com
+
+Skills
+Python, FastAPI
+
+Projects
+Built a Python FastAPI service with
+"""
+
+
 UNCLEAR_REQUIREMENTS_JOB_TEXT = """Persistent careers
 
 Join our engineering team and collaborate with product teams on customer-facing software.
@@ -97,6 +124,30 @@ def test_skills_only_matches_do_not_create_exportable_tailored_bullets():
 
     assert report.weak_skills
     assert report.tailored_bullets == []
+    assert not validate_report_against_resume(report, resume)
+
+
+def test_tailored_bullets_use_reconstructed_project_evidence():
+    report, resume = _build_report(PDF_WRAPPED_RESUME_TEXT, FORBES_STYLE_JOB_TEXT)
+
+    assert report.tailored_bullets
+    assert report.tailored_bullets[0].bullet == (
+        "Built a job-tracking REST API with Python and FastAPI, PostgreSQL, and "
+        "SQLAlchemy for reliable application workflows."
+    )
+    assert report.tailored_bullets[0].evidence_ids == ["projects_001"]
+    assert all(
+        not bullet.evidence_ids[0].startswith(("summary_", "skills_"))
+        for bullet in report.tailored_bullets
+    )
+    assert not validate_report_against_resume(report, resume)
+
+
+def test_dangling_project_fact_is_not_promoted_to_tailored_bullet():
+    report, resume = _build_report(DANGLING_PROJECT_FACT_RESUME_TEXT, FORBES_STYLE_JOB_TEXT)
+
+    assert report.tailored_bullets == []
+    assert {skill.skill for skill in report.matched_skills} >= {"Python", "FastAPI"}
     assert not validate_report_against_resume(report, resume)
 
 

@@ -107,13 +107,13 @@ def test_export_usage_is_metered_and_limited(client, sample_resume_text, sample_
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
 
     for _ in range(5):
-        response = client.get(f"/reports/{body['report_id']}/markdown")
+        response = client.post(f"/reports/{body['report_id']}/markdown")
         assert response.status_code == 200
 
     summary = client.get("/usage/summary").json()
     assert _limit(summary, "exports") == {"used": 5, "limit": 5, "remaining": 0}
 
-    blocked_response = client.get(f"/reports/{body['report_id']}/resume/latex")
+    blocked_response = client.post(f"/reports/{body['report_id']}/resume/latex")
 
     assert blocked_response.status_code == 402
     assert blocked_response.json()["detail"]["code"] == "plan_limit_reached"

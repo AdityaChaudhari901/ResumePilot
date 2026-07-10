@@ -5,6 +5,10 @@ import {
   shouldUseClerkProvider,
   type RuntimeEnv
 } from "../src/lib/auth-runtime.ts";
+import {
+  createTrustedHeaderIdentitySignature,
+  verifyTrustedHeaderIdentitySignature
+} from "../src/lib/trusted-header-auth.ts";
 
 function resolve(overrides: RuntimeEnv) {
   return resolveAuthRuntimeConfig({
@@ -63,16 +67,91 @@ assert.equal(resolve(clerkReadyEnv).isUsable, true, "complete Clerk config shoul
 assert.equal(shouldUseClerkProvider(clerkReadyEnv), true);
 
 const trustedHeadersWithoutSecret = resolve({
-  RESUMEPILOT_AUTH_PROVIDER: "trusted_headers"
+  RESUMEPILOT_AUTH_PROVIDER: "trusted_headers",
+  AUTH_TRUSTED_PROXY_SECRET: "proxy-secret"
 });
 assert.equal(trustedHeadersWithoutSecret.isUsable, false);
-assert.match(trustedHeadersWithoutSecret.reason ?? "", /AUTH_TRUSTED_PROXY_SECRET/);
+assert.match(trustedHeadersWithoutSecret.reason ?? "", /RESUMEPILOT_TRUSTED_HEADER_SECRET/);
+
+const trustedHeadersWithoutBackendSigningSecret = resolve({
+  RESUMEPILOT_AUTH_PROVIDER: "trusted_headers",
+  RESUMEPILOT_TRUSTED_HEADER_SECRET: "upstream-secret"
+});
+assert.equal(trustedHeadersWithoutBackendSigningSecret.isUsable, false);
+assert.match(trustedHeadersWithoutBackendSigningSecret.reason ?? "", /AUTH_TRUSTED_PROXY_SECRET/);
 
 const trustedHeadersReady = resolve({
   RESUMEPILOT_AUTH_PROVIDER: "trusted-headers",
-  AUTH_TRUSTED_PROXY_SECRET: "proxy-secret"
+  AUTH_TRUSTED_PROXY_SECRET: "proxy-secret",
+  RESUMEPILOT_TRUSTED_HEADER_SECRET: "upstream-secret",
+  RESUMEPILOT_TRUSTED_HEADER_TTL_SECONDS: "60"
 });
 assert.equal(trustedHeadersReady.provider, "trusted_headers");
 assert.equal(trustedHeadersReady.isUsable, true);
+assert.equal(trustedHeadersReady.trustedHeaderAuthTtlSeconds, 60);
+
+const trustedHeadersWithInvalidTtl = resolve({
+  RESUMEPILOT_AUTH_PROVIDER: "trusted_headers",
+  AUTH_TRUSTED_PROXY_SECRET: "proxy-secret",
+  RESUMEPILOT_TRUSTED_HEADER_SECRET: "upstream-secret",
+  RESUMEPILOT_TRUSTED_HEADER_TTL_SECONDS: "5"
+});
+assert.equal(trustedHeadersWithInvalidTtl.isUsable, false);
+assert.match(trustedHeadersWithInvalidTtl.reason ?? "", /TRUSTED_HEADER_TTL_SECONDS/);
+
+const trustedIdentity = {
+  externalId: "upstream-user",
+  email: "upstream@example.test",
+  displayName: "Upstream User",
+  timestamp: "1725000000"
+};
+const trustedIdentitySignature = createTrustedHeaderIdentitySignature(
+  "upstream-secret",
+  trustedIdentity
+);
+assert.equal(
+  verifyTrustedHeaderIdentitySignature({
+    identity: trustedIdentity,
+    maxAgeSeconds: 60,
+    nowSeconds: 1725000030,
+    secret: "upstream-secret",
+    signature: trustedIdentitySignature
+  }),
+  true,
+  "valid upstream signatures should authenticate"
+);
+assert.equal(
+  verifyTrustedHeaderIdentitySignature({
+    identity: { ...trustedIdentity, externalId: "spoofed-user" },
+    maxAgeSeconds: 60,
+    nowSeconds: 1725000030,
+    secret: "upstream-secret",
+    signature: trustedIdentitySignature
+  }),
+  false,
+  "signatures must bind the external user ID"
+);
+assert.equal(
+  verifyTrustedHeaderIdentitySignature({
+    identity: trustedIdentity,
+    maxAgeSeconds: 60,
+    nowSeconds: 1725000061,
+    secret: "upstream-secret",
+    signature: trustedIdentitySignature
+  }),
+  false,
+  "expired upstream signatures must be rejected"
+);
+assert.equal(
+  verifyTrustedHeaderIdentitySignature({
+    identity: trustedIdentity,
+    maxAgeSeconds: 60,
+    nowSeconds: 1725000030,
+    secret: "upstream-secret",
+    signature: null
+  }),
+  false,
+  "unsigned trusted headers must be rejected"
+);
 
 console.log("Auth runtime config checks passed.");

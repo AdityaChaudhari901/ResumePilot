@@ -85,7 +85,7 @@ def test_report_export_marks_application_exported(client, sample_resume_text):
         headers=USER_A_HEADERS,
     ).json()["report_id"]
 
-    export_response = client.get(f"/reports/{report_id}/markdown", headers=USER_A_HEADERS)
+    export_response = client.post(f"/reports/{report_id}/markdown", headers=USER_A_HEADERS)
 
     assert export_response.status_code == 200
     application = client.get("/applications", headers=USER_A_HEADERS).json()["items"][0]

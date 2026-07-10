@@ -4,11 +4,16 @@ import { createHmac } from "node:crypto";
 import { headers } from "next/headers";
 
 import {
+  DEFAULT_TRUSTED_HEADER_AUTH_TTL_SECONDS,
   isProductionAuthRuntime,
   resolveAuthRuntimeConfig,
   type ActiveAuthProvider,
   type AuthProvider
 } from "@/lib/auth-runtime";
+import {
+  verifyTrustedHeaderIdentitySignature,
+  type TrustedHeaderIdentity
+} from "@/lib/trusted-header-auth";
 
 export type { AuthProvider } from "@/lib/auth-runtime";
 
@@ -34,6 +39,7 @@ const USER_EMAIL_HEADER = "X-ResumePilot-Email";
 const USER_NAME_HEADER = "X-ResumePilot-Name";
 const AUTH_TIMESTAMP_HEADER = "x-resumepilot-auth-timestamp";
 const AUTH_SIGNATURE_HEADER = "x-resumepilot-auth-signature";
+const PRIVATE_AUTH_CACHE_CONTROL = "private, no-store, max-age=0";
 
 export async function getAuthSession(request?: Request): Promise<AuthSession> {
   const authConfig = resolveAuthRuntimeConfig(process.env);
@@ -48,7 +54,7 @@ export async function getAuthSession(request?: Request): Promise<AuthSession> {
     return localSession();
   }
   if (provider === "trusted_headers") {
-    return trustedHeaderSession(request);
+    return trustedHeaderSession(request, authConfig.trustedHeaderAuthTtlSeconds);
   }
   if (provider === "clerk") {
     return clerkSession();
@@ -68,13 +74,18 @@ export function authFailureResponse(session: AnonymousSession): Response {
     {
       status: 401,
       headers: {
-        "Cache-Control": "no-store"
+        "Cache-Control": PRIVATE_AUTH_CACHE_CONTROL,
+        "Vary": "Authorization, Cookie, X-ResumePilot-Auth-User, X-ResumePilot-Auth-Email, X-ResumePilot-Auth-Name",
+        "X-Content-Type-Options": "nosniff"
       }
     }
   );
 }
 
-export function signedBackendIdentityHeaders(session: AuthenticatedSession): Headers {
+export function signedBackendIdentityHeaders(
+  session: AuthenticatedSession,
+  target: { method: string; path: string }
+): Headers {
   const headers = new Headers({
     [USER_ID_HEADER]: session.externalId
   });
@@ -102,7 +113,9 @@ export function signedBackendIdentityHeaders(session: AuthenticatedSession): Hea
       externalId: session.externalId,
       email: session.email,
       displayName: session.displayName,
-      timestamp
+      timestamp,
+      method: target.method,
+      path: target.path
     })
   );
   return headers;
@@ -121,7 +134,10 @@ function localSession(): AuthenticatedSession {
   };
 }
 
-async function trustedHeaderSession(request: Request | undefined): Promise<AuthSession> {
+async function trustedHeaderSession(
+  request: Request | undefined,
+  maxAgeSeconds: number | null
+): Promise<AuthSession> {
   const requestHeaders = request?.headers ?? await headers();
   const externalId = normalizeOptional(requestHeaders.get("x-resumepilot-auth-user"));
   if (!externalId) {
@@ -130,12 +146,35 @@ async function trustedHeaderSession(request: Request | undefined): Promise<AuthS
     });
   }
 
+  const identity: TrustedHeaderIdentity = {
+    externalId,
+    email: normalizeOptional(requestHeaders.get("x-resumepilot-auth-email")),
+    displayName: normalizeOptional(requestHeaders.get("x-resumepilot-auth-name")),
+    timestamp: normalizeOptional(requestHeaders.get("x-resumepilot-upstream-auth-timestamp")) ?? ""
+  };
+  const signature = normalizeOptional(requestHeaders.get("x-resumepilot-upstream-auth-signature"));
+  const upstreamSecret = process.env.RESUMEPILOT_TRUSTED_HEADER_SECRET?.trim();
+
+  if (
+    !upstreamSecret ||
+    !verifyTrustedHeaderIdentitySignature({
+      identity,
+      maxAgeSeconds: maxAgeSeconds ?? DEFAULT_TRUSTED_HEADER_AUTH_TTL_SECONDS,
+      secret: upstreamSecret,
+      signature
+    })
+  ) {
+    return anonymousSession("trusted_headers", "Invalid trusted upstream identity.", {
+      canSignIn: false
+    });
+  }
+
   return {
     isAuthenticated: true,
     provider: "trusted_headers",
     externalId,
-    email: normalizeOptional(requestHeaders.get("x-resumepilot-auth-email")),
-    displayName: normalizeOptional(requestHeaders.get("x-resumepilot-auth-name"))
+    email: identity.email,
+    displayName: identity.displayName
   };
 }
 
@@ -178,16 +217,25 @@ function signIdentity({
   externalId,
   email,
   displayName,
-  timestamp
+  timestamp,
+  method,
+  path
 }: {
   secret: string;
   externalId: string;
   email: string | null;
   displayName: string | null;
   timestamp: string;
+  method: string;
+  path: string;
 }): string {
   return createHmac("sha256", secret)
-    .update([externalId, email ?? "", displayName ?? "", timestamp].join("\n"), "utf8")
+    .update(
+      [externalId, email ?? "", displayName ?? "", timestamp, method.toUpperCase(), path].join(
+        "\n"
+      ),
+      "utf8"
+    )
     .digest("hex");
 }
 

@@ -37,7 +37,7 @@ def test_reports_resumes_and_audit_events_are_tenant_scoped(
     assert client.get(f"/resumes/{user_a['resume_id']}", headers=USER_B_HEADERS).status_code == 404
     assert client.get("/reports", headers=USER_B_HEADERS).json()["items"] == []
     assert (
-        client.get(f"/reports/{user_a['report_id']}/markdown", headers=USER_B_HEADERS).status_code
+        client.post(f"/reports/{user_a['report_id']}/markdown", headers=USER_B_HEADERS).status_code
         == 404
     )
     assert (

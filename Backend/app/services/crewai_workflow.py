@@ -213,16 +213,73 @@ class CrewAIWorkflowRunner:
                 "degrees.",
                 *rules,
             ],
-            "resume": resume.model_dump(mode="json"),
+            "resume": _llm_safe_resume_payload(resume),
             "job": job.model_dump(mode="json"),
             "deterministic_match": match.model_dump(mode="json"),
-            "deterministic_report": deterministic_report.model_dump(mode="json"),
+            "deterministic_report": deterministic_report.model_dump(
+                mode="json",
+                exclude={"cover_letter", "resume_candidate_name"},
+            ),
         }
+        private_replacements = {
+            str(value): "Candidate" if value == resume.candidate.name else "[redacted]"
+            for value in (
+                resume.candidate.name,
+                resume.candidate.email,
+                resume.candidate.phone,
+                *resume.candidate.links,
+            )
+            if value and str(value).strip()
+        }
+        payload = _redact_private_values(payload, private_replacements)
         return json.dumps(payload, ensure_ascii=True)
 
 
 def build_crewai_workflow_runner(settings: Settings) -> CrewAIWorkflowRunner:
     return CrewAIWorkflowRunner(settings)
+
+
+def _llm_safe_resume_payload(resume: ResumeProfile) -> dict[str, Any]:
+    payload = resume.model_dump(
+        mode="json",
+        exclude={"candidate"},
+    )
+    private_values = {
+        str(value).strip().casefold()
+        for value in (
+            resume.candidate.name,
+            resume.candidate.email,
+            resume.candidate.phone,
+            *resume.candidate.links,
+        )
+        if value and str(value).strip()
+    }
+    for section in ("facts", "experience", "projects", "education", "certifications"):
+        entries = payload.get(section)
+        if not isinstance(entries, list):
+            continue
+        payload[section] = [
+            entry
+            for entry in entries
+            if not (
+                isinstance(entry, dict)
+                and str(entry.get("text", "")).strip().casefold() in private_values
+            )
+        ]
+    return payload
+
+
+def _redact_private_values(value: Any, replacements: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {key: _redact_private_values(item, replacements) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_private_values(item, replacements) for item in value]
+    if isinstance(value, str):
+        redacted = value
+        for private_value, replacement in replacements.items():
+            redacted = redacted.replace(private_value, replacement)
+        return redacted
+    return value
 
 
 def _crewai_model_reference(settings: Settings) -> str:

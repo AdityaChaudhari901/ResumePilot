@@ -519,15 +519,15 @@ Request:
 }
 ```
 
-### Report retrieval
+### Report retrieval and export
 
 ```http
 GET /reports/{report_id}
-GET /reports/{report_id}/markdown
+POST /reports/{report_id}/markdown
 GET /reports/{report_id}/trace
-GET /reports/{report_id}/resume/latex
-GET /reports/{report_id}/resume/docx
-GET /reports/{report_id}/resume/pdf
+POST /reports/{report_id}/resume/latex
+POST /reports/{report_id}/resume/docx
+POST /reports/{report_id}/resume/pdf
 DELETE /reports/{report_id}
 ```
 

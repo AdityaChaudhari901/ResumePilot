@@ -3,7 +3,7 @@ import { CheckCircle2, Circle, CircleDot, LockKeyhole } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 
-export type WorkflowStepId = "job" | "jobReview" | "resume" | "ai" | "report";
+export type WorkflowStepId = "job" | "jobReview" | "resume" | "ai" | "report" | "draft";
 export type WorkflowStepStatus = "active" | "complete" | "locked" | "ready";
 
 export interface WorkflowProgressStep {
@@ -19,8 +19,11 @@ interface WorkflowProgressProps {
 
 export function WorkflowProgress({ steps }: WorkflowProgressProps) {
   return (
-    <nav aria-label="Application workflow" className="rounded-lg border border-border bg-surface-raised p-3 shadow-sm">
-      <ol className="grid gap-2 md:grid-cols-5">
+    <nav
+      aria-label="Application workflow"
+      className="rounded-lg border border-border bg-surface-raised p-3 shadow-sm"
+    >
+      <ol className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
         {steps.map((step, index) => {
           const Icon = statusIcon(step.status);
 
@@ -34,7 +37,7 @@ export function WorkflowProgress({ steps }: WorkflowProgressProps) {
                   "border-validation/25 bg-validation/10 text-foreground",
                 step.status === "ready" && "border-border bg-surface text-foreground",
                 step.status === "locked" &&
-                  "border-border bg-background text-muted-foreground opacity-75"
+                  "border-border bg-background text-muted-foreground"
               )}
               key={step.id}
             >

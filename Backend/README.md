@@ -16,6 +16,7 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution, including latency, provider/model, token usage when exposed by CrewAI, and cost estimates when configured provider pricing matches the trace.
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
+- Tenant-scoped tailored resume draft workspace for accepting/rejecting generated bullets before final export.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
 - Evidence-backed LaTeX resume export using the uploaded resume facts and supported tailored bullets.
 - Editable DOCX resume export generated from the same validated report, resume, and job data.
@@ -164,6 +165,13 @@ The job uploads `evals/outputs/backend_quality_gate.json` as a short-retention
 artifact. Live CrewAI/Vertex checks remain local/manual because they require
 provider credentials and networked model calls.
 
+The default production Docker image installs the hash-locked deterministic
+runtime from `requirements/py312-production.lock.txt`. It excludes the optional
+CrewAI dependency tree while ChromaDB's `CVE-2026-45829` has no patched release.
+`AGENT_WORKFLOW_MODE=crewai` therefore falls back to the deterministic workflow
+in that image. Keep live CrewAI in an isolated runtime and do not expose a
+ChromaDB server until the upstream advisory is resolved.
+
 ## API Surface
 
 - `GET /health`
@@ -171,16 +179,21 @@ provider credentials and networked model calls.
 - `GET /applications`
 - `POST /applications`
 - `PATCH /applications/{application_id}/status`
+- `GET /applications/{application_id}/tailored-resume`
+- `PATCH /applications/{application_id}/tailored-resume/items/{item_id}`
+- `POST /applications/{application_id}/tailored-resume/latex`
+- `POST /applications/{application_id}/tailored-resume/docx`
+- `POST /applications/{application_id}/tailored-resume/pdf`
 - `POST /resumes/upload`
 - `DELETE /resumes/{resume_id}`
 - `POST /jobs/preview`
 - `POST /jobs/analyze`
 - `GET /reports/{report_id}`
-- `GET /reports/{report_id}/markdown`
+- `POST /reports/{report_id}/markdown`
 - `GET /reports/{report_id}/trace`
-- `GET /reports/{report_id}/resume/latex`
-- `GET /reports/{report_id}/resume/docx`
-- `GET /reports/{report_id}/resume/pdf`
+- `POST /reports/{report_id}/resume/latex`
+- `POST /reports/{report_id}/resume/docx`
+- `POST /reports/{report_id}/resume/pdf`
 - `DELETE /reports/{report_id}`
 - `GET /audit/events`
 - `POST /retention/purge`
@@ -197,6 +210,13 @@ draft. `POST /jobs/analyze` can receive `application_id` to complete that draft
 with resume/job/report IDs and match score. `PATCH /applications/{id}/status`
 supports the dashboard pipeline statuses `draft`, `reviewed`, `analyzed`,
 `exported`, and `applied`.
+
+`GET /applications/{id}/tailored-resume` creates or returns the application-linked
+tailored resume review draft. Users can edit, accept, reject, or reset each
+evidence-backed bullet through the item patch route. Application-specific DOCX,
+LaTeX, and PDF exports use `POST` because each export reserves usage, records an
+audit event, and advances application status atomically. They include accepted
+bullets only and reject unsupported accepted edits before rendering.
 
 The `/chat/openclaw` endpoint requires:
 

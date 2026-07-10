@@ -51,6 +51,7 @@ class JobAnalysisRequest(StrictBaseModel):
     company: str | None = None
     role: str | None = None
     reviewed_job_profile: JobProfile | None = None
+    allow_live_ai_processing: bool = False
 
     @model_validator(mode="after")
     def require_job_input(self) -> "JobAnalysisRequest":

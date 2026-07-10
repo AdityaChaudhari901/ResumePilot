@@ -696,5 +696,5 @@ def _runtime_metadata(
 
 
 def _public_error_summary(exc: Exception) -> str:
-    message = str(exc).strip().splitlines()[0] if str(exc).strip() else exc.__class__.__name__
-    return message[:220]
+    del exc
+    return "Live AI runtime failed or is unavailable."
