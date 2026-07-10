@@ -466,6 +466,7 @@ Production readiness hardening completed 2026-07-10:
 - Binds BFF identity signatures to HTTP method and path, disables OpenClaw token redirects outside private local auth, removes raw provider/database exception text from public responses, and rejects placeholder/short production secrets.
 - Reserves monthly analysis, live-AI, and export usage under the user-row lock before billable work, then finalizes usage metadata after completion.
 - Added hash-locked production Python dependencies, pinned container bases and GitHub Actions, removed the vulnerable CrewAI/ChromaDB tree from the default image, and added Python/npm dependency audits to CI.
+- Declared the Graphite2 runtime required by the checksum-pinned Tectonic binary so fresh Linux/amd64 production images validate and run the PDF compiler instead of relying on an architecture-specific local cache.
 - Made production Compose fail closed to Clerk or signed trusted headers, bind host ports to loopback by default, and pass trusted-header credentials correctly. The frontend image now receives the Clerk publishable key at build time.
 - Added a clean production-build Playwright gate with six Chromium scenarios, WCAG A/AA Axe checks, security-header assertions, responsive coverage, and report/tailored export verification.
 
@@ -478,14 +479,14 @@ Next implementation scope:
 - Existing original JSON schemas are valid but looser than the implemented Pydantic contracts.
 - OpenClaw APIs should be verified against current official docs before live integration.
 - The new backend quality gate measures deterministic local backend latency only; live CrewAI/provider latency and token usage are visible in per-report traces but not included in the deterministic quality gate yet.
-- The amd64 backend image installs checksum-pinned Tectonic and bounds compiler concurrency, time, and output. Arm64 images still require a verified compiler, and remote deployment should move compilation to a network-disabled, resource-limited worker.
+- The amd64 backend image installs checksum-pinned Tectonic with its Graphite2 runtime and bounds compiler concurrency, time, and output. Arm64 images still require a verified compiler, and remote deployment should move compilation to a network-disabled, resource-limited worker.
 - Workflow trace cost estimates currently cover only the configured Vertex global standard `google/gemini-3.5-flash` path; additional provider/model/region rates must be added before other traces can emit cost.
 - DOCX export has structural package and browser download coverage; pixel-level DOCX render QA requires installing `pdf2image` plus LibreOffice/`soffice` on this machine.
 - Python Playwright fallback requires `python -m playwright install chromium` on environments that need JavaScript-rendered public job page fetches.
 - OpenClaw configure/start scripts now set LaunchAgent environment variables for the active login session and register the durable global Vertex model provider; reboot persistence for launchd environment still needs a plist/env-file strategy before broader handoff.
 - A reverse proxy or API gateway must enforce TLS, request-rate/body limits, and private-network egress policy. ResumePilot now reserves monthly quotas atomically, but it does not provide a distributed per-minute limiter or idempotency-key store.
 - Background workers, caching, production metrics/alerts, and visual screenshot baseline regression are not implemented yet.
-- The CI browser workflow is implemented and locally verified; this uncommitted workflow has not run on GitHub-hosted infrastructure yet.
+- GitHub-hosted CI now exercises backend, frontend, browser/accessibility, and fresh Linux/amd64 production-container gates on every push; the fresh image build is the authoritative guard against architecture-specific dependency gaps.
 
 ## Verification Evidence
 
@@ -499,6 +500,8 @@ Latest verification run: 2026-07-10
 | Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: clean production build and 6/6 Chromium tests; WCAG A/AA, security headers, desktop/mobile, POST exports, reviewed evidence, and ledger reopen verified |
 | Production dependency audit | `uvx --python .venv/bin/python --from pip-audit==2.10.1 pip-audit -r requirements/py312-production.lock.txt` | Passed: no known vulnerabilities in the hash-locked default runtime |
 | Production containers and Compose | Compose config/build plus an isolated `resumepilot-prodcheck` stack on ports 8150/3150 | Passed on local arm64: Postgres/backend/frontend became healthy, `/health` and migration-aware `/ready` returned `ok` at head `20260709_0007`, frontend returned 200 with security headers, backend runs as UID/GID 1000, `pip check` passed, and ChromaDB is absent; the disposable stack and volumes were removed |
+| First GitHub-hosted production gate | GitHub Actions run `29074378258` for commit `26fbd21` | Backend, frontend, and browser/accessibility jobs passed; the deployment job failed a fresh Linux/amd64 image because Tectonic's Graphite2 runtime was not declared |
+| Linux/amd64 backend image repair | `docker buildx build --platform linux/amd64 --load --progress=plain -t resumepilot-backend:ci-fix Backend` plus an in-container Tectonic/`ldd`/`pip check`/UID smoke | Passed: checksum verification completed, Tectonic 0.16.9 loaded with no unresolved libraries, Python dependencies were consistent, and the runtime user remained UID 1000 |
 | Backend application workspace focused tests | `cd Backend && .venv/bin/pytest tests/test_applications_api.py tests/test_analysis_api.py tests/test_tenant_isolation.py -q` | Passed: 14 tests covering draft creation, analysis linking, export status, status updates, and tenant isolation |
 | Backend application workspace lint | `cd Backend && .venv/bin/ruff format app tests migrations --check && .venv/bin/ruff check app tests migrations` | Passed |
 | Backend full suite after application workspace | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check app tests scripts migrations && .venv/bin/pytest -q` | Passed: Ruff format/check and 77 pytest tests |

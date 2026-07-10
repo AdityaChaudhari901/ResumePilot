@@ -17,7 +17,10 @@ ARG TECTONIC_SHA256=f3c825128095dc3399ea11c08c18035b33050a216930c295c79e8eb11bd2
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      libgraphite2-3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if [ "${TARGETARCH}" = "amd64" ]; then \
