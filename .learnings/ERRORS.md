@@ -47,6 +47,167 @@ and reject mismatched operation, analysis, or graph-state versions.
 
 ---
 
+## [ERR-20260710-010] backend-targeted-lint-missing-select-import
+
+**Logged**: 2026-07-10T09:49:45Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+A new SQLAlchemy regression test used `select()` without importing it, so Ruff
+stopped the targeted verification sequence before pytest ran.
+
+### Error
+
+```text
+F821 Undefined name `select`
+```
+
+### Context
+
+- The failure followed the intentional addition of an old-reservation quota test.
+- Ruff caught the missing symbol before the test suite executed.
+
+### Suggested Fix
+
+Import `select` from SQLAlchemy in the test module and rerun formatting, lint,
+and the targeted tests in that order.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/tests/test_workflow_jobs.py
+
+### Resolution
+
+- **Resolved**: 2026-07-10T09:49:45Z
+- **Notes**: Added the missing SQLAlchemy import before rerunning verification.
+
+---
+
+## [ERR-20260710-011] compose-inspection-missing-production-env-file
+
+**Logged**: 2026-07-10T09:56:51Z
+**Priority**: low
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+The first Compose status/config check omitted the production environment file,
+so interpolation failed before Docker inspected the running stack.
+
+### Error
+
+```text
+POSTGRES_PASSWORD is missing a value: Set POSTGRES_PASSWORD in .env.production
+```
+
+### Context
+
+- Production-like Compose commands require the ignored root `.env.production`.
+- No secret value was printed or changed.
+
+### Suggested Fix
+
+Pass `--env-file .env.production` to production-like Compose inspection and
+runtime commands.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: docker-compose.yml, .env.production.example
+
+### Resolution
+
+- **Resolved**: 2026-07-10T09:56:51Z
+- **Notes**: Reran the checks with the existing ignored production environment file.
+
+---
+
+## [ERR-20260710-012] postgres-migration-gate-has-no-help-mode
+
+**Logged**: 2026-07-10T09:57:19Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+Invoking the PostgreSQL migration gate with `--help` executed the gate instead
+of showing usage and stopped because its required admin URL was absent.
+
+### Error
+
+```text
+RuntimeError: POSTGRES_ADMIN_URL is required
+```
+
+### Context
+
+- `run_postgres_migration_gate.py` is an environment-driven script, not an
+  argparse command.
+- The failure occurred before a database connection or mutation.
+
+### Suggested Fix
+
+Read the script entry contract and provide `POSTGRES_ADMIN_URL` in an isolated
+PostgreSQL environment; do not assume a `--help` interface.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/scripts/run_postgres_migration_gate.py
+
+### Resolution
+
+- **Resolved**: 2026-07-10T09:57:19Z
+- **Notes**: Ran the gate inside the Compose network using the container's existing database URL and temporary gate databases.
+
+---
+
+## [ERR-20260710-013] staged-diff-markdown-trailing-whitespace
+
+**Logged**: 2026-07-10T10:07:18Z
+**Priority**: low
+**Status**: resolved
+**Area**: docs
+
+### Summary
+
+The staged diff check rejected two Markdown header lines that used trailing
+spaces for hard line breaks.
+
+### Error
+
+```text
+Docs/project-audit/00-executive-summary.md:3-4: trailing whitespace
+```
+
+### Context
+
+- The issue was caught before commit.
+- It affected formatting only, not rendered content or application behavior.
+
+### Suggested Fix
+
+Use normal Markdown line breaks in audit metadata and rerun the staged diff
+check before committing.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Docs/project-audit/00-executive-summary.md
+
+### Resolution
+
+- **Resolved**: 2026-07-10T10:07:18Z
+- **Notes**: Removed the trailing spaces and restaged the corrected files.
+
+---
+
 ## [ERR-20260710-008] langgraph-tables-crossed-alembic-ownership-boundary
 
 **Logged**: 2026-07-10T08:48:01Z

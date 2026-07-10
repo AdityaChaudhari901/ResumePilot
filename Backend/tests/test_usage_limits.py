@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.core.config import Settings
+from app.db.models import UserRecord
 from app.main import create_app
 from app.schemas.agent import AgentWorkflowMode
 from tests.api_helpers import submit_analysis, successful_analysis
@@ -76,6 +78,28 @@ def test_paid_local_plan_seed_only_applies_to_configured_dev_user(tmp_path):
     assert body["plan"] == "free"
     assert body["subscription_status"] == "inactive"
     assert body["live_ai_enabled"] is False
+
+
+def test_inactive_paid_plan_falls_back_to_free_entitlements(tmp_path):
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_URL=f"sqlite:///{tmp_path / 'resumepilot-inactive-plan.db'}",
+        RESUMEPILOT_DATA_DIR=tmp_path / "data",
+        DEV_USER_PLAN="premium",
+        DEV_USER_SUBSCRIPTION_STATUS="inactive",
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/usage/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan"] == "free"
+    assert body["subscription_status"] == "inactive"
+    assert body["live_ai_enabled"] is False
+    assert _limit(body, "analyses") == {"used": 0, "limit": 3, "remaining": 3}
+    assert _limit(body, "live_ai_runs") == {"used": 0, "limit": 0, "remaining": 0}
 
 
 def test_analysis_usage_is_metered_and_limited(client, sample_resume_text, sample_job_text):
@@ -172,6 +196,45 @@ def test_free_plan_skips_langgraph_without_consuming_live_runs(
 
     assert trace_response.status_code == 200
     assert trace_response.json()["trace"]["mode"] == AgentWorkflowMode.deterministic_fallback
+    assert _limit(summary, "live_ai_runs") == {"used": 0, "limit": 0, "remaining": 0}
+
+
+def test_inactive_premium_plan_skips_langgraph_without_consuming_live_runs(
+    client, monkeypatch, sample_resume_text, sample_job_text, settings
+):
+    settings.agent_workflow_mode = AgentWorkflowMode.langgraph
+
+    class UnexpectedRunner:
+        def __init__(self, **_kwargs):
+            raise AssertionError("Inactive subscriptions must not attempt live LangGraph execution")
+
+    monkeypatch.setattr(
+        "app.services.workflow_job_service.LiveDraftGraphRunner",
+        UnexpectedRunner,
+    )
+    resume_id = _upload_resume(client, sample_resume_text)
+    with client.app.state.session_factory() as db:
+        user = db.scalar(select(UserRecord).where(UserRecord.external_id == "local-dev-user"))
+        assert user is not None
+        user.plan = "premium"
+        user.subscription_status = "inactive"
+        db.commit()
+
+    body = successful_analysis(
+        client,
+        {
+            "resume_id": resume_id,
+            "job_text": sample_job_text,
+            "allow_live_ai_processing": True,
+        },
+    )
+    trace_response = client.get(f"/reports/{body['report_id']}/trace")
+    summary = client.get("/usage/summary").json()
+
+    assert trace_response.status_code == 200
+    assert trace_response.json()["trace"]["mode"] == AgentWorkflowMode.deterministic_fallback
+    assert summary["plan"] == "free"
+    assert summary["live_ai_enabled"] is False
     assert _limit(summary, "live_ai_runs") == {"used": 0, "limit": 0, "remaining": 0}
 
 

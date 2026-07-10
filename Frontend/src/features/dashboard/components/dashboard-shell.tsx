@@ -622,7 +622,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       }
 
       setActiveOperation(null);
-      setWorkflowStep("draft");
+      setWorkflowStep("report");
     } catch (error) {
       if (error instanceof TerminalOperationError) {
         analysisCommandRef.current = null;
@@ -683,7 +683,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       analysisCommandRef.current = null;
       approvalCommandRef.current = null;
       setActiveOperation(null);
-      setWorkflowStep("draft");
+      setWorkflowStep("report");
     } catch (error) {
       if (error instanceof TerminalOperationError) {
         analysisCommandRef.current = null;
@@ -776,7 +776,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       }
 
       setActiveOperation(null);
-      setWorkflowStep("draft");
+      setWorkflowStep("report");
     } catch (error) {
       if (error instanceof TerminalOperationError) {
         approvalCommandRef.current = null;
@@ -1026,7 +1026,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   }
 
   function handleViewDraftFromSummary() {
-    if (analysis) {
+    if (analysis && activeApplicationId !== null) {
       setWorkflowStep("draft");
     }
   }
@@ -1393,8 +1393,10 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             {workflowStep === "report" ? (
               <ReportViewer
                 analysis={analysis}
+                canOpenTailoredResume={activeApplicationId !== null}
                 isExporting={isExportingReport}
                 onExport={handleReportExport}
+                onOpenTailoredResume={handleViewDraftFromSummary}
                 report={report}
                 resumeProfile={resumeProfile}
                 workflowTrace={workflowTrace}

@@ -25,6 +25,17 @@ class WorkflowJobStatus(StrEnum):
     dead_lettered = "dead_lettered"
 
 
+ACTIVE_WORKFLOW_JOB_STATUSES = frozenset(
+    {
+        WorkflowJobStatus.queued,
+        WorkflowJobStatus.running,
+        WorkflowJobStatus.retry_scheduled,
+        WorkflowJobStatus.cancel_requested,
+        WorkflowJobStatus.waiting_for_approval,
+    }
+)
+
+
 TERMINAL_WORKFLOW_JOB_STATUSES = frozenset(
     {
         WorkflowJobStatus.succeeded,

@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import UsageEventRecord
+from app.db.models import UsageEventRecord, WorkflowJobRecord
 
 
 class UsageEventRepository:
@@ -31,6 +31,7 @@ class UsageEventRepository:
         end_at: datetime,
         states: set[str] | None = None,
         reserved_after: datetime | None = None,
+        active_reservation_job_statuses: set[str] | None = None,
     ) -> int:
         query = select(func.coalesce(func.sum(UsageEventRecord.quantity), 0)).where(
             UsageEventRecord.user_id == user_id,
@@ -41,10 +42,18 @@ class UsageEventRepository:
         if states:
             query = query.where(UsageEventRecord.state.in_(states))
         if reserved_after is not None:
-            query = query.where(
-                (UsageEventRecord.state != "reserved")
-                | (UsageEventRecord.reserved_at >= reserved_after)
-            )
+            reservation_is_active = UsageEventRecord.reserved_at >= reserved_after
+            if active_reservation_job_statuses:
+                reservation_is_active = or_(
+                    reservation_is_active,
+                    exists(
+                        select(WorkflowJobRecord.id).where(
+                            WorkflowJobRecord.usage_event_id == UsageEventRecord.id,
+                            WorkflowJobRecord.status.in_(active_reservation_job_statuses),
+                        )
+                    ),
+                )
+            query = query.where(or_(UsageEventRecord.state != "reserved", reservation_is_active))
         value = self.db.scalar(query)
         return int(value or 0)
 

@@ -8,6 +8,7 @@ import {
   CircleX,
   ClipboardList,
   Download,
+  FileCheck2,
   GitBranch,
   ListChecks,
   SearchCheck,
@@ -37,8 +38,10 @@ import { formatScore, scoreLabel, scoreTone } from "@/features/dashboard/utils/r
 
 interface ReportViewerProps {
   analysis: JobAnalysisResponse | null;
+  canOpenTailoredResume: boolean;
   isExporting: ReportExportFormat | null;
   onExport: (format: ReportExportFormat) => Promise<void>;
+  onOpenTailoredResume: () => void;
   report: ApplicationReport | null;
   resumeProfile: ResumeProfile | null;
   workflowTrace: AgentWorkflowTrace | null;
@@ -46,8 +49,10 @@ interface ReportViewerProps {
 
 export function ReportViewer({
   analysis,
+  canOpenTailoredResume,
   isExporting,
   onExport,
+  onOpenTailoredResume,
   report,
   resumeProfile,
   workflowTrace
@@ -102,6 +107,18 @@ export function ReportViewer({
           >
             Markdown
           </ReportExportButton>
+          <Button
+            disabled={!canOpenTailoredResume}
+            icon={<FileCheck2 className="h-4 w-4" aria-hidden="true" />}
+            onClick={onOpenTailoredResume}
+            title={
+              canOpenTailoredResume
+                ? undefined
+                : "Tailoring is unavailable because this report is not linked to an application."
+            }
+          >
+            Review tailored resume
+          </Button>
         </div>
       }
       eyebrow={`Report ${analysis.report_id}`}

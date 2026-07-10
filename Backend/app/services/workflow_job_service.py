@@ -39,6 +39,7 @@ from app.schemas.auth import CurrentUser
 from app.schemas.job import JobAnalysisRequest, JobProfile
 from app.schemas.match import MatchResult
 from app.schemas.operation import (
+    ACTIVE_WORKFLOW_JOB_STATUSES,
     TERMINAL_WORKFLOW_JOB_STATUSES,
     WorkflowApproval,
     WorkflowApprovalDecision,
@@ -85,15 +86,6 @@ from app.services.usage_service import (
 )
 
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[\x21-\x7E]{8,255}$")
-ACTIVE_WORKFLOW_JOB_STATUSES = frozenset(
-    {
-        WorkflowJobStatus.queued,
-        WorkflowJobStatus.running,
-        WorkflowJobStatus.retry_scheduled,
-        WorkflowJobStatus.cancel_requested,
-        WorkflowJobStatus.waiting_for_approval,
-    }
-)
 LOGGER = logging.getLogger("resumepilot.workflow_jobs")
 
 

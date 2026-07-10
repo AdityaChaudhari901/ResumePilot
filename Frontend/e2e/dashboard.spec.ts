@@ -454,9 +454,13 @@ test("tailored resume explains blocked unsupported edits inline", async ({ page 
   await enterJobListing(page, { url: jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH) });
   await uploadResume(page);
   await page.getByRole("button", { name: "Run AI analysis" }).click();
-  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
     timeout: 30_000
   });
+  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Review tailored resume" })).toBeVisible();
+  await page.getByRole("button", { name: "Review tailored resume" }).click();
+  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toBeVisible();
 
   const draftWorkspace = page.locator("section").filter({
     has: page.getByRole("heading", { name: "Tailored resume workspace" })
@@ -497,6 +501,35 @@ test("tailored resume explains blocked unsupported edits inline", async ({ page 
   await expect(
     draftWorkspace.getByText("99% reliability is not present in the linked resume evidence.")
   ).toBeVisible();
+});
+
+test("report disables tailoring when its application link is unavailable", async ({ page }) => {
+  await mockFixtureJobPreviews(page);
+  await page.route("**/api/applications?limit=20", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      body: JSON.stringify({ count: 0, items: [] }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+  await page.goto("/");
+
+  await enterJobListing(page, { url: jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH) });
+  await uploadResume(page);
+  await page.getByRole("button", { name: "Run AI analysis" }).click();
+
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(page.getByRole("button", { name: "Review tailored resume" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Review tailored resume" })).toHaveAttribute(
+    "title",
+    "Tailoring is unavailable because this report is not linked to an application."
+  );
 });
 
 test("report ledger reopens the selected saved report accurately", async ({ page }) => {
@@ -794,9 +827,31 @@ async function runAiAnalysis(
 ): Promise<RunAiAnalysisResult> {
   await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible();
   await page.getByRole("button", { name: "Run AI analysis" }).click();
-  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
     timeout: 30_000
   });
+  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Review tailored resume" })).toBeVisible();
+
+  const reportLabel = await page
+    .locator('section[aria-label="Active workflow step"]')
+    .getByText(/^Report \d+$/)
+    .first()
+    .textContent();
+  const reportId = reportLabel?.match(/\d+/)?.[0];
+  if (!reportId) {
+    throw new Error(`Could not parse the active report id from: ${reportLabel ?? "missing label"}`);
+  }
+
+  if (!(options.expectDraftComparison ?? true) && !options.acceptFirstDraft) {
+    return {
+      applicationId: null,
+      reportId
+    };
+  }
+
+  await page.getByRole("button", { name: "Review tailored resume" }).click();
+  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toBeVisible();
 
   const draftWorkspace = page.locator("section").filter({
     has: page.getByRole("heading", { name: "Tailored resume workspace" })
@@ -827,15 +882,6 @@ async function runAiAnalysis(
   await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
     timeout: 15_000
   });
-  const reportLabel = await page
-    .locator('section[aria-label="Active workflow step"]')
-    .getByText(/^Report \d+$/)
-    .first()
-    .textContent();
-  const reportId = reportLabel?.match(/\d+/)?.[0];
-  if (!reportId) {
-    throw new Error(`Could not parse the active report id from: ${reportLabel ?? "missing label"}`);
-  }
   return {
     applicationId,
     reportId

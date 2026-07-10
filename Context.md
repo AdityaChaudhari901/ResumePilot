@@ -4,17 +4,15 @@ Last updated: 2026-07-10
 
 ## Active Implementation Checkpoint
 
-Completed LangGraph approval slice (2026-07-10):
+Comprehensive audit and first safe launch-hardening batch completed (2026-07-10):
 
-- Keep OpenClaw as the authenticated chat/channel interface; it must remain a thin caller of FastAPI and must not own tenant identity, billing, application state, or workflow checkpoints.
-- Keep FastAPI, PostgreSQL, deterministic parsing/matching, and pass/warn/block claim validation as the business and evidence source of truth.
-- Replace CrewAI only as part of the consented live-drafting path that now requires a durable asynchronous human approval pause. Deterministic analyses continue to complete without an unnecessary approval prompt.
-- Use LangGraph as the single outer controller for live draft generation, deterministic validation, `interrupt()` approval, and `Command(resume=...)` recovery. Keep the existing PostgreSQL-leased worker as the execution queue; LangGraph is not a queue replacement.
-- Use LangChain strictly inside LangGraph generation nodes for Vertex AI structured model calls. Do not introduce a second LangChain agent loop or call LangChain from FastAPI routes, repositories, deterministic services, or OpenClaw.
-- Use the workflow operation UUID as the internal LangGraph `thread_id`, a PostgreSQL checkpointer in production, and an ephemeral in-memory checkpointer only for test/development SQLite. Checkpoint state may contain internal IDs and redacted generated proposals, but never raw resume text, candidate contact data, auth material, or provider secrets.
-- Hard validation blocks are never user-overridable. Approval can accept only the already validated live proposal; rejection keeps the deterministic baseline. Tailored-resume bullet Accept/Reject remains a separate evidence-level review control.
-- Implemented tenant-isolated, idempotent approve/reject APIs, waiting-state lease release, exact revision-bound proposal application, checkpoint privacy deletion/reconciliation, frontend refresh and polling recovery, and separate tailored-bullet approval.
-- Verified fresh/upgrade PostgreSQL migrations, package-owned checkpoint schema, cross-process interrupt/resume, partial-checkpoint recovery, no duplicate completed model nodes, orphan cleanup, 139 backend tests, 11 Chromium tests, dependency audits, and the rebuilt production Compose stack.
+- Audited the first-party product surface across architecture, backend, frontend, data, security, privacy, reliability, deployment, operations, product, UI/UX, accessibility, and monetization. Generated caches, local runtime data, dependency trees, build output, duplicate documentation bundles, credentials, and binary artifacts were excluded and are recorded in the audit.
+- Published the repository-specific audit and threat model under `Docs/project-audit/`: executive verdict, architecture/code, security/production, UI/product, monetization, and a measurable immediate/30-day/31-90-day roadmap.
+- Preserved OpenClaw as a thin private channel, deterministic evidence and validation as the source of truth, LangGraph as the durable live approval controller, and LangChain model construction inside LangGraph execution only. No CrewAI runtime or dependency was reintroduced.
+- Paid plan privileges now fail closed to the free entitlement set unless subscription status is exactly `active`. Usage reservations remain quota-bearing after the TTL while their workflow is queued, running, retrying, cancel-requested, or waiting for approval.
+- Successful new, resumed, and approved analyses now open the evidence-backed fit report before the tailored-resume editor. The editor remains one explicit `Review tailored resume` action away; approval recovery and the OpenClaw integration/topology are unchanged.
+- Final verification: 142 backend tests with 88% measured application coverage, Ruff/compile/golden/quality gates, PostgreSQL migration/checkpoint gate, frontend audit/lint/type/auth/build, 12 Chromium tests, 7 OpenClaw tests, Compose config, and live stack health all passed. The only backend warning is the existing upstream Starlette/httpx deprecation notice.
+- Audit verdict: the loopback stack is a strong private-beta/production-like baseline, not proof of public-production or billing readiness. The next implementation priority is an atomic, replay-repairing analysis finalizer; public launch also requires ingress abuse controls, privacy scheduling/self-service, runtime role separation, worker observability, backup/restore, and a selected deployment target.
 
 ## Purpose
 
@@ -23,7 +21,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: production-oriented evidence-first modular monolith with a Next.js authenticated BFF, FastAPI API and worker roles, PostgreSQL business state, Alembic application migrations, a package-owned LangGraph checkpoint schema, signed tenant identity, request IDs/timeouts, atomic usage reservations, durable idempotent analysis/PDF operations, lease renewal/retry/cancellation/dead-letter handling, persisted URL or pasted-job snapshots, deterministic matching and pass/warn/block validation, optional consented LangGraph live drafting with durable approval, accepted-draft-only resume exports, application history, audit/privacy controls, and a responsive Playwright-verified dashboard. OpenClaw remains the thin chat/channel interface. The production-like Compose stack runs on loopback ports 8050/3050.
+- Current state: production-oriented evidence-first modular monolith with a Next.js authenticated BFF, FastAPI API and worker roles, PostgreSQL business state, Alembic application migrations, a package-owned LangGraph checkpoint schema, signed tenant identity, request IDs/timeouts, active-workflow-aware atomic usage reservations, subscription-aware effective entitlements, durable idempotent analysis/PDF operations, lease renewal/retry/cancellation/dead-letter handling, persisted URL or pasted-job snapshots, deterministic matching and pass/warn/block validation, optional consented LangGraph live drafting with durable approval, outcome-first fit review, accepted-draft-only resume exports, application history, audit/privacy controls, and a responsive Playwright-verified dashboard. OpenClaw remains the thin chat/channel interface. The production-like Compose stack runs on loopback ports 8050/3050.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -133,6 +131,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
   - `docker-compose.yml`
   - `.env.production.example`
   - `Docs/DEPLOYMENT.md`
+  - `Docs/project-audit/*.md`
   - `Ai services/openclaw/workspace/skills/job/SKILL.md`
   - `Ai services/openclaw/workspace/skills/job/scripts/resumepilot_job.py`
   - `Ai services/openclaw/scripts/register_vertex_model.py`
@@ -165,9 +164,9 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
 - FastAPI production auth mode requires `AUTH_REQUIRED=true` and `AUTH_TRUSTED_PROXY_SECRET` so tenant identity headers must be signed by the trusted Next.js BFF instead of accepted directly from browsers.
 - Production startup refuses SQLite, debug mode, missing signed-proxy auth, missing `JOBCOPILOT_API_TOKEN`, schema auto-creation, or disabled migration readiness checks.
 - `GET /health` is process liveness; `GET /ready` verifies database connectivity, Alembic head alignment, and the LangGraph checkpoint schema in production.
-- Usage plan definitions remain application-owned, while PostgreSQL user-row locks serialize quota reservations. Analysis/PDF jobs reserve quota atomically with durable work, consume it only on success, and release it on failure or cancellation. `free` allows 3 monthly analyses, 5 exports, and no live AI; `pro` allows 100 monthly analyses, 100 exports, and no live AI; `premium` allows 500 monthly analyses, 500 exports, and 100 live AI runs.
+- Usage plan definitions remain application-owned, while PostgreSQL user-row locks serialize quota reservations. Analysis/PDF jobs reserve quota atomically with durable work, consume it only on success, and release it on failure or cancellation. Reservations linked to active workflows remain quota-bearing even beyond the orphan TTL. `free` allows 3 monthly analyses, 5 exports, and no live AI; effective `pro` allows 100 monthly analyses and 100 exports; effective `premium` allows 500 monthly analyses, 500 exports, and 100 live AI runs. Paid definitions are effective only for an explicitly `active` subscription; all other or unknown states fail closed to free until a real billing lifecycle defines trial/grace behavior.
 - Local development/test auto-created dev users can be seeded with `DEV_USER_PLAN` and `DEV_USER_SUBSCRIPTION_STATUS` for isolated browser verification; non-dev authenticated users still default to `free`/`inactive` until a real subscription flow updates them.
-- Live LangGraph execution is consent- and plan-gated. Free and Pro users remain deterministic; premium users consume `live_ai_run` only after provider work, and exhausted live quota returns the successful deterministic baseline without invoking the model.
+- Live LangGraph execution is consent-, plan-, and subscription-gated. Free, Pro, and inactive/unknown paid subscriptions remain deterministic; active premium users consume `live_ai_run` only after provider work, and exhausted live quota returns the successful deterministic baseline without invoking the model.
 
 ## Product Rule
 
@@ -565,11 +564,11 @@ Latest verification run: 2026-07-10
 
 | Check | Command | Result |
 |---|---|---|
-| Backend full release gate | `cd Backend && .venv/bin/ruff format --check . && .venv/bin/ruff check . && .venv/bin/pytest -q && .venv/bin/python -m compileall -q app tests scripts && .venv/bin/python scripts/run_golden_evals.py && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 126 files formatted, lint clean, 139 tests, compile clean, 20 pairs, 100% schema pass, 0 evidence/unsupported/routing gaps, 7.62 ms average and 9.20 ms p95; one upstream Starlette/httpx deprecation warning |
+| Backend full release gate | `cd Backend && .venv/bin/ruff format --check app tests scripts migrations && .venv/bin/ruff check . && .venv/bin/pytest --cov=app --cov-report=term-missing:skip-covered && .venv/bin/python -m compileall -q app tests scripts migrations && .venv/bin/python scripts/run_golden_evals.py && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 126 files formatted, lint clean, 142 tests, 88% application coverage, compile clean, 20 pairs, 100% schema pass, 0 evidence/unsupported/routing gaps, 9.07 ms average and 11.61 ms p95; one upstream Starlette/httpx deprecation warning |
 | SQLite migration/drift gate | Fresh temporary SQLite `alembic upgrade head` plus `alembic check` | Passed through `20260710_0009`; no new upgrade operations detected |
 | PostgreSQL 16 migration/checkpoint gate | Disposable PostgreSQL 16 plus `Backend/scripts/run_postgres_migration_gate.py` | Passed: fresh and seeded `0007` upgrades, downgrade/re-upgrade, Alembic drift/ownership checks, checkpoint setup idempotency, cross-process interrupt/resume without generation replay, orphan reconciliation, indexes, backfills, sequences, exclusive `SKIP LOCKED` claims, and stale-lease recovery |
 | Frontend static/security/build gate | `npm run lint && npm run typecheck && npm run build` plus bundled Next.js scanners and `npm audit --audit-level=low` | Passed on Next.js 16.2.10; npm reported 0 vulnerabilities. Scanner alerts were manually verified false positives for Clerk's documented publishable key; its server secret remains private |
-| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: production build and 11/11 Chromium tests covering WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, approval refresh recovery, stuck-operation controls, validation, accepted exports, desktop/mobile, and report reopen |
+| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: production build and 12/12 Chromium tests covering WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, approval refresh recovery, stuck-operation controls, validation, report-first tailoring availability, accepted exports, desktop/mobile, and report reopen |
 | Production dependency/security audit | Isolated `pip-audit --disable-pip -r Backend/requirements/py312-production.lock.txt`; `npm audit --audit-level=low` | Passed with 0 known Python or npm vulnerabilities |
 | Live LangGraph/LangChain/Vertex approval smoke | Real `gemini-3.5-flash` structured calls through the three LangGraph generation nodes, in-memory checkpoint inspection, then `Command(resume=...)` rejection | Passed: 3 successful provider requests, 11,796 total tokens, durable approval pause, rejection resumed without another provider call, stable proposal revision, and no raw resume/JD/contact values in checkpoint history |
 | Live production Compose stack | `docker compose --env-file .env.production up -d --build migrate backend worker frontend` plus health/readiness/image/runtime checks | Passed on local arm64: clean hash-locked images built; migration exited 0; PostgreSQL/API/frontend healthy; worker and checkpoint reconciler running; `/health`, `/ready`, frontend, and same-origin upload→worker→report smoke passed; `pip check` clean; CrewAI/ChromaDB absent; LangGraph 1.2.9 and PostgreSQL saver 3.1.0 installed. Stack remains on 8050/3050 |

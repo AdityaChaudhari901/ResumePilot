@@ -12,6 +12,7 @@ from app.core.config import get_cached_settings
 from app.db.models import UsageEventRecord, UserRecord
 from app.repositories.usage_events import UsageEventRepository
 from app.schemas.auth import CurrentUser
+from app.schemas.operation import ACTIVE_WORKFLOW_JOB_STATUSES
 from app.schemas.usage import (
     PlanLimit,
     UsageEventState,
@@ -486,6 +487,9 @@ def _enforce_metric_limit(
         end_at=period_end,
         states={UsageEventState.consumed.value, UsageEventState.reserved.value},
         reserved_after=reserved_after,
+        active_reservation_job_statuses={
+            workflow_status.value for workflow_status in ACTIVE_WORKFLOW_JOB_STATUSES
+        },
     )
     if used_or_reserved < maximum:
         return
@@ -553,7 +557,12 @@ def _lock_user_for_usage(db: Session, user_id: int) -> None:
 
 
 def _plan_for_user(current_user: CurrentUser) -> PlanDefinition:
-    return PLAN_DEFINITIONS.get(current_user.plan.lower(), DEFAULT_PLAN)
+    requested_plan = PLAN_DEFINITIONS.get(current_user.plan.lower(), DEFAULT_PLAN)
+    if requested_plan.name == DEFAULT_PLAN.name:
+        return DEFAULT_PLAN
+    if current_user.subscription_status.lower() != "active":
+        return DEFAULT_PLAN
+    return requested_plan
 
 
 def _current_period() -> tuple[datetime, datetime]:

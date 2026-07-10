@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
-from app.db.models import WorkflowJobRecord
+from sqlalchemy import select
+
+from app.db.models import UsageEventRecord, WorkflowJobRecord
 from app.services.workflow_job_service import (
     _renew_workflow_lease,
     execute_next_workflow_job,
@@ -81,6 +83,47 @@ def test_queued_analysis_can_be_canceled_without_consuming_quota(
     assert canceled_response.status_code == 200
     assert canceled_response.json()["status"] == "canceled"
     assert client.get("/usage/summary").json()["limits"][0]["used"] == 0
+
+
+def test_old_active_reservations_still_enforce_analysis_limit(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+
+    for index in range(3):
+        response, queued = submit_analysis(
+            client,
+            {"resume_id": resume_id, "job_text": f"{sample_job_text}\nQueue marker: {index}"},
+            idempotency_key=f"analysis-old-active-{index}",
+        )
+        assert response.status_code == 202
+        assert queued is not None
+        assert queued["status"] == "queued"
+
+    with client.app.state.session_factory() as db:
+        reservations = list(
+            db.scalars(select(UsageEventRecord).where(UsageEventRecord.state == "reserved"))
+        )
+        assert len(reservations) == 3
+        stale_at = datetime.now(UTC) - timedelta(seconds=settings.usage_reservation_ttl_seconds + 1)
+        for reservation in reservations:
+            reservation.reserved_at = stale_at
+        db.commit()
+
+    response, operation = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": f"{sample_job_text}\nQueue marker: blocked"},
+        idempotency_key="analysis-old-active-blocked",
+    )
+
+    assert response.status_code == 402
+    assert operation is not None
+    assert operation["detail"]["code"] == "plan_limit_reached"
+    assert operation["detail"]["used"] == 3
 
 
 def test_worker_executes_a_queued_analysis_and_exposes_progress_result(
