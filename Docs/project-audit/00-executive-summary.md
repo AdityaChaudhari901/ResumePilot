@@ -18,16 +18,16 @@ baseline. It is not ready for a public multi-tenant launch and is not ready to
 charge users. The deterministic workflow, durable operation queue, tenant
 scoping, LangGraph approval checkpointing, validation gates, migration gate,
 and broad automated tests are materially stronger than a typical prototype.
-The remaining risks are concentrated in transaction integrity, score validity,
-privacy operations, abuse controls, deployment/restore capability, worker
-observability, and billing lifecycle enforcement.
+The remaining risks are concentrated in score validity, privacy operations,
+abuse controls, deployment/restore capability, worker observability, and billing
+lifecycle enforcement.
 
 No confirmed P0 vulnerability was found, and no data loss was observed during
-the audit. Several P1 defects can still produce misleading scores, incomplete
-application state, missing files/checkpoints after a failed cross-store deletion,
-excess paid usage, or retained sensitive data. The single most important next
-move is to make analysis finalization replay-safe and atomic before expanding
-traffic or billing.
+the audit. Several P1 defects can still produce misleading scores, missing
+files/checkpoints after a failed cross-store deletion, excess paid usage, or
+retained sensitive data. The single most important next move is to correct and
+version match-score semantics before expanding traffic or billing. The audited
+partial-analysis-finalization defect was closed in the first post-audit batch.
 
 ## Product and users
 
@@ -51,12 +51,12 @@ and after application, where tracking stops at `applied`.
 
 | Area | Status | Evidence and reason |
 |---|---|---|
-| Correctness | AMBER | Validation and idempotent jobs are strong, but analysis completion commits before application/audit/usage finalization in `Backend/app/services/analysis_service.py:226-275`, and the matcher does not use candidate evidence for its experience component. |
+| Correctness | AMBER | Validation, idempotent jobs, atomic replay-repairing finalization, and lease fencing are strong; the matcher still does not use candidate evidence for its experience component. |
 | Security | AMBER | Signed internal identity, tenant-scoped repositories, upload bounds, SSRF controls, and non-root images are present. Public ingress rate/body limits, CSP, least-privilege database roles, and cloud controls are absent. |
 | Architecture | AMBER | The modular monolith is the correct shape. Commit ownership is spread across large orchestration services and committing repositories, making partial-state defects difficult to prevent. |
-| Database | AMBER | Alembic and a PostgreSQL migration gate are strong. Full production workflows are primarily tested on SQLite; timestamp columns are timezone-naive and cross-resource deletion is not atomic. |
+| Database | AMBER | Alembic and the PostgreSQL migration gate now cover concurrent finalization in addition to migrations, locks, and checkpoints. Full workflows are still primarily tested on SQLite; timestamp columns are timezone-naive and cross-resource deletion is not atomic. |
 | Performance | AMBER | Queue leasing and `SKIP LOCKED` support horizontal workers, but the shipped Compose topology has one serial worker and no measured load/queue budget. |
-| Testing | GREEN | 142 backend tests, 12 Chromium E2E tests, 20 golden pairs, 88% measured backend coverage, build/lint/type checks, migration checks, and dependency gates passed. PostgreSQL race coverage and labeled match-quality evaluation remain gaps. |
+| Testing | GREEN | 148 backend tests at 88% measured application coverage, 12 Chromium E2E tests, 20 golden pairs, build/lint/type checks, migration checks, dependency gates, and a PostgreSQL concurrent-finalization check passed. Broader PostgreSQL races and labeled match-quality evaluation remain gaps. |
 | UI/UX | AMBER | The evidence editor and guarded export are differentiated. The main workspace mixes user outcomes with developer diagnostics, repeats navigation, and overuses equal card surfaces. |
 | Accessibility | AMBER | Initial axe coverage and semantic controls pass, but dynamic steps lack consistent focus movement/`aria-current`, and complex approval/report/mobile states are not scanned. |
 | Deployment | RED | `docker-compose.yml` is explicitly a local production-like baseline. There is no selected public target, TLS ingress, staging promotion, IaC, or automated rollback. |
@@ -85,20 +85,17 @@ that the current loopback demo is unsafe for its stated scope.
 
 ## Largest launch risks
 
-1. **P1 — partial analysis finalization.** A completed report is committed before
-   its application link, audit events, and usage settlement. A retry can return
-   success without repairing the missing application.
-2. **P1 — misleading match dimensions.** Candidate experience is not read when
+1. **P1 — misleading match dimensions.** Candidate experience is not read when
    calculating the experience score, and responsibility matching accepts
    substrings such as `Go` inside `ongoing`.
-3. **P1 — incomplete privacy lifecycle.** Retention is only run by a
+2. **P1 — incomplete privacy lifecycle.** Retention is only run by a
    tenant-authenticated manual endpoint; browser users cannot delete/export
    account data; file/checkpoint deletion spans non-atomic stores.
-4. **P1 — public abuse exposure.** No edge rate limit, bounded JSON-body helper,
+3. **P1 — public abuse exposure.** No edge rate limit, bounded JSON-body helper,
    per-tenant storage quota, or job-preview concurrency budget exists.
-5. **P1 — operational blindness.** A dead worker can leave the API ready while
+4. **P1 — operational blindness.** A dead worker can leave the API ready while
    analyses stall. Backups and restore are instructions, not a tested system.
-6. **P1 — public deployment absent.** TLS, secret management, role separation,
+5. **P1 — public deployment absent.** TLS, secret management, role separation,
    network egress policy, staging, and rollback require a hosting decision.
 
 ## Safe improvements selected in this audit
@@ -113,7 +110,11 @@ data-migration, and score-semantic decisions:
 - successful analysis now presents the fit verdict before asking the user to
   tailor a resume, preserving approval recovery and leaving the editor one
   explicit action away;
-- focused backend and browser regressions cover these paths.
+- focused backend and browser regressions cover these paths;
+- analysis finalization now commits report/application/audits/usage atomically,
+  repairs completed replays, preserves superseding application work, and fences
+  stale worker writes; SQLite crash injection and PostgreSQL concurrency gates
+  cover the repaired contract.
 
 ## Coverage and exclusions
 

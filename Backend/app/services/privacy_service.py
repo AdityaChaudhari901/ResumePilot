@@ -297,9 +297,11 @@ def delete_account(
         db.scalars(
             select(WorkflowJobRecord)
             .where(WorkflowJobRecord.user_id == current_user.id)
+            .order_by(WorkflowJobRecord.id)
             .with_for_update()
         )
     )
+    analyses = _lock_analysis_records(db, analyses)
 
     deleted_upload_files = _delete_tenant_tree(
         settings,
@@ -377,7 +379,7 @@ def _delete_analysis_record(
     analysis: AnalysisRecord,
     settings: Settings,
 ) -> DeletionCounts:
-    counts = DeletionCounts(deleted_reports=1)
+    counts = DeletionCounts()
     job_id = analysis.job_id
     user_id = analysis.user_id
     workflow_jobs = _workflow_jobs_for_references(
@@ -387,6 +389,12 @@ def _delete_analysis_record(
         report_ids={analysis.id},
         operation_ids={analysis.workflow_job_id} if analysis.workflow_job_id else set(),
     )
+    workflow_jobs = _lock_workflow_job_records(db, workflow_jobs)
+    locked_analyses = _lock_analysis_records(db, [analysis])
+    if not locked_analyses:
+        return counts
+    analysis = locked_analyses[0]
+    counts.deleted_reports = 1
     _detach_application_references(db, user_id=user_id, analysis_id=analysis.id)
     TailoredResumeRepository(db).delete_by_report_id(analysis.id, user_id=user_id)
     db.delete(analysis)
@@ -470,16 +478,7 @@ def _delete_workflow_job_records(
     records: list[WorkflowJobRecord],
 ) -> DeletionCounts:
     counts = DeletionCounts()
-    seen: set[str] = set()
-    for record in records:
-        if record.id in seen:
-            continue
-        seen.add(record.id)
-        persisted = db.scalar(
-            select(WorkflowJobRecord).where(WorkflowJobRecord.id == record.id).with_for_update()
-        )
-        if persisted is None:
-            continue
+    for persisted in _lock_workflow_job_records(db, records):
         linked_analyses = list(
             db.scalars(select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == persisted.id))
         )
@@ -499,6 +498,43 @@ def _delete_workflow_job_records(
     if counts.deleted_workflow_jobs or counts.scrubbed_workflow_jobs:
         db.flush()
     return counts
+
+
+def _lock_workflow_job_records(
+    db: Session,
+    records: list[WorkflowJobRecord],
+) -> list[WorkflowJobRecord]:
+    locked: list[WorkflowJobRecord] = []
+    for record_id in sorted({record.id for record in records}):
+        persisted = db.scalar(
+            select(WorkflowJobRecord)
+            .where(WorkflowJobRecord.id == record_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if persisted is not None:
+            locked.append(persisted)
+    return locked
+
+
+def _lock_analysis_records(
+    db: Session,
+    records: list[AnalysisRecord],
+) -> list[AnalysisRecord]:
+    locked: list[AnalysisRecord] = []
+    for record_id, user_id in sorted({(record.id, record.user_id) for record in records}):
+        persisted = db.scalar(
+            select(AnalysisRecord)
+            .where(
+                AnalysisRecord.id == record_id,
+                AnalysisRecord.user_id == user_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if persisted is not None:
+            locked.append(persisted)
+    return locked
 
 
 def _scrub_workflow_usage(db: Session, record: WorkflowJobRecord) -> None:

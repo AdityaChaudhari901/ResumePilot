@@ -24,6 +24,32 @@ def add_audit_event(
     return AuditEventRepository(db).add(record)
 
 
+def ensure_analysis_audit_event(
+    db: Session,
+    *,
+    event_type: str,
+    analysis_id: int,
+    payload: dict[str, Any],
+    user_id: int,
+    request_id: str | None = None,
+) -> AuditEventRecord:
+    repository = AuditEventRepository(db)
+    existing = repository.get_for_analysis(
+        user_id=user_id,
+        event_type=event_type,
+        analysis_id=analysis_id,
+    )
+    if existing is not None:
+        return existing
+    return add_audit_event(
+        db,
+        event_type=event_type,
+        payload=payload,
+        user_id=user_id,
+        request_id=request_id,
+    )
+
+
 def record_audit_event(
     db: Session,
     *,

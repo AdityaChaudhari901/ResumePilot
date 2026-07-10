@@ -22,6 +22,18 @@ class UsageEventRepository:
             .limit(1)
         )
 
+    def get_for_update(self, record_id: int, *, user_id: int) -> UsageEventRecord | None:
+        return self.db.scalar(
+            select(UsageEventRecord)
+            .where(
+                UsageEventRecord.id == record_id,
+                UsageEventRecord.user_id == user_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+            .limit(1)
+        )
+
     def quantity_sum(
         self,
         *,

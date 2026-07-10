@@ -146,6 +146,37 @@ def finalize_analysis_usage(
     workflow_mode: str,
     runtime_status: str = "completed",
 ) -> None:
+    stage_analysis_usage_finalization(
+        db,
+        record,
+        user_id=record.user_id,
+        analysis_id=analysis_id,
+        report_id=report_id,
+        workflow_mode=workflow_mode,
+        runtime_status=runtime_status,
+    )
+    db.commit()
+
+
+def stage_analysis_usage_finalization(
+    db: Session,
+    record: UsageEventRecord,
+    *,
+    user_id: int,
+    analysis_id: int,
+    report_id: int,
+    workflow_mode: str,
+    runtime_status: str = "completed",
+) -> None:
+    if record.user_id != user_id or record.event_type != UsageEventType.analysis_created.value:
+        raise RuntimeError("Analysis usage reservation does not match the finalized analysis")
+    if record.state == UsageEventState.consumed.value:
+        metadata = record.metadata_json or {}
+        if metadata.get("analysis_id") == analysis_id and metadata.get("report_id") == report_id:
+            return
+        raise RuntimeError("Consumed analysis usage is linked to a different analysis")
+    if record.state != UsageEventState.reserved.value:
+        raise RuntimeError("Analysis usage reservation is no longer available for settlement")
     record.state = (
         UsageEventState.consumed.value
         if runtime_status == "completed"
@@ -159,7 +190,6 @@ def finalize_analysis_usage(
         "workflow_mode": workflow_mode,
     }
     db.add(record)
-    db.commit()
 
 
 def record_export_usage(

@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -519,6 +519,7 @@ def _execute_claimed_job(
     settings: Settings,
 ) -> WorkflowJobRecord:
     repository = WorkflowJobRepository(db)
+    claimed_lease_owner = record.lease_owner
     try:
         if record.cancel_requested_at is not None:
             return _mark_canceled(db, record, settings=settings)
@@ -558,6 +559,9 @@ def _execute_claimed_job(
             _delete_checkpoint_safely(settings, record.id)
             return record
         record = persisted
+        if not _claimed_lease_is_current(record, claimed_lease_owner):
+            db.rollback()
+            return repository.get_any(record.id) or record
         if record.cancel_requested_at is not None:
             db.rollback()
             record = repository.get_any(record.id) or record
@@ -587,17 +591,23 @@ def _execute_claimed_job(
         return saved
     except _CooperativeCancellation:
         db.rollback()
-        persisted = repository.get_any(record.id)
+        persisted = repository.get_any_for_update(record.id)
         if persisted is None:
             _delete_checkpoint_safely(settings, record.id)
             return record
+        if not _claimed_lease_is_current(persisted, claimed_lease_owner):
+            db.rollback()
+            return repository.get_any(record.id) or persisted
         return _mark_canceled(db, persisted, settings=settings)
     except Exception as exc:
         db.rollback()
-        persisted = repository.get_any(record.id)
+        persisted = repository.get_any_for_update(record.id)
         if persisted is None:
             _delete_checkpoint_safely(settings, record.id)
             return record
+        if not _claimed_lease_is_current(persisted, claimed_lease_owner):
+            db.rollback()
+            return repository.get_any(record.id) or persisted
         record = persisted
         if record.cancel_requested_at is not None:
             return _mark_canceled(db, record, settings=settings)
@@ -614,6 +624,13 @@ def _execute_claimed_job(
         )
 
 
+def _claimed_lease_is_current(
+    record: WorkflowJobRecord,
+    expected_lease_owner: str | None,
+) -> bool:
+    return bool(expected_lease_owner) and record.lease_owner == expected_lease_owner
+
+
 def _execute_analysis_job(
     db: Session,
     record: WorkflowJobRecord,
@@ -621,6 +638,9 @@ def _execute_analysis_job(
     current_user: CurrentUser,
     settings: Settings,
 ) -> _JobExecutionResult:
+    lease_owner = record.lease_owner
+    if not lease_owner:
+        raise RuntimeError("Claimed analysis workflow is missing its lease owner")
     request = JobAnalysisRequest.model_validate(record.payload_json)
     approval_payload = _approval_payload(record)
     if (
@@ -643,12 +663,14 @@ def _execute_analysis_job(
         settings,
         analysis_usage=usage,
         workflow_job_id=record.id,
+        workflow_lease_owner=lease_owner,
         release_usage_on_failure=False,
         progress_callback=lambda stage, progress: _update_progress(
             db,
             record.id,
             stage=stage,
             progress=progress,
+            lease_owner=lease_owner,
         ),
     )
     baseline_result = response.model_dump(mode="json")
@@ -921,7 +943,13 @@ def _execute_pdf_export_job(
             detail="The accepted tailored resume changed. Start a new PDF export.",
         )
 
-    _update_progress(db, record.id, stage="compiling_pdf", progress=45)
+    _update_progress(
+        db,
+        record.id,
+        stage="compiling_pdf",
+        progress=45,
+        lease_owner=record.lease_owner,
+    )
     rendered = render_tailored_resume_pdf_for_application(
         db,
         application_id,
@@ -933,7 +961,13 @@ def _execute_pdf_export_job(
     if current_job is None or current_job.cancel_requested_at is not None:
         raise _CooperativeCancellation
 
-    _update_progress(db, record.id, stage="saving_pdf", progress=80)
+    _update_progress(
+        db,
+        record.id,
+        stage="saving_pdf",
+        progress=80,
+        lease_owner=record.lease_owner,
+    )
 
     current_job = db.scalar(
         select(WorkflowJobRecord).where(WorkflowJobRecord.id == record.id).with_for_update()
@@ -1061,15 +1095,29 @@ def _update_progress(
     *,
     stage: str,
     progress: int,
+    lease_owner: str | None,
 ) -> None:
-    record = WorkflowJobRepository(db).get_any(job_id)
-    if record is None or WorkflowJobStatus(record.status) != WorkflowJobStatus.running:
+    if not lease_owner:
         return
-    record.stage = stage[:64]
-    record.progress_percent = max(record.progress_percent, min(progress, 95))
-    record.heartbeat_at = datetime.now(UTC)
-    record.updated_at = record.heartbeat_at
-    db.add(record)
+    heartbeat_at = datetime.now(UTC)
+    progress_value = min(progress, 95)
+    db.execute(
+        update(WorkflowJobRecord)
+        .where(
+            WorkflowJobRecord.id == job_id,
+            WorkflowJobRecord.status == WorkflowJobStatus.running.value,
+            WorkflowJobRecord.lease_owner == lease_owner,
+        )
+        .values(
+            stage=stage[:64],
+            progress_percent=case(
+                (WorkflowJobRecord.progress_percent < progress_value, progress_value),
+                else_=WorkflowJobRecord.progress_percent,
+            ),
+            heartbeat_at=heartbeat_at,
+            updated_at=heartbeat_at,
+        )
+    )
     db.commit()
 
 

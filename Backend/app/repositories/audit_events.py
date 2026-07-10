@@ -24,6 +24,23 @@ class AuditEventRepository:
             statement = statement.where(AuditEventRecord.event_type == event_type)
         return list(self.db.scalars(statement.limit(limit)))
 
+    def get_for_analysis(
+        self,
+        *,
+        user_id: int,
+        event_type: str,
+        analysis_id: int,
+    ) -> AuditEventRecord | None:
+        return self.db.scalar(
+            select(AuditEventRecord)
+            .where(
+                AuditEventRecord.user_id == user_id,
+                AuditEventRecord.event_type == event_type,
+                AuditEventRecord.payload_json["analysis_id"].as_integer() == analysis_id,
+            )
+            .limit(1)
+        )
+
     def add(self, record: AuditEventRecord) -> AuditEventRecord:
         self.db.add(record)
         self.db.flush()

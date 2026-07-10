@@ -33,18 +33,17 @@ from app.schemas.job import (
 from app.schemas.report import ApplicationReport, ReportHistoryItem, ReportHistoryResponse
 from app.schemas.resume import ResumeProfile
 from app.services.agent_workflow import run_application_agent_workflow
-from app.services.application_service import (
-    record_application_analysis,
-    validate_application_for_analysis,
+from app.services.analysis_finalization_service import (
+    finalize_analysis_transaction,
+    require_active_analysis_workflow_lease,
 )
+from app.services.application_service import validate_application_for_analysis
 from app.services.audit_service import record_audit_event
 from app.services.file_storage import StoredUpload, persist_resume_upload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
 from app.services.matcher import match_resume_to_job
-from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import ResumeParseError, extract_resume_text, parse_resume_profile
 from app.services.usage_service import (
-    finalize_analysis_usage,
     release_usage_reservation,
     reserve_analysis_usage,
 )
@@ -125,6 +124,7 @@ def analyze_job(
     *,
     analysis_usage: UsageEventRecord | None = None,
     workflow_job_id: str | None = None,
+    workflow_lease_owner: str | None = None,
     release_usage_on_failure: bool = True,
     progress_callback: Callable[[str, int], None] | None = None,
 ) -> JobAnalysisResponse:
@@ -134,19 +134,44 @@ def analyze_job(
     analyses = AnalysisRepository(db)
 
     if workflow_job_id:
-        existing = analyses.get_by_workflow_job_id(workflow_job_id, user_id=current_user.id)
+        require_active_analysis_workflow_lease(
+            db,
+            workflow_job_id=workflow_job_id,
+            user_id=current_user.id,
+            lease_owner=workflow_lease_owner,
+        )
+        existing = analyses.get_by_workflow_job_id_for_update(
+            workflow_job_id,
+            user_id=current_user.id,
+        )
         if existing and existing.status == "completed":
-            if analysis_usage and analysis_usage.state == "reserved":
-                finalize_analysis_usage(
-                    db,
-                    analysis_usage,
-                    analysis_id=existing.id,
-                    report_id=existing.id,
-                    workflow_mode=existing.workflow_mode,
-                )
-            return _analysis_response(existing)
+            if existing.resume_id != request.resume_id:
+                raise RuntimeError("Completed workflow analysis does not match its request")
+            replay_resume = resumes.get(existing.resume_id, user_id=current_user.id)
+            replay_job = jobs.get(existing.job_id, user_id=current_user.id)
+            if replay_resume is None or replay_job is None:
+                raise RuntimeError("Completed workflow analysis dependencies are missing")
+            replay_application = validate_application_for_analysis(
+                db,
+                request.application_id,
+                current_user,
+            )
+            repaired = finalize_analysis_transaction(
+                db,
+                request=request,
+                current_user=current_user,
+                resume=replay_resume,
+                job=replay_job,
+                analysis=existing,
+                application=replay_application,
+                analysis_usage=analysis_usage,
+                workflow_lease_owner=workflow_lease_owner,
+            )
+            return _analysis_response(repaired)
         if existing:
             db.delete(existing)
+            db.commit()
+        else:
             db.commit()
 
     resume_record = resumes.get(request.resume_id, user_id=current_user.id)
@@ -220,21 +245,9 @@ def analyze_job(
             settings=resolved_settings,
         )
         _report_progress(progress_callback, "validating_claims", 80)
-        report = workflow_result.report
-        markdown = report_to_markdown(report)
-
-        analysis_record.status = "completed"
-        analysis_record.report_json = report.model_dump(mode="json")
-        analysis_record.report_markdown = markdown
-        analysis_record.validation_warnings_json = [
-            warning.model_dump(mode="json") for warning in report.validation_warnings
-        ]
-        analysis_record.workflow_mode = workflow_result.trace.mode.value
-        analysis_record.workflow_trace_json = workflow_result.trace.model_dump(mode="json")
-        analyses.save(analysis_record)
-
         _report_progress(progress_callback, "saving_application", 90)
-        record_application_analysis(
+
+        analysis_record = finalize_analysis_transaction(
             db,
             request=request,
             current_user=current_user,
@@ -242,49 +255,60 @@ def analyze_job(
             job=job_record,
             analysis=analysis_record,
             application=application_record,
-        )
-        record_audit_event(
-            db,
-            event_type="job.analyzed",
-            user_id=current_user.id,
-            payload={
-                "analysis_id": analysis_record.id,
-                "report_id": analysis_record.id,
-                "resume_id": resume_record.id,
-                "job_id": job_record.id,
-                "source": (
-                    application_record.source_type
-                    if application_record
-                    else "url"
-                    if request.job_url
-                    else "pasted_text"
-                ),
-                "workflow_mode": analysis_record.workflow_mode,
-                "match_score": analysis_record.match_score,
-                "validation_warnings_count": len(report.validation_warnings),
-                "validation_status": report.validation_status.value,
-            },
-        )
-        finalize_analysis_usage(
-            db,
-            analysis_usage,
-            analysis_id=analysis_record.id,
-            report_id=analysis_record.id,
-            workflow_mode=analysis_record.workflow_mode,
+            analysis_usage=analysis_usage,
+            workflow_result=workflow_result,
+            workflow_lease_owner=workflow_lease_owner,
         )
         return _analysis_response(analysis_record)
     except Exception:
-        if analysis_record is not None and analysis_record.status != "completed":
+        analysis_id = analysis_record.id if analysis_record is not None else None
+        db.rollback()
+        lease_allows_failure_write = True
+        if workflow_job_id is not None:
+            try:
+                require_active_analysis_workflow_lease(
+                    db,
+                    workflow_job_id=workflow_job_id,
+                    user_id=current_user.id,
+                    lease_owner=workflow_lease_owner,
+                )
+            except RuntimeError:
+                db.rollback()
+                lease_allows_failure_write = False
+        persisted_analysis = (
+            analyses.get(analysis_id, user_id=current_user.id) if analysis_id is not None else None
+        )
+        if (
+            lease_allows_failure_write
+            and persisted_analysis is not None
+            and persisted_analysis.status != "completed"
+        ):
+            persisted_analysis.status = "failed"
+            persisted_analysis.workflow_mode = "deterministic_fallback"
+            analyses.save(persisted_analysis)
+        elif (
+            lease_allows_failure_write
+            and persisted_analysis is None
+            and analysis_record is not None
+            and workflow_job_id is None
+        ):
             analysis_record.status = "failed"
             analysis_record.workflow_mode = "deterministic_fallback"
             analyses.save(analysis_record)
+        elif workflow_job_id is not None:
+            db.rollback()
         if release_usage_on_failure:
+            persisted_usage = (
+                db.get(UsageEventRecord, analysis_usage.id)
+                if analysis_usage.id is not None
+                else analysis_usage
+            )
             release_usage_reservation(
                 db,
-                analysis_usage,
+                persisted_usage or analysis_usage,
                 runtime_status="failed",
                 metadata={
-                    "analysis_id": analysis_record.id if analysis_record else None,
+                    "analysis_id": analysis_id,
                     "operation_id": workflow_job_id,
                 },
             )

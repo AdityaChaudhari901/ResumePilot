@@ -2,6 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.models import AnalysisRecord, ApplicationRecord, JobRecord, ResumeRecord
+from app.repositories.analyses import AnalysisRepository
 from app.repositories.applications import ApplicationRepository
 from app.repositories.resumes import ResumeRepository
 from app.repositories.tailored_resumes import TailoredResumeRepository
@@ -96,7 +97,7 @@ def validate_application_for_analysis(
     return application
 
 
-def record_application_analysis(
+def stage_application_analysis(
     db: Session,
     *,
     request: JobAnalysisRequest,
@@ -105,9 +106,25 @@ def record_application_analysis(
     job: JobRecord,
     analysis: AnalysisRecord,
     application: ApplicationRecord | None,
-) -> ApplicationItem:
+) -> ApplicationRecord:
     repository = ApplicationRepository(db)
-    record = application or ApplicationRecord(
+    if application is not None and application.id is not None:
+        record = repository.get_for_update(application.id, user_id=current_user.id)
+        if record is None:
+            raise RuntimeError("Application disappeared during analysis finalization")
+    else:
+        record = repository.get_by_report_id_for_update(
+            analysis.id,
+            user_id=current_user.id,
+        )
+    if record is not None and _linked_to_newer_analysis(
+        db,
+        record,
+        analysis=analysis,
+        user_id=current_user.id,
+    ):
+        return record
+    record = record or ApplicationRecord(
         user_id=current_user.id,
         source_type=(
             JobSourceType.url.value if request.job_url else JobSourceType.pasted_text.value
@@ -138,25 +155,28 @@ def record_application_analysis(
     record.analysis_id = analysis.id
     record.report_id = analysis.id
     record.match_score = analysis.match_score
-    if record.id is None:
-        repository.add(record)
-    elif previous_report_id != analysis.id:
+    if record.id is not None and previous_report_id != analysis.id:
         TailoredResumeRepository(db).delete_by_application_id(record.id, user_id=current_user.id)
-    saved = repository.save(record)
-    record_audit_event(
-        db,
-        event_type="application.analyzed",
-        user_id=current_user.id,
-        payload={
-            "application_id": saved.id,
-            "resume_id": resume.id,
-            "job_id": job.id,
-            "analysis_id": analysis.id,
-            "report_id": analysis.id,
-            "match_score": analysis.match_score,
-        },
+    repository.add(record)
+    return record
+
+
+def _linked_to_newer_analysis(
+    db: Session,
+    application: ApplicationRecord,
+    *,
+    analysis: AnalysisRecord,
+    user_id: int,
+) -> bool:
+    if application.report_id is None or application.report_id == analysis.id:
+        return False
+    linked_analysis = AnalysisRepository(db).get(application.report_id, user_id=user_id)
+    if linked_analysis is None:
+        raise RuntimeError("Application references an analysis that no longer exists")
+    return (linked_analysis.created_at, linked_analysis.id) > (
+        analysis.created_at,
+        analysis.id,
     )
-    return _application_item_from_record(saved)
 
 
 def update_application_status(

@@ -208,6 +208,51 @@ check before committing.
 
 ---
 
+## [ERR-20260710-014] analysis-finalization-partial-commit-reproduction
+
+**Logged**: 2026-07-10T10:21:25Z
+**Priority**: high
+**Status**: resolved
+**Area**: backend
+
+### Summary
+
+Fault-injection and legacy-replay regressions confirmed that analysis completion
+can persist without all linked application, audit, and usage state.
+
+### Error
+
+```text
+Post-application audit failure left a completed analysis committed.
+Completed-analysis replay returned success without recreating its application.
+```
+
+### Context
+
+- A simulated `job.analyzed` audit failure occurred after the current analysis
+  and application commits.
+- A completed durable analysis was replayed after its downstream application and
+  analysis audit events were removed.
+- Both tests intentionally fail against the pre-fix implementation.
+
+### Suggested Fix
+
+Stage completed analysis state, application linkage, idempotent analysis audit
+events, and usage settlement in one transaction. On completed-analysis replay,
+run the same finalizer before returning.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/app/services/analysis_service.py, Backend/app/services/application_service.py, Backend/tests/test_workflow_jobs.py
+
+### Resolution
+
+- **Resolved**: 2026-07-10T10:40:00Z
+- **Notes**: One row-locked finalizer now commits analysis, application, audits, and usage together; replay, post-commit crash, supersession, stale-worker, OpenClaw, and PostgreSQL concurrency gates pass.
+
+---
+
 ## [ERR-20260710-008] langgraph-tables-crossed-alembic-ownership-boundary
 
 **Logged**: 2026-07-10T08:48:01Z
@@ -531,5 +576,84 @@ post-deletion absence assertions.
 
 - **Resolved**: 2026-07-10T08:00:00Z
 - **Notes**: Updated the focused assertions to compare against stripped input.
+
+---
+
+## [ERR-20260710-015] zsh-health-check-reserved-status-variable
+
+**Logged**: 2026-07-10T10:37:17Z
+**Priority**: low
+**Status**: resolved
+**Area**: infra
+
+### Summary
+
+The Compose health polling wrapper assigned to zsh's read-only `status` variable.
+
+### Error
+
+```text
+zsh:1: read-only variable: status
+```
+
+### Context
+
+- The backend and worker containers had restarted successfully.
+- Only the follow-up polling command failed before issuing health requests.
+
+### Suggested Fix
+
+Use a non-reserved variable such as `health_state` in zsh automation.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: docker-compose.yml
+
+### Resolution
+
+- **Resolved**: 2026-07-10T10:37:17Z
+- **Notes**: Reran the health poll with `health_state`; no application change was required.
+
+---
+
+## [ERR-20260710-016] playwright-started-with-incomplete-next-build
+
+**Logged**: 2026-07-10T10:39:00Z
+**Priority**: medium
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The first Playwright release-gate run timed out because its interrupted frontend build left `.next` without `BUILD_ID`.
+
+### Error
+
+```text
+Error: Timed out waiting 120000ms from config.webServer.
+Error: Could not find a production build in the '.next' directory.
+```
+
+### Context
+
+- The temporary FastAPI E2E server reached healthy state.
+- A direct `next start` reproduced the missing production-build marker.
+- No Playwright test had started, so this was a server-artifact failure rather than a product assertion failure.
+
+### Suggested Fix
+
+Regenerate the production build and confirm `.next/BUILD_ID` before rerunning the browser gate.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/playwright.config.ts, Frontend/package.json
+- See Also: ERR-20260710-001
+
+### Resolution
+
+- **Resolved**: 2026-07-10T10:40:00Z
+- **Notes**: A clean `npm run build` recreated `BUILD_ID`; the next Playwright run passed all 12 tests.
 
 ---

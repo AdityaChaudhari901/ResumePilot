@@ -15,10 +15,30 @@ class ApplicationRepository:
             .limit(1)
         )
 
+    def get_for_update(self, application_id: int, *, user_id: int) -> ApplicationRecord | None:
+        return self.db.scalar(
+            select(ApplicationRecord)
+            .where(ApplicationRecord.id == application_id, ApplicationRecord.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+            .limit(1)
+        )
+
     def get_by_report_id(self, report_id: int, *, user_id: int) -> ApplicationRecord | None:
         return self.db.scalar(
             select(ApplicationRecord)
             .where(ApplicationRecord.report_id == report_id, ApplicationRecord.user_id == user_id)
+            .limit(1)
+        )
+
+    def get_by_report_id_for_update(
+        self, report_id: int, *, user_id: int
+    ) -> ApplicationRecord | None:
+        return self.db.scalar(
+            select(ApplicationRecord)
+            .where(ApplicationRecord.report_id == report_id, ApplicationRecord.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
             .limit(1)
         )
 

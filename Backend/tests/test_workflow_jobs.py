@@ -2,9 +2,19 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
-from app.db.models import UsageEventRecord, WorkflowJobRecord
+from app.db.models import (
+    AnalysisRecord,
+    ApplicationRecord,
+    AuditEventRecord,
+    TailoredResumeDraftRecord,
+    UsageEventRecord,
+    WorkflowJobRecord,
+)
+from app.repositories.audit_events import AuditEventRepository
+from app.repositories.workflow_jobs import WorkflowJobRepository
 from app.services.workflow_job_service import (
     _renew_workflow_lease,
+    _update_progress,
     execute_next_workflow_job,
     execute_workflow_job,
 )
@@ -160,6 +170,398 @@ def test_worker_executes_a_queued_analysis_and_exposes_progress_result(
     assert operation["result"]["status"] == "completed"
 
 
+def test_analysis_finalization_rolls_back_and_retry_converges(
+    client,
+    monkeypatch,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-finalization-rollback",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    original_add = AuditEventRepository.add
+
+    def fail_job_audit(repository, record):
+        if record.event_type == "job.analyzed":
+            raise RuntimeError("simulated post-application finalization failure")
+        return original_add(repository, record)
+
+    monkeypatch.setattr(AuditEventRepository, "add", fail_job_audit)
+    with client.app.state.session_factory() as db:
+        retry = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="fault-worker",
+        )
+
+    assert retry.status == "retry_scheduled"
+    with client.app.state.session_factory() as db:
+        analyses = list(
+            db.scalars(select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == queued["id"]))
+        )
+        assert not any(analysis.status == "completed" for analysis in analyses)
+        assert not list(
+            db.scalars(select(ApplicationRecord).where(ApplicationRecord.user_id == retry.user_id))
+        )
+        assert _analysis_audit_counts(db, user_id=retry.user_id) == {
+            "application.analyzed": 0,
+            "job.analyzed": 0,
+        }
+        usage = db.get(UsageEventRecord, retry.usage_event_id)
+        assert usage is not None
+        assert usage.state == "reserved"
+
+    monkeypatch.setattr(AuditEventRepository, "add", original_add)
+    with client.app.state.session_factory() as db:
+        retry = db.get(WorkflowJobRecord, queued["id"])
+        assert retry is not None
+        retry.available_at = datetime.now(UTC) - timedelta(seconds=1)
+        db.commit()
+        settled = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="recovery-worker",
+        )
+
+    assert settled.status == "succeeded"
+    _assert_complete_analysis_finalization(client, operation_id=queued["id"])
+
+
+def test_post_finalizer_job_save_failure_replays_without_duplicate_side_effects(
+    client,
+    monkeypatch,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-post-finalizer-crash",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    original_save = WorkflowJobRepository.save
+    failed_once = False
+
+    def fail_first_success_save(repository, record):
+        nonlocal failed_once
+        if record.status == "succeeded" and not failed_once:
+            failed_once = True
+            raise RuntimeError("simulated crash before operation success commit")
+        return original_save(repository, record)
+
+    monkeypatch.setattr(WorkflowJobRepository, "save", fail_first_success_save)
+    with client.app.state.session_factory() as db:
+        retry = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="post-finalizer-fault-worker",
+        )
+
+    assert retry.status == "retry_scheduled"
+    _assert_complete_analysis_finalization(client, operation_id=queued["id"])
+    with client.app.state.session_factory() as db:
+        operation = db.get(WorkflowJobRecord, queued["id"])
+        assert operation is not None
+        usage = db.get(UsageEventRecord, operation.usage_event_id)
+        assert usage is not None
+        first_settled_at = usage.settled_at
+        assert first_settled_at is not None
+
+    monkeypatch.setattr(WorkflowJobRepository, "save", original_save)
+    with client.app.state.session_factory() as db:
+        retry = db.get(WorkflowJobRecord, queued["id"])
+        assert retry is not None
+        retry.available_at = datetime.now(UTC) - timedelta(seconds=1)
+        db.commit()
+        settled = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="post-finalizer-recovery-worker",
+        )
+
+    assert settled.status == "succeeded"
+    _assert_complete_analysis_finalization(client, operation_id=queued["id"])
+    with client.app.state.session_factory() as db:
+        operation = db.get(WorkflowJobRecord, queued["id"])
+        assert operation is not None
+        usage = db.get(UsageEventRecord, operation.usage_event_id)
+        assert usage is not None
+        assert usage.settled_at == first_settled_at
+
+
+def test_completed_analysis_replay_repairs_missing_downstream_state(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-finalization-repair",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    with client.app.state.session_factory() as db:
+        first = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="initial-worker",
+        )
+    assert first.status == "succeeded"
+
+    with client.app.state.session_factory() as db:
+        operation = db.get(WorkflowJobRecord, queued["id"])
+        assert operation is not None
+        analysis = db.scalar(
+            select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == operation.id)
+        )
+        assert analysis is not None
+        application = db.scalar(
+            select(ApplicationRecord).where(
+                ApplicationRecord.user_id == operation.user_id,
+                ApplicationRecord.report_id == analysis.id,
+            )
+        )
+        assert application is not None
+        db.delete(application)
+        for audit in db.scalars(
+            select(AuditEventRecord).where(
+                AuditEventRecord.user_id == operation.user_id,
+                AuditEventRecord.event_type.in_({"application.analyzed", "job.analyzed"}),
+            )
+        ):
+            db.delete(audit)
+        usage = db.get(UsageEventRecord, operation.usage_event_id)
+        assert usage is not None
+        usage.state = "reserved"
+        usage.settled_at = None
+        usage.metadata_json = {"status": "reserved"}
+        operation.status = "retry_scheduled"
+        operation.stage = "retry_scheduled"
+        operation.available_at = datetime.now(UTC) - timedelta(seconds=1)
+        operation.analysis_id = None
+        operation.result_json = {}
+        operation.finished_at = None
+        db.commit()
+
+        repaired = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="repair-worker",
+        )
+
+    assert repaired.status == "succeeded"
+    _assert_complete_analysis_finalization(client, operation_id=queued["id"])
+
+    with client.app.state.session_factory() as db:
+        operation = db.get(WorkflowJobRecord, queued["id"])
+        assert operation is not None
+        usage = db.get(UsageEventRecord, operation.usage_event_id)
+        assert usage is not None
+        first_settled_at = usage.settled_at
+        assert first_settled_at is not None
+        operation.status = "retry_scheduled"
+        operation.stage = "retry_scheduled"
+        operation.available_at = datetime.now(UTC) - timedelta(seconds=1)
+        operation.finished_at = None
+        db.commit()
+        replayed = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="replay-worker",
+        )
+
+    assert replayed.status == "succeeded"
+    _assert_complete_analysis_finalization(client, operation_id=queued["id"])
+    with client.app.state.session_factory() as db:
+        replayed_operation = db.get(WorkflowJobRecord, queued["id"])
+        assert replayed_operation is not None
+        replayed_usage = db.get(UsageEventRecord, replayed_operation.usage_event_id)
+        assert replayed_usage is not None
+        assert replayed_usage.settled_at == first_settled_at
+
+
+def test_older_completed_replay_preserves_newer_application_analysis_and_draft(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    preview = client.post("/jobs/preview", json={"job_text": sample_job_text})
+    assert preview.status_code == 200
+    draft_response = client.post(
+        "/applications",
+        json={
+            "source_type": "pasted_text",
+            "job_text": sample_job_text,
+            "reviewed_job_text": sample_job_text,
+            "reviewed_job_profile": preview.json()["profile"],
+            "resume_id": resume_id,
+        },
+    )
+    assert draft_response.status_code == 201
+    application_id = draft_response.json()["id"]
+    payload = {"resume_id": resume_id, "application_id": application_id}
+
+    first_response, first_queued = submit_analysis(
+        client,
+        payload,
+        idempotency_key="analysis-superseded-first",
+    )
+    assert first_response.status_code == 202
+    assert first_queued is not None
+    with client.app.state.session_factory() as db:
+        first = execute_workflow_job(
+            db,
+            first_queued["id"],
+            settings=settings,
+            worker_id="superseded-first-worker",
+        )
+    assert first.status == "succeeded"
+
+    second_response, second_queued = submit_analysis(
+        client,
+        payload,
+        idempotency_key="analysis-superseded-second",
+    )
+    assert second_response.status_code == 202
+    assert second_queued is not None
+    with client.app.state.session_factory() as db:
+        second = execute_workflow_job(
+            db,
+            second_queued["id"],
+            settings=settings,
+            worker_id="superseded-second-worker",
+        )
+        assert second.status == "succeeded"
+        second_analysis = db.scalar(
+            select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == second_queued["id"])
+        )
+        application = db.get(ApplicationRecord, application_id)
+        assert second_analysis is not None
+        assert application is not None
+        assert application.report_id == second_analysis.id
+        newer_draft = TailoredResumeDraftRecord(
+            user_id=application.user_id,
+            application_id=application.id,
+            report_id=second_analysis.id,
+            status="reviewed",
+            items_json=[],
+        )
+        db.add(newer_draft)
+        db.commit()
+        newer_draft_id = newer_draft.id
+        second_analysis_id = second_analysis.id
+
+    with client.app.state.session_factory() as db:
+        old_operation = db.get(WorkflowJobRecord, first_queued["id"])
+        assert old_operation is not None
+        old_operation.status = "retry_scheduled"
+        old_operation.stage = "retry_scheduled"
+        old_operation.available_at = datetime.now(UTC) - timedelta(seconds=1)
+        old_operation.finished_at = None
+        db.commit()
+        replayed = execute_workflow_job(
+            db,
+            first_queued["id"],
+            settings=settings,
+            worker_id="superseded-replay-worker",
+        )
+
+    assert replayed.status == "succeeded"
+    with client.app.state.session_factory() as db:
+        application = db.get(ApplicationRecord, application_id)
+        newer_draft = db.get(TailoredResumeDraftRecord, newer_draft_id)
+        assert application is not None
+        assert application.analysis_id == second_analysis_id
+        assert application.report_id == second_analysis_id
+        assert newer_draft is not None
+        assert newer_draft.report_id == second_analysis_id
+        assert _analysis_audit_counts(db, user_id=application.user_id) == {
+            "application.analyzed": 2,
+            "job.analyzed": 2,
+        }
+
+
+def test_stale_worker_cannot_overwrite_reclaimed_workflow_state(
+    client,
+    monkeypatch,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-stale-worker-fence",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    def simulate_reclaim(*_args, **_kwargs):
+        with client.app.state.session_factory() as replacement_db:
+            replacement = replacement_db.get(WorkflowJobRecord, queued["id"])
+            assert replacement is not None
+            replacement.status = "running"
+            replacement.lease_owner = "replacement-worker"
+            replacement.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+            replacement_db.commit()
+        raise RuntimeError("stale worker resumed after lease reassignment")
+
+    monkeypatch.setattr(
+        "app.services.workflow_job_service.analyze_job",
+        simulate_reclaim,
+    )
+    with client.app.state.session_factory() as db:
+        observed = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="stale-worker",
+        )
+
+    assert observed.status == "running"
+    assert observed.lease_owner == "replacement-worker"
+    with client.app.state.session_factory() as db:
+        persisted = db.get(WorkflowJobRecord, queued["id"])
+        usage = db.get(UsageEventRecord, observed.usage_event_id)
+        assert persisted is not None
+        assert persisted.status == "running"
+        assert persisted.stage == "starting"
+        assert persisted.lease_owner == "replacement-worker"
+        assert persisted.error_code is None
+        assert usage is not None
+        assert usage.state == "reserved"
+
+
 def test_worker_reaps_expired_cancel_request_without_consuming_quota(
     client,
     settings,
@@ -280,6 +682,55 @@ def test_worker_heartbeat_renews_only_the_current_owner_lease(
     assert record.lease_expires_at.replace(tzinfo=UTC) == heartbeat_at + timedelta(seconds=60)
 
 
+def test_worker_progress_updates_only_the_current_lease_owner(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-progress-owner-fence",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    with client.app.state.session_factory() as db:
+        record = db.get(WorkflowJobRecord, queued["id"])
+        assert record is not None
+        record.status = "running"
+        record.stage = "replacement_started"
+        record.progress_percent = 35
+        record.lease_owner = "replacement-worker"
+        record.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
+        db.commit()
+
+        _update_progress(
+            db,
+            record.id,
+            stage="stale_progress",
+            progress=80,
+            lease_owner="stale-worker",
+        )
+        db.refresh(record)
+        assert record.stage == "replacement_started"
+        assert record.progress_percent == 35
+
+        _update_progress(
+            db,
+            record.id,
+            stage="current_progress",
+            progress=80,
+            lease_owner="replacement-worker",
+        )
+        db.refresh(record)
+        assert record.stage == "current_progress"
+        assert record.progress_percent == 80
+
+
 def _upload_resume(client, resume_text: str) -> int:
     response = client.post(
         "/resumes/upload",
@@ -287,3 +738,49 @@ def _upload_resume(client, resume_text: str) -> int:
     )
     assert response.status_code == 201
     return response.json()["resume_id"]
+
+
+def _assert_complete_analysis_finalization(client, *, operation_id: str) -> None:
+    with client.app.state.session_factory() as db:
+        operation = db.get(WorkflowJobRecord, operation_id)
+        assert operation is not None
+        analyses = list(
+            db.scalars(select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == operation_id))
+        )
+        assert len(analyses) == 1
+        analysis = analyses[0]
+        assert analysis.status == "completed"
+        applications = list(
+            db.scalars(
+                select(ApplicationRecord).where(
+                    ApplicationRecord.user_id == operation.user_id,
+                    ApplicationRecord.report_id == analysis.id,
+                )
+            )
+        )
+        assert len(applications) == 1
+        assert applications[0].analysis_id == analysis.id
+        assert _analysis_audit_counts(db, user_id=operation.user_id) == {
+            "application.analyzed": 1,
+            "job.analyzed": 1,
+        }
+        usage = db.get(UsageEventRecord, operation.usage_event_id)
+        assert usage is not None
+        assert usage.state == "consumed"
+        assert usage.metadata_json["analysis_id"] == analysis.id
+        assert usage.metadata_json["report_id"] == analysis.id
+
+
+def _analysis_audit_counts(db, *, user_id: int) -> dict[str, int]:
+    records = list(
+        db.scalars(
+            select(AuditEventRecord).where(
+                AuditEventRecord.user_id == user_id,
+                AuditEventRecord.event_type.in_({"application.analyzed", "job.analyzed"}),
+            )
+        )
+    )
+    return {
+        event_type: sum(record.event_type == event_type for record in records)
+        for event_type in ("application.analyzed", "job.analyzed")
+    }

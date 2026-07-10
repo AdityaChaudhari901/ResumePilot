@@ -77,28 +77,29 @@ route/BFF -> use-case coordinator -> domain services -> repositories
 
 Repositories currently expose committing `save()` methods, while routes and
 services also commit. A request-scoped unit-of-work, introduced one use case at
-a time, would prevent partial finalization without a large rewrite. Start with
-analysis finalization and privacy deletion because the audit found concrete
-cross-boundary defects there.
+a time, prevents partial finalization without a large rewrite. Analysis now has
+that boundary; privacy deletion is the next concrete cross-store candidate.
 
 ## Correctness and data findings
 
-### DATA-01 — P1 — Analysis replay can converge to incomplete state
+### DATA-01 — P1, fixed after this audit — Analysis replay was incomplete
 
-- **Evidence:** `Backend/app/services/analysis_service.py:136-150,226-275`,
-  `Backend/app/services/application_service.py:99-159`, and
-  `Backend/app/services/workflow_job_service.py:603-620`.
-- **Verified behavior:** the analysis is committed as `completed` before the
-  application link, application/job audit events, and usage settlement.
-  Fault-injecting immediately after report persistence produced a retry; that
-  retry succeeded with one analysis, zero applications, and consumed usage.
-- **Impact:** users can be charged quota and receive an operation success while
-  the application workspace has no corresponding record.
-- **Remedy:** create an idempotent `finalize_analysis` use case. On every replay,
-  ensure exactly one application link, stable-key audit records, one usage
-  settlement, and one workflow result in a single PostgreSQL transaction.
-- **Validation:** inject a failure after every persistence boundary and prove
-  replay converges to exactly one of each record.
+- **Original evidence:** analysis, application, audit, and usage completion used
+  separate commits, so fault injection could persist a completed analysis with
+  missing downstream state.
+- **Change:** `Backend/app/services/analysis_finalization_service.py:23-123`
+  now validates tenant/report/dependency/workflow correlation, locks the active
+  workflow, analysis, application, and usage rows in a stable order, stages both
+  analysis audit events idempotently, and performs one business commit. Completed
+  replays run this same finalizer before returning.
+- **Concurrency hardening:** stale workers cannot publish progress, failure, or
+  terminal state after lease reassignment; an older completed replay cannot
+  replace a newer application analysis or delete its tailored draft.
+- **Validation:** SQLite tests inject failure inside finalization and immediately
+  after its commit, repair deleted downstream state, replay repeatedly without
+  changing `settled_at`, preserve a superseding draft, and fence a stale worker.
+  The PostgreSQL gate concurrently finalizes the same completed analysis and
+  requires one application, one event of each type, and one consumed reservation.
 
 ### DATA-02 — P1, fixed in this batch — Subscription state was not trusted
 

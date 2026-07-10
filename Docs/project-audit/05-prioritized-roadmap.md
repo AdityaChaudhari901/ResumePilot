@@ -7,6 +7,23 @@ effort, not calendar promises.
 
 ## Completed in the 2026-07-10 audit batch
 
+### Atomic, replay-repairing analysis finalization
+
+- **Outcome:** every completed analysis converges to one coherent application
+  result and one quota settlement after a fault or replay.
+- **Scope:** one row-locked business finalizer, idempotent analysis audits,
+  completed-state repair, supersession protection, and lease-owner fencing.
+- **Dependencies:** none; no schema or dependency migration was required.
+- **Effort:** M.
+- **Risk:** Medium; the core commit boundary and worker terminal path changed.
+- **Definition of done:** failure inside finalization and immediately after its
+  commit both converge; repeated replay does not duplicate records or settlement;
+  older work cannot replace a newer application draft; stale workers cannot
+  publish baseline finalization or terminal operation state.
+- **Success measure:** 148 backend tests and the PostgreSQL concurrent-finalizer
+  gate pass, with one application, one event of each type, and one consumed usage
+  reservation for the tested operation.
+
 ### Fail-closed paid entitlements and active reservations
 
 - **Outcome:** inactive paid rows cannot consume premium/live-AI privileges;
@@ -36,23 +53,7 @@ effort, not calendar promises.
 
 ## Immediate: before launch or next release
 
-### 1. Make analysis finalization atomic and replay-repairing — P1
-
-- **Outcome:** one operation always converges to one complete application result
-  and one quota charge after any retry.
-- **Scope:** `analysis_service.py`, `application_service.py`, audit persistence,
-  usage settlement, workflow finalization, stable idempotency key.
-- **Dependencies:** characterize current application/report semantics; decide
-  audit-event uniqueness representation.
-- **Effort:** M.
-- **Risk:** Medium because commit ownership changes in a core workflow.
-- **Definition of done:** fault injection after every persistence boundary
-  converges to exactly one analysis, application link, audit correlation, usage
-  settlement, and succeeded workflow; no early completed-analysis path skips repair.
-- **Success measure:** zero incomplete-success fixtures across repeated SQLite and
-  PostgreSQL runs; support query can prove correlation by operation ID.
-
-### 2. Correct and version match-score semantics — P1
+### 1. Correct and version match-score semantics — P1
 
 - **Outcome:** score components measure candidate evidence and never match token
   substrings accidentally.
@@ -69,13 +70,13 @@ effort, not calendar promises.
 - **Success measure:** reviewed benchmark passes expected matches, forbidden
   matches, score bands/pairwise order, and evidence confidence.
 
-### 3. Add PostgreSQL workflow integrity tests — P1
+### 2. Add PostgreSQL workflow integrity tests — P1
 
 - **Outcome:** production-only locks, leases, and concurrency behavior are
   verified rather than inferred from SQLite.
 - **Scope:** quota reservation race, approval-versus-cancel, finalization replay,
   privacy tombstone/checkpoint cleanup; repeat-race CI job.
-- **Dependencies:** item 1 finalizer contract and disposable PostgreSQL in CI.
+- **Dependencies:** completed finalizer contract and disposable PostgreSQL in CI.
 - **Effort:** M.
 - **Risk:** Low application risk; moderate CI flake risk if synchronization is poor.
 - **Definition of done:** deterministic barriers replace timing sleeps; each race
@@ -83,7 +84,7 @@ effort, not calendar promises.
 - **Success measure:** repeated CI runs remain green and fail against known-bad
   transaction implementations.
 
-### 4. Close public ingress and runtime privilege gaps — P1
+### 3. Close public ingress and runtime privilege gaps — P1
 
 - **Outcome:** one tenant cannot exhaust shared resources, and one compromised
   runtime does not automatically gain migration/all-tenant privilege.
@@ -98,7 +99,7 @@ effort, not calendar promises.
 - **Success measure:** load/abuse test stays within memory/disk/outbound budgets;
   privilege tests and alerts pass.
 
-### 5. Operationalize worker health, backup, and restore — P1
+### 4. Operationalize worker health, backup, and restore — P1
 
 - **Outcome:** stalled work and data loss become detectable and recoverable.
 - **Scope:** JSON logs, worker heartbeat, queue/dead-letter/provider metrics,
@@ -113,7 +114,7 @@ effort, not calendar promises.
 - **Success measure:** measured detection time and restore time meet the approved
   objectives in a recorded drill.
 
-### 6. Implement durable privacy lifecycle — P1
+### 5. Implement durable privacy lifecycle — P1
 
 - **Outcome:** retention and user deletion complete safely across database,
   checkpoints, artifacts, and identity sessions.
@@ -129,7 +130,7 @@ effort, not calendar promises.
 - **Success measure:** zero eligible records beyond approved deletion lag and
   successful self-service completion without support intervention.
 
-### 7. Define a public deployment and trust package — P1
+### 6. Define a public deployment and trust package — P1
 
 - **Outcome:** reproducible, private-by-default public deployment with rollback
   and accurate customer disclosures.
@@ -144,7 +145,7 @@ effort, not calendar promises.
 - **Success measure:** repeatable deploy/rollback evidence and no undocumented
   public data flow.
 
-### 8. Decide OpenClaw public-launch scope — P1 if included
+### 7. Decide OpenClaw public-launch scope — P1 if included
 
 - **Outcome:** OpenClaw remains useful without bypassing tenant identity,
   durability, idempotency, or usage policy.
@@ -161,13 +162,13 @@ effort, not calendar promises.
 
 ## Near term: next 30 days
 
-### 9. Confirm and reuse resume evidence
+### 8. Confirm and reuse resume evidence
 
 - **Outcome:** repeat users trust parsed facts and start later applications
   without re-uploading.
 - **Scope:** versioned correction overlay, confidence flags, confirmation gate,
   one default resume, version label/last-used, replace/delete flows.
-- **Dependencies:** correction schema and privacy lifecycle item 6.
+- **Dependencies:** correction schema and privacy lifecycle item 5.
 - **Effort:** M–L.
 - **Risk:** Medium; corrections must not fabricate source evidence.
 - **Definition of done:** corrected facts persist, visibly retain provenance,
@@ -175,7 +176,7 @@ effort, not calendar promises.
 - **Success measure:** confirmed-evidence rate, correction rate, second application
   without upload, and reduced extraction-related support reports.
 
-### 10. Simplify the workspace and complete dynamic accessibility
+### 9. Simplify the workspace and complete dynamic accessibility
 
 - **Outcome:** one clear next action with reliable keyboard/screen-reader context.
 - **Scope:** one application rail, developer diagnostics disclosure, evidence
@@ -190,7 +191,7 @@ effort, not calendar promises.
 - **Success measure:** reduced fixture scroll depth and task time, no serious axe
   violations, and successful manual screen-reader beta journey.
 
-### 11. Protect drafts and extend post-application tracking
+### 10. Protect drafts and extend post-application tracking
 
 - **Outcome:** editing work is not lost and ResumePilot remains useful after export.
 - **Scope:** Save/Discard guard then revision-safe autosave, export history,
@@ -205,7 +206,7 @@ effort, not calendar promises.
 - **Success measure:** draft recovery, post-`applied` update rate, applications
   with a next action, and safe re-download completion.
 
-### 12. Add privacy-safe product analytics and pricing research
+### 11. Add privacy-safe product analytics and pricing research
 
 - **Outcome:** activation, retention, outcome, and upgrade decisions use evidence.
 - **Scope:** provider-neutral allowlisted event schema, redaction tests, funnel
@@ -219,13 +220,13 @@ effort, not calendar promises.
 - **Success measure:** validated activation baseline, repeated-use cohort,
   purchase intent, and cost per completed paid live outcome.
 
-### 13. Build billing only after entitlement and price decisions
+### 12. Build billing only after entitlement and price decisions
 
 - **Outcome:** charge and revoke access consistently without deleting user work.
 - **Scope:** product catalog, subscription and event-ledger tables, signed
   idempotent webhooks, out-of-order reducer, hosted checkout/portal, support
   reconciliation, effective entitlements, failed-payment/grace/downgrade tests.
-- **Dependencies:** item 12 evidence; provider, tax/currency, lifecycle, refund,
+- **Dependencies:** item 11 evidence; provider, tax/currency, lifecycle, refund,
   and grace decisions.
 - **Effort:** L.
 - **Risk:** Medium-high financial and support risk.
@@ -237,14 +238,14 @@ effort, not calendar promises.
 
 ## Medium term: 31–90 days
 
-### 14. Scale from measured queue and storage demand
+### 13. Scale from measured queue and storage demand
 
 - **Outcome:** beta growth does not create head-of-line blocking or unbounded
   privacy/storage cost.
 - **Scope:** queue/load benchmark, safe worker replicas, optional export capacity
   isolation, object storage with encryption/lifecycle, batched privacy queries,
   keyset pagination, timestamp migration.
-- **Dependencies:** observability item 5, hosting item 7, measured bottlenecks,
+- **Dependencies:** observability item 4, hosting item 6, measured bottlenecks,
   backup/lifecycle design.
 - **Effort:** L.
 - **Risk:** Medium; infrastructure and data migrations.
@@ -254,7 +255,7 @@ effort, not calendar promises.
 - **Success measure:** p95 queue start/API latency within approved targets,
   bounded memory/query counts, and known storage cost per active user.
 
-### 15. Close the outcome-learning loop
+### 14. Close the outcome-learning loop
 
 - **Outcome:** recommendations improve using voluntary job-search outcomes rather
   than opaque model confidence.
@@ -268,7 +269,7 @@ effort, not calendar promises.
 - **Success measure:** useful completion rate, segment-level calibration insight,
   and fewer verified false-positive/false-negative score cases.
 
-### 16. Evaluate coach/placement workflows only on demand
+### 15. Evaluate coach/placement workflows only on demand
 
 - **Outcome:** avoid premature multi-tenant organization complexity while
   preserving a credible expansion path.

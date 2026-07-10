@@ -15,6 +15,15 @@ class AnalysisRepository:
             .limit(1)
         )
 
+    def get_for_update(self, analysis_id: int, *, user_id: int) -> AnalysisRecord | None:
+        return self.db.scalar(
+            select(AnalysisRecord)
+            .where(AnalysisRecord.id == analysis_id, AnalysisRecord.user_id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+            .limit(1)
+        )
+
     def get_by_workflow_job_id(
         self,
         workflow_job_id: str,
@@ -27,6 +36,23 @@ class AnalysisRepository:
                 AnalysisRecord.workflow_job_id == workflow_job_id,
                 AnalysisRecord.user_id == user_id,
             )
+            .limit(1)
+        )
+
+    def get_by_workflow_job_id_for_update(
+        self,
+        workflow_job_id: str,
+        *,
+        user_id: int,
+    ) -> AnalysisRecord | None:
+        return self.db.scalar(
+            select(AnalysisRecord)
+            .where(
+                AnalysisRecord.workflow_job_id == workflow_job_id,
+                AnalysisRecord.user_id == user_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
             .limit(1)
         )
 
