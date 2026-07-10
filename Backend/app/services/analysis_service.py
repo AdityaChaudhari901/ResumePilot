@@ -30,6 +30,7 @@ from app.schemas.job import (
     JobProfile,
     JobSourceType,
 )
+from app.schemas.match import ScoringVersion
 from app.schemas.report import ApplicationReport, ReportHistoryItem, ReportHistoryResponse
 from app.schemas.resume import ResumeProfile
 from app.services.agent_workflow import run_application_agent_workflow
@@ -41,8 +42,15 @@ from app.services.application_service import validate_application_for_analysis
 from app.services.audit_service import record_audit_event
 from app.services.file_storage import StoredUpload, persist_resume_upload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
-from app.services.matcher import match_resume_to_job
+from app.services.matcher import CURRENT_SCORING_VERSION, match_resume_to_job
+from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import ResumeParseError, extract_resume_text, parse_resume_profile
+from app.services.score_contract_service import (
+    hydrate_report_score_contract,
+    persisted_match_payload,
+    score_contract_from_analysis,
+    stage_analysis_score_contract,
+)
 from app.services.usage_service import (
     release_usage_reservation,
     reserve_analysis_usage,
@@ -125,6 +133,7 @@ def analyze_job(
     analysis_usage: UsageEventRecord | None = None,
     workflow_job_id: str | None = None,
     workflow_lease_owner: str | None = None,
+    scoring_version: ScoringVersion = CURRENT_SCORING_VERSION,
     release_usage_on_failure: bool = True,
     progress_callback: Callable[[str, int], None] | None = None,
 ) -> JobAnalysisResponse:
@@ -221,7 +230,7 @@ def analyze_job(
         job = JobProfile.model_validate(job_record.profile_json)
 
         _report_progress(progress_callback, "matching_evidence", 45)
-        match = match_resume_to_job(resume, job)
+        match = match_resume_to_job(resume, job, scoring_version=scoring_version)
         analysis_record = AnalysisRecord(
             user_id=current_user.id,
             resume_id=resume_record.id,
@@ -229,11 +238,12 @@ def analyze_job(
             workflow_job_id=workflow_job_id,
             status="running",
             match_score=match.score,
-            match_result_json=match.model_dump(mode="json"),
+            match_result_json=persisted_match_payload(match),
             report_json={},
             report_markdown="",
             validation_warnings_json=[],
         )
+        stage_analysis_score_contract(analysis_record, match)
         analyses.add(analysis_record)
         _report_progress(progress_callback, "generating_report", 60)
 
@@ -397,14 +407,16 @@ def get_report(db: Session, report_id: int, current_user: CurrentUser) -> Applic
     analysis = AnalysisRepository(db).get(report_id, user_id=current_user.id)
     if not analysis:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    return ApplicationReport.model_validate(analysis.report_json)
+    report = ApplicationReport.model_validate(analysis.report_json)
+    return hydrate_report_score_contract(analysis, report)
 
 
 def get_report_markdown(db: Session, report_id: int, current_user: CurrentUser) -> str:
     analysis = AnalysisRepository(db).get(report_id, user_id=current_user.id)
     if not analysis:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    return analysis.report_markdown
+    report = ApplicationReport.model_validate(analysis.report_json)
+    return report_to_markdown(hydrate_report_score_contract(analysis, report))
 
 
 def ensure_report_access(db: Session, report_id: int, current_user: CurrentUser) -> None:
@@ -579,10 +591,13 @@ def _workflow_trace_from_record(analysis: AnalysisRecord) -> AgentWorkflowTrace:
 
 
 def _analysis_response(analysis: AnalysisRecord) -> JobAnalysisResponse:
+    scoring_version, score_status, _breakdown = score_contract_from_analysis(analysis)
     return JobAnalysisResponse(
         analysis_id=analysis.id,
         report_id=analysis.id,
         match_score=analysis.match_score,
+        scoring_version=scoring_version,
+        score_status=score_status,
         status=analysis.status,
     )
 
@@ -598,6 +613,7 @@ def _report_progress(
 
 def _report_history_item_from_record(analysis: AnalysisRecord) -> ReportHistoryItem:
     counts = _report_history_counts_from_record(analysis)
+    scoring_version, score_status, _breakdown = score_contract_from_analysis(analysis)
     return ReportHistoryItem(
         report_id=analysis.id,
         analysis_id=analysis.id,
@@ -608,6 +624,8 @@ def _report_history_item_from_record(analysis: AnalysisRecord) -> ReportHistoryI
         resume_candidate_name=analysis.resume.candidate_name,
         status=analysis.status,
         match_score=analysis.match_score,
+        scoring_version=scoring_version,
+        score_status=score_status,
         workflow_mode=analysis.workflow_mode,
         validation_warnings_count=counts["validation_warnings"],
         matched_skills_count=counts["matched_skills"],

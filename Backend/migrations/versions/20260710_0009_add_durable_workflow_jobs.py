@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +22,10 @@ down_revision: str | Sequence[str] | None = "20260710_0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+ANALYSIS_SCORE_ROLLBACK_TABLE = "score_contract_0010_analysis_rollback"
+WORKFLOW_SCORE_ROLLBACK_TABLE = "score_contract_0010_workflow_rollback"
+ALLOW_DESTRUCTIVE_SCORE_ROLLBACK_ENV = "RESUMEPILOT_ALLOW_DESTRUCTIVE_SCORE_ROLLBACK"
+
 
 def upgrade() -> None:
     _add_application_source_snapshots()
@@ -30,6 +35,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _reject_score_provenance_loss()
+    _drop_score_rollback_sidecars()
+
     with op.batch_alter_table("analyses") as batch_op:
         batch_op.drop_constraint("fk_analyses_workflow_job_id", type_="foreignkey")
         batch_op.drop_constraint("uq_analyses_workflow_job_id", type_="unique")
@@ -53,12 +61,12 @@ def downgrade() -> None:
         batch_op.drop_column("reservation_key")
         batch_op.drop_column("state")
 
-    bind = op.get_bind()
     applications = sa.table(
         "applications",
         sa.column("id", sa.Integer()),
         sa.column("source_url", sa.Text()),
     )
+    bind = op.get_bind()
     bind.execute(
         sa.update(applications)
         .where(applications.c.source_url.is_(None))
@@ -70,6 +78,53 @@ def downgrade() -> None:
         batch_op.drop_column("source_content_hash")
         batch_op.drop_column("reviewed_job_text")
         batch_op.drop_column("source_type")
+
+
+def _reject_score_provenance_loss() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    evidence_v2_rows = 0
+    for table_name, key_column in (
+        (ANALYSIS_SCORE_ROLLBACK_TABLE, "analysis_id"),
+        (WORKFLOW_SCORE_ROLLBACK_TABLE, "workflow_job_id"),
+    ):
+        if not inspector.has_table(table_name):
+            continue
+        rollback_table = sa.table(
+            table_name,
+            sa.column(key_column),
+            sa.column("scoring_version", sa.String()),
+        )
+        evidence_v2_rows += int(
+            bind.scalar(
+                sa.select(sa.func.count())
+                .select_from(rollback_table)
+                .where(rollback_table.c.scoring_version == "evidence_v2")
+            )
+            or 0
+        )
+
+    destructive_override = os.getenv(ALLOW_DESTRUCTIVE_SCORE_ROLLBACK_ENV, "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if evidence_v2_rows and not destructive_override:
+        raise RuntimeError(
+            "Cannot downgrade below 20260710_0009 while evidence_v2 rollback provenance "
+            f"exists; restore 20260710_0010 or set {ALLOW_DESTRUCTIVE_SCORE_ROLLBACK_ENV}=true "
+            "only after taking a verified database backup"
+        )
+
+
+def _drop_score_rollback_sidecars() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if inspector.has_table(WORKFLOW_SCORE_ROLLBACK_TABLE):
+        op.drop_table(WORKFLOW_SCORE_ROLLBACK_TABLE)
+    if inspector.has_table(ANALYSIS_SCORE_ROLLBACK_TABLE):
+        op.drop_table(ANALYSIS_SCORE_ROLLBACK_TABLE)
 
 
 def _add_application_source_snapshots() -> None:

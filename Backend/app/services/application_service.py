@@ -155,6 +155,8 @@ def stage_application_analysis(
     record.analysis_id = analysis.id
     record.report_id = analysis.id
     record.match_score = analysis.match_score
+    record.scoring_version = analysis.scoring_version
+    record.score_status = analysis.score_status
     if record.id is not None and previous_report_id != analysis.id:
         TailoredResumeRepository(db).delete_by_application_id(record.id, user_id=current_user.id)
     repository.add(record)
@@ -254,6 +256,8 @@ def _application_item_from_record(record: ApplicationRecord) -> ApplicationItem:
         analysis_id=record.analysis_id,
         report_id=record.report_id,
         match_score=record.match_score,
+        scoring_version=record.scoring_version,
+        score_status=record.score_status,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )

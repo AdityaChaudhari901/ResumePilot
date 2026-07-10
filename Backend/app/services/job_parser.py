@@ -23,6 +23,81 @@ REQUIRED_MARKERS = ("required", "requirements", "must have", "you have", "need t
 PREFERRED_MARKERS = ("preferred", "nice to have", "bonus", "plus", "good to have")
 RESPONSIBILITY_MARKERS = ("responsibilities", "what you will do", "you will", "role includes")
 BENEFIT_MARKERS = ("benefits", "perks", "compensation")
+EXPERIENCE_SECTION_MARKERS = (
+    "experience requirements",
+    "minimum qualifications",
+    "qualifications",
+    "requirements",
+    "what you bring",
+    "what we're looking for",
+    "what we are looking for",
+    "who you are",
+)
+NON_REQUIREMENT_SECTION_MARKERS = (
+    "about us",
+    "about the company",
+    "company overview",
+    *RESPONSIBILITY_MARKERS,
+    *BENEFIT_MARKERS,
+)
+EXPLICIT_EXPERIENCE_REQUIREMENT_MARKERS = (
+    "at least",
+    "at most",
+    "minimum",
+    "maximum",
+    "up to",
+    "less than",
+    "fewer than",
+    "no more than",
+    "required",
+    "must have",
+    "should have",
+    "need to have",
+    "needs to have",
+    "you have",
+    "you bring",
+)
+EXPERIENCE_BETWEEN_PATTERN = re.compile(
+    r"\bbetween\s+(?P<minimum>\d+(?:\.\d+)?)\s+and\s+"
+    r"(?P<maximum>\d+(?:\.\d+)?)\s*(?:years?|yrs?)\b",
+    re.IGNORECASE,
+)
+EXPERIENCE_UPPER_BOUND_PATTERN = re.compile(
+    r"\b(?:(?:at\s+most|up\s+to|less\s+than|fewer\s+than|no\s+more\s+than|"
+    r"max(?:imum)?(?:\s+of)?)\s+\d+(?:\.\d+)?\s*(?:years?|yrs?)|"
+    r"\d+(?:\.\d+)?\s*(?:years?|yrs?)"
+    r"(?:\s+(?:of\s+)?(?:[a-z-]+\s+){0,5}experience)?"
+    r"\s+(?:or\s+less|max(?:imum)?))\b",
+    re.IGNORECASE,
+)
+EXPERIENCE_YEARS_PATTERN = re.compile(
+    r"\b(?P<claim>\d+(?:\.\d+)?\s*\+?\s*"
+    r"(?:(?:-|–|—|to)\s*\d+(?:\.\d+)?)?)\)?\s*(?:years?|yrs?)\b",
+    re.IGNORECASE,
+)
+COLLECTIVE_EXPERIENCE_PATTERN = re.compile(
+    r"\b(?:combined|collective|collectively)\b|"
+    r"\b(?:team|group|company|organization|department|colleagues?)\b"
+    r"[^.!?]{0,40}\b(?:with|bringing|brings|has|have)\b|"
+    r"\b(?:mentored|managed|led|supervised|collaborated\s+with)\s+"
+    r"(?:engineers?|applicants?|consultants?)\s+with\b|"
+    r"\b(?:managing|mentoring|supporting|leading|supervising|collaborating\s+with)\s+"
+    r"(?:[a-z-]+\s+){0,2}(?:engineers?|developers?|customers?|clients?|consultants?)\s+"
+    r"(?:with|bringing|who\s+have)\b|"
+    r"\b(?:years?|yrs?)\b[^.!?]{0,50}\b(?:across|among)\s+"
+    r"(?:(?:our|the)\s+)?(?:engineering\s+)?"
+    r"(?:team|company|organization|department|consultants?|engineers?|applicants?)\b",
+    re.IGNORECASE,
+)
+ENTRY_LEVEL_ROLE_PATTERN = re.compile(
+    r"\b(?:fresher|entry[- ]level|junior|intern(?:ship)?)\b",
+    re.IGNORECASE,
+)
+SENIOR_ROLE_PATTERN = re.compile(
+    r"\b(?:senior|lead|principal|staff|manager|head|director)\b",
+    re.IGNORECASE,
+)
+EXPERIENCE_REQUIREMENT_UNCLEAR = "requirement unclear"
 MIN_FETCHED_TEXT_CHARS = 40
 MAX_FETCHED_JOB_BYTES = 2 * 1024 * 1024
 MAX_JOB_REDIRECTS = 3
@@ -288,7 +363,7 @@ def parse_job_profile(
     lines = split_non_empty_lines(text)
     company_name = company or _extract_company(lines)
     role_title = role or _extract_role(lines)
-    experience_level = _extract_experience_level(text)
+    experience_level = _extract_experience_level(lines, role_title=role_title)
     required, preferred, keyword_skills = _extract_job_skills(lines)
     responsibilities = _extract_section_items(
         lines, RESPONSIBILITY_MARKERS, stop_markers=REQUIRED_MARKERS + BENEFIT_MARKERS
@@ -381,13 +456,115 @@ def _extract_role(lines: list[str]) -> str | None:
     return None
 
 
-def _extract_experience_level(text: str) -> str | None:
-    match = re.search(r"(\d+\s*\+?\s*(?:-|to)?\s*\d*)\s+years?", text, flags=re.IGNORECASE)
-    if match:
-        return f"{match.group(1).replace(' ', '')} years"
-    if re.search(r"\b(fresher|entry[- ]level|junior|intern)\b", text, flags=re.IGNORECASE):
+def _extract_experience_level(lines: list[str], *, role_title: str | None) -> str | None:
+    claims: set[str] = set()
+    section_context = "neutral"
+    saw_experience_requirement = False
+    for line in lines:
+        lowered = line.casefold()
+        declares_preferred = any(marker in lowered for marker in PREFERRED_MARKERS)
+        if declares_preferred:
+            section_context = "preferred"
+        elif any(marker in lowered for marker in NON_REQUIREMENT_SECTION_MARKERS):
+            section_context = "non_requirement"
+        elif any(marker in lowered for marker in EXPERIENCE_SECTION_MARKERS):
+            section_context = "required"
+
+        for clause in re.split(r"\s*;\s*", line):
+            lowered_clause = clause.casefold()
+            clause_declares_preferred = any(
+                marker in lowered_clause for marker in PREFERRED_MARKERS
+            )
+            if clause_declares_preferred:
+                continue
+            is_explicit_requirement = _has_explicit_experience_requirement(lowered_clause)
+            inherited_non_requirement = section_context in {"preferred", "non_requirement"}
+            if inherited_non_requirement and not is_explicit_requirement:
+                continue
+            if COLLECTIVE_EXPERIENCE_PATTERN.search(lowered_clause):
+                if section_context == "required" or is_explicit_requirement:
+                    saw_experience_requirement = True
+                continue
+            if not _is_candidate_experience_requirement(
+                lowered_clause,
+                in_requirements=section_context == "required",
+            ):
+                continue
+            saw_experience_requirement = True
+            claims.update(_experience_claims(clause))
+
+    if len(claims) == 1:
+        return f"{claims.pop()} years"
+    if len(claims) > 1 or saw_experience_requirement:
+        return EXPERIENCE_REQUIREMENT_UNCLEAR
+
+    if _is_entry_level_role(role_title):
         return "0-2 years"
     return None
+
+
+def _is_candidate_experience_requirement(line: str, *, in_requirements: bool) -> bool:
+    if not re.search(r"\b(?:years?|yrs?)\b", line):
+        return False
+    if COLLECTIVE_EXPERIENCE_PATTERN.search(line):
+        return False
+    has_experience_word = "experience" in line
+    starts_with_experience = bool(re.match(r"^\s*(?:[-*•]\s*)?experience\s*:", line))
+    starts_with_tenure = bool(
+        re.match(
+            r"^\s*(?:[-*•]\s*)?(?:over\s+|more\s+than\s+)?\d+(?:\.\d+)?\s*\+?\s*"
+            r"(?:years?|yrs?)\b",
+            line,
+        )
+    )
+    return has_experience_word and (
+        starts_with_experience
+        or starts_with_tenure
+        or _has_explicit_experience_requirement(line)
+        or in_requirements
+    )
+
+
+def _has_explicit_experience_requirement(line: str) -> bool:
+    has_explicit_marker = any(marker in line for marker in EXPLICIT_EXPERIENCE_REQUIREMENT_MARKERS)
+    subject_requirement = bool(
+        re.search(
+            r"\b(?:candidate|applicant|you)\s+(?:must\s+|should\s+|need(?:s)?\s+to\s+)?"
+            r"(?:have|bring|possess|offer)\b",
+            line,
+        )
+    )
+    required_suffix = bool(re.search(r"\b(?:years?|yrs?)\b[^.!?]{0,30}\brequired\b", line))
+    return has_explicit_marker or subject_requirement or required_suffix
+
+
+def _experience_claims(line: str) -> set[str]:
+    if EXPERIENCE_UPPER_BOUND_PATTERN.search(line):
+        return set()
+    between = EXPERIENCE_BETWEEN_PATTERN.search(line)
+    if between:
+        minimum = between.group("minimum")
+        maximum = between.group("maximum")
+        return {f"{minimum}-{maximum}"}
+    return {
+        _normalize_experience_claim(match.group("claim"))
+        for match in EXPERIENCE_YEARS_PATTERN.finditer(line)
+    }
+
+
+def _normalize_experience_claim(value: str) -> str:
+    normalized = re.sub(r"\s+", "", value.casefold()).replace("to", "-")
+    return normalized.replace("–", "-").replace("—", "-")
+
+
+def _is_entry_level_role(role_title: str | None) -> bool:
+    if not role_title:
+        return False
+    if re.match(r"^\s*(?:junior|entry[- ]level|fresher|intern(?:ship)?)\b", role_title, re.I):
+        return True
+    if SENIOR_ROLE_PATTERN.search(role_title):
+        return False
+    return bool(ENTRY_LEVEL_ROLE_PATTERN.search(role_title))
 
 
 def _extract_job_skills(lines: list[str]) -> tuple[list[JobSkill], list[JobSkill], list[str]]:

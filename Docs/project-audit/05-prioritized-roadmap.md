@@ -38,6 +38,25 @@ effort, not calendar promises.
 - **Success measure:** regression suite passes and no execution path derives
   paid permission from plan name alone.
 
+### Versioned evidence-fit score semantics
+
+- **Outcome:** each score component measures candidate evidence, exposes its
+  provenance, and avoids token-substring matches.
+- **Scope:** explicit-tenure experience scoring, exact-token responsibilities,
+  not-applicable reweighting, unknown-weight reservation at zero contribution,
+  score caps, relational version metadata, rollback-safe stored JSON, UI
+  breakdown/disclaimer, and a labeled corpus.
+- **Dependencies:** none; the migration classifies historical and queued behavior.
+- **Effort:** M.
+- **Risk:** Medium; the current version can produce different scores from the
+  retained legacy algorithm.
+- **Definition of done:** junior/senior counterexamples rank correctly, `Go`
+  does not match `ongoing`, missing preferred skills receive no neutral credit,
+  breakdown arithmetic reconciles, and historical reports retain provenance.
+- **Success measure:** all 38 labeled bands, 14 pairwise deltas, forbidden
+  attribution cases, component rules, migration backfills, rollback guards,
+  and browser explanation checks pass.
+
 ### Outcome-first analysis completion
 
 - **Outcome:** users see the validated fit decision before spending time on
@@ -53,24 +72,7 @@ effort, not calendar promises.
 
 ## Immediate: before launch or next release
 
-### 1. Correct and version match-score semantics — P1
-
-- **Outcome:** score components measure candidate evidence and never match token
-  substrings accidentally.
-- **Scope:** structured experience evidence or explicit unknown state,
-  token-boundary responsibility matching, score version, report explanation,
-  labeled evaluation corpus.
-- **Dependencies:** product decision on neutral/unknown experience display and
-  migration/display of historical score versions.
-- **Effort:** M.
-- **Risk:** Medium; users may see different scores for the same inputs.
-- **Definition of done:** junior/senior counterexamples rank correctly, `Go`
-  does not match `ongoing`, score breakdown reconciles to inputs, and historical
-  reports keep their original version.
-- **Success measure:** reviewed benchmark passes expected matches, forbidden
-  matches, score bands/pairwise order, and evidence confidence.
-
-### 2. Add PostgreSQL workflow integrity tests — P1
+### 1. Add PostgreSQL workflow integrity tests — P1
 
 - **Outcome:** production-only locks, leases, and concurrency behavior are
   verified rather than inferred from SQLite.
@@ -84,7 +86,7 @@ effort, not calendar promises.
 - **Success measure:** repeated CI runs remain green and fail against known-bad
   transaction implementations.
 
-### 3. Close public ingress and runtime privilege gaps — P1
+### 2. Close public ingress and runtime privilege gaps — P1
 
 - **Outcome:** one tenant cannot exhaust shared resources, and one compromised
   runtime does not automatically gain migration/all-tenant privilege.
@@ -99,7 +101,7 @@ effort, not calendar promises.
 - **Success measure:** load/abuse test stays within memory/disk/outbound budgets;
   privilege tests and alerts pass.
 
-### 4. Operationalize worker health, backup, and restore — P1
+### 3. Operationalize worker health, backup, and restore — P1
 
 - **Outcome:** stalled work and data loss become detectable and recoverable.
 - **Scope:** JSON logs, worker heartbeat, queue/dead-letter/provider metrics,
@@ -114,7 +116,7 @@ effort, not calendar promises.
 - **Success measure:** measured detection time and restore time meet the approved
   objectives in a recorded drill.
 
-### 5. Implement durable privacy lifecycle — P1
+### 4. Implement durable privacy lifecycle — P1
 
 - **Outcome:** retention and user deletion complete safely across database,
   checkpoints, artifacts, and identity sessions.
@@ -130,7 +132,7 @@ effort, not calendar promises.
 - **Success measure:** zero eligible records beyond approved deletion lag and
   successful self-service completion without support intervention.
 
-### 6. Define a public deployment and trust package — P1
+### 5. Define a public deployment and trust package — P1
 
 - **Outcome:** reproducible, private-by-default public deployment with rollback
   and accurate customer disclosures.
@@ -145,7 +147,7 @@ effort, not calendar promises.
 - **Success measure:** repeatable deploy/rollback evidence and no undocumented
   public data flow.
 
-### 7. Decide OpenClaw public-launch scope — P1 if included
+### 6. Decide OpenClaw public-launch scope — P1 if included
 
 - **Outcome:** OpenClaw remains useful without bypassing tenant identity,
   durability, idempotency, or usage policy.
@@ -162,13 +164,13 @@ effort, not calendar promises.
 
 ## Near term: next 30 days
 
-### 8. Confirm and reuse resume evidence
+### 7. Confirm and reuse resume evidence
 
 - **Outcome:** repeat users trust parsed facts and start later applications
   without re-uploading.
 - **Scope:** versioned correction overlay, confidence flags, confirmation gate,
   one default resume, version label/last-used, replace/delete flows.
-- **Dependencies:** correction schema and privacy lifecycle item 5.
+- **Dependencies:** correction schema and privacy lifecycle item 4.
 - **Effort:** M–L.
 - **Risk:** Medium; corrections must not fabricate source evidence.
 - **Definition of done:** corrected facts persist, visibly retain provenance,
@@ -176,7 +178,7 @@ effort, not calendar promises.
 - **Success measure:** confirmed-evidence rate, correction rate, second application
   without upload, and reduced extraction-related support reports.
 
-### 9. Simplify the workspace and complete dynamic accessibility
+### 8. Simplify the workspace and complete dynamic accessibility
 
 - **Outcome:** one clear next action with reliable keyboard/screen-reader context.
 - **Scope:** one application rail, developer diagnostics disclosure, evidence
@@ -191,7 +193,7 @@ effort, not calendar promises.
 - **Success measure:** reduced fixture scroll depth and task time, no serious axe
   violations, and successful manual screen-reader beta journey.
 
-### 10. Protect drafts and extend post-application tracking
+### 9. Protect drafts and extend post-application tracking
 
 - **Outcome:** editing work is not lost and ResumePilot remains useful after export.
 - **Scope:** Save/Discard guard then revision-safe autosave, export history,
@@ -206,7 +208,7 @@ effort, not calendar promises.
 - **Success measure:** draft recovery, post-`applied` update rate, applications
   with a next action, and safe re-download completion.
 
-### 11. Add privacy-safe product analytics and pricing research
+### 10. Add privacy-safe product analytics and pricing research
 
 - **Outcome:** activation, retention, outcome, and upgrade decisions use evidence.
 - **Scope:** provider-neutral allowlisted event schema, redaction tests, funnel
@@ -220,13 +222,13 @@ effort, not calendar promises.
 - **Success measure:** validated activation baseline, repeated-use cohort,
   purchase intent, and cost per completed paid live outcome.
 
-### 12. Build billing only after entitlement and price decisions
+### 11. Build billing only after entitlement and price decisions
 
 - **Outcome:** charge and revoke access consistently without deleting user work.
 - **Scope:** product catalog, subscription and event-ledger tables, signed
   idempotent webhooks, out-of-order reducer, hosted checkout/portal, support
   reconciliation, effective entitlements, failed-payment/grace/downgrade tests.
-- **Dependencies:** item 11 evidence; provider, tax/currency, lifecycle, refund,
+- **Dependencies:** item 10 evidence; provider, tax/currency, lifecycle, refund,
   and grace decisions.
 - **Effort:** L.
 - **Risk:** Medium-high financial and support risk.
@@ -238,7 +240,7 @@ effort, not calendar promises.
 
 ## Medium term: 31–90 days
 
-### 13. Scale from measured queue and storage demand
+### 12. Scale from measured queue and storage demand
 
 - **Outcome:** beta growth does not create head-of-line blocking or unbounded
   privacy/storage cost.
@@ -255,7 +257,7 @@ effort, not calendar promises.
 - **Success measure:** p95 queue start/API latency within approved targets,
   bounded memory/query counts, and known storage cost per active user.
 
-### 14. Close the outcome-learning loop
+### 13. Close the outcome-learning loop
 
 - **Outcome:** recommendations improve using voluntary job-search outcomes rather
   than opaque model confidence.
@@ -269,7 +271,7 @@ effort, not calendar promises.
 - **Success measure:** useful completion rate, segment-level calibration insight,
   and fewer verified false-positive/false-negative score cases.
 
-### 15. Evaluate coach/placement workflows only on demand
+### 14. Evaluate coach/placement workflows only on demand
 
 - **Outcome:** avoid premature multi-tenant organization complexity while
   preserving a credible expansion path.

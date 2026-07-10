@@ -4,14 +4,15 @@ Last updated: 2026-07-10
 
 ## Active Implementation Checkpoint
 
-Atomic, replay-repairing analysis finalization completed locally (2026-07-10):
+Versioned evidence-fit scoring completed and verified (2026-07-10):
 
-- Started from clean synchronized `main` at `278ef50` and reproduced the audited partial-commit and incomplete-replay failures before changing production code.
-- Added one row-locked finalizer that validates report/resume/job/user/workflow correlations and commits completed analysis state, application linkage, idempotent `application.analyzed`/`job.analyzed` events, and analysis usage settlement in one PostgreSQL business transaction.
-- Completed-operation replay now runs the same finalizer, repairs missing downstream state, preserves a newer analysis/draft on the same application, and leaves an already-consumed reservation's settlement timestamp unchanged.
-- Added lease-owner fencing to analysis progress, finalization, retry/failure handling, and terminal workflow writes so a stale worker cannot overwrite a reclaimed attempt.
-- Preserved public API/report contracts, deterministic evidence validation, OpenClaw's synchronous private channel, LangGraph approval/checkpoint ownership, and LangChain confinement to LangGraph nodes. No schema or dependency change was required.
-- Local release evidence is green: 148 backend tests, Ruff/compile, 20-pair quality gates, PostgreSQL fresh/upgrade/downgrade plus concurrent finalization, frontend audit/lint/type/build, 12 Chromium tests, rebuilt backend/worker images, and healthy Compose readiness on ports 8050/3050. Commit, push, and exact-commit CI are the remaining publication steps.
+- Started from synchronized `main` at `b0e01c1` and reproduced the audited experience, substring, missing-preferred, and synthetic-neutral score failures before changing production code.
+- Added `evidence_v2` with required skills weighted at 50, responsibilities at 20, preferred skills at 10, explicit tenure at 15, and domain evidence at 5. Not-applicable dimensions are removed and reweighted; unknown dimensions retain their effective weight at zero contribution, so missing information cannot increase the score and makes it provisional.
+- Candidate experience now requires candidate-attributed resume tenure and a required job minimum. Preferred, company, team, client, mentee, object, conflicting, word-number-ambiguous, and upper-bound-only job tenure cannot become a scored minimum. Responsibility matching uses exact canonical tokens, zero tenure gets zero credit, and persisted caps explain scores limited by missing required skills or actionable evidence.
+- Analyses, applications, and queued jobs persist score version/status provenance. Queued work snapshots its scorer, historical rows are classified as `deterministic_v1` or `legacy_unversioned`, old scoring remains executable, worker startup verifies migration readiness, and PostgreSQL fences incompatible old workers from `evidence_v2` jobs.
+- Kept stored report/match JSON in its pre-versioning shape for binary rollback. Relational metadata hydrates read boundaries; finalization rejects mismatched totals, versions, statuses, or breakdowns; permanent score-contract corruption fails without retry churn.
+- Added 38 labeled score cases with 14 monotonic pairwise expectations, guarded provenance-preserving rollback, typed API/UI breakdowns, evidence references, historical version labels in report/ledger/application surfaces, and responsive accessible progress indicators. OpenClaw, LangGraph approval/checkpoint ownership, and LangChain confinement to LangGraph nodes remain unchanged.
+- Release evidence is green: 220 backend tests at 88.90% coverage, Ruff/compile, 20-pair and 38-case score gates, SQLite and PostgreSQL 16 migration round trips, frontend audit/lint/type/build, 13 Chromium tests, and 7 OpenClaw tests.
 
 ## Purpose
 
@@ -20,7 +21,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
 ## Current Workspace State
 
 - Root path: `/Users/adityachaudhari/Desktop/ResumePilot`
-- Current state: production-oriented evidence-first modular monolith with a Next.js authenticated BFF, FastAPI API and worker roles, PostgreSQL business state, Alembic application migrations, a package-owned LangGraph checkpoint schema, signed tenant identity, request IDs/timeouts, active-workflow-aware atomic usage reservations, subscription-aware effective entitlements, durable idempotent analysis/PDF operations, atomic replay-repairing analysis finalization, stale-worker lease fencing, lease renewal/retry/cancellation/dead-letter handling, persisted URL or pasted-job snapshots, deterministic matching and pass/warn/block validation, optional consented LangGraph live drafting with durable approval, outcome-first fit review, accepted-draft-only resume exports, application history, audit/privacy controls, and a responsive Playwright-verified dashboard. OpenClaw remains the thin chat/channel interface. The production-like Compose stack runs on loopback ports 8050/3050.
+- Current state: production-oriented evidence-first modular monolith with a Next.js authenticated BFF, FastAPI API and worker roles, PostgreSQL business state, Alembic application migrations, a package-owned LangGraph checkpoint schema, signed tenant identity, request IDs/timeouts, active-workflow-aware atomic usage reservations, subscription-aware effective entitlements, durable idempotent analysis/PDF operations, atomic replay-repairing analysis finalization, stale-worker lease fencing, lease renewal/retry/cancellation/dead-letter handling, persisted URL or pasted-job snapshots, versioned evidence-fit matching with explainable components, pass/warn/block validation, optional consented LangGraph live drafting with durable approval, outcome-first fit review, accepted-draft-only resume exports, application history, audit/privacy controls, and a responsive Playwright-verified dashboard. OpenClaw remains the thin chat/channel interface. The production-like Compose stack runs on loopback ports 8050/3050.
 - Git state: initialized on branch `main`.
 - Git remote: `origin` -> `https://github.com/AdityaChaudhari901/ResumePilot.git`.
 - Workspace folders:
@@ -69,6 +70,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
   - `Backend/app/services/latex_resume_renderer.py`
   - `Backend/app/services/pdf_resume_compiler.py`
   - `Backend/app/services/claim_validation.py`
+  - `Backend/app/services/score_contract_service.py`
   - `Backend/app/services/workflow_job_service.py`
   - `Backend/app/workers/run.py`
   - `Backend/app/data/provider_pricing.json`
@@ -78,6 +80,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
   - `Backend/migrations/versions/20260709_0006_add_tailored_resume_drafts.py`
   - `Backend/migrations/versions/20260710_0008_reconcile_postgres_schema.py`
   - `Backend/migrations/versions/20260710_0009_add_durable_workflow_jobs.py`
+  - `Backend/migrations/versions/20260710_0010_version_match_scores.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/tests/test_audit_privacy_api.py`
@@ -89,6 +92,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
   - `Backend/scripts/run_golden_evals.py`
   - `Backend/scripts/run_backend_quality_gate.py`
   - `Backend/scripts/run_postgres_migration_gate.py`
+  - `Backend/evals/match_score_cases.json`
   - `Backend/scripts/migrate_runtime.py`
   - `Backend/scripts/bootstrap_py312.sh`
   - `Backend/requirements/py312-dev.constraints.txt`
@@ -126,6 +130,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
   - `Frontend/src/features/dashboard/components/application-pipeline-card.tsx`
   - `Frontend/src/features/dashboard/components/tailored-resume-workspace-card.tsx`
   - `Frontend/src/features/dashboard/components/workflow-approval-panel.tsx`
+  - `Frontend/src/features/dashboard/components/match-score-breakdown.tsx`
   - `.github/workflows/ci.yml`
   - `docker-compose.yml`
   - `.env.production.example`
@@ -145,7 +150,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
 - Project dependencies are declared in `Backend/pyproject.toml`.
 - Backend development constraints are pinned in `Backend/requirements/py312-dev.constraints.txt`; the production image installs `Backend/requirements/py312-production.lock.txt` with hashes.
 - Local API server verified on `http://127.0.0.1:8002`.
-- Rebuilt production-like Compose stack is currently running on `http://127.0.0.1:3050` with FastAPI on `http://127.0.0.1:8050`, PostgreSQL at Alembic head `20260710_0009`, and a separate active workflow worker.
+- Rebuilt production-like Compose stack is currently running on `http://127.0.0.1:3050` with FastAPI on `http://127.0.0.1:8050`, PostgreSQL at Alembic head `20260710_0010`, and a separate active workflow worker.
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
 - OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
 - OpenClaw local config exists at `~/.openclaw/openclaw.json`; the included Google plugin is enabled.
@@ -564,15 +569,15 @@ Latest verification run: 2026-07-10
 
 | Check | Command | Result |
 |---|---|---|
-| Backend full release gate | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check . && .venv/bin/pytest --cov=app --cov-report=term-missing:skip-covered && .venv/bin/python -m compileall -q app tests scripts migrations && .venv/bin/python scripts/run_golden_evals.py && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 127 files formatted, lint/compile clean, 148 tests, 88% application coverage, 20 pairs, 100% schema pass, 0 evidence/unsupported/routing gaps, 8.26 ms average and 10.44 ms p95; one upstream Starlette/httpx deprecation warning |
-| SQLite migration/drift gate | Fresh temporary SQLite `alembic upgrade head` plus `alembic check` | Passed through `20260710_0009`; no new upgrade operations detected |
-| PostgreSQL 16 migration/checkpoint/finalization gate | Disposable PostgreSQL 16 plus `Backend/scripts/run_postgres_migration_gate.py` | Passed: fresh and seeded `0007` upgrades, downgrade/re-upgrade, Alembic drift/ownership checks, concurrent finalizer replay converging to one application/two correlated audit types/one usage settlement, checkpoint setup idempotency, cross-process interrupt/resume without generation replay, orphan reconciliation, indexes, backfills, sequences, exclusive `SKIP LOCKED` claims, and stale-lease recovery |
-| Frontend static/security/build gate | `npm run lint && npm run typecheck && npm run build` plus bundled Next.js scanners and `npm audit --audit-level=low` | Passed on Next.js 16.2.10; npm reported 0 vulnerabilities. Scanner alerts were manually verified false positives for Clerk's documented publishable key; its server secret remains private |
-| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: production build and 12/12 Chromium tests covering WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, approval refresh recovery, stuck-operation controls, validation, report-first tailoring availability, accepted exports, desktop/mobile, and report reopen |
+| Backend full release gate | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check . && .venv/bin/pytest --cov=app --cov-report=term-missing --cov-fail-under=80 && .venv/bin/python -m compileall -q app tests scripts && .venv/bin/python scripts/run_golden_evals.py && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 129 files formatted, lint/compile clean, 220 tests, 88.90% application coverage, 20 golden pairs, 38 labeled score cases, 14 pairwise score expectations, 100% schema pass, 0 evidence/unsupported/routing/score-benchmark failures, 8.67 ms average and 10.15 ms p95; one upstream Starlette/httpx deprecation warning |
+| SQLite migration/drift gate | Fresh temporary SQLite upgrade/check plus downgrade to `20260710_0009` and re-upgrade | Passed through `20260710_0010`; no drift; score provenance columns remained present after the round trip |
+| PostgreSQL 16 migration/checkpoint/finalization gate | Isolated PostgreSQL 16 plus `Backend/scripts/run_postgres_migration_gate.py` | Passed: fresh and seeded `0007` upgrades, score-version backfill from `0009`, downgrade/re-upgrade, Alembic drift/ownership checks, concurrent finalization, durable LangGraph interrupt/resume, orphan reconciliation, indexes, seeds, sequences, exclusive `SKIP LOCKED` claims, and stale-lease recovery |
+| Frontend static/security/build gate | `npm run security:audit && npm run lint && npm run typecheck && npm run test:auth-runtime && npm run build` | Passed on Next.js 16.2.10; npm reported 0 vulnerabilities; auth runtime checks and the production build passed |
+| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: production build and 13/13 Chromium tests covering WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, approval refresh recovery, validation, evidence-fit breakdown/disclaimer, legacy/v1 report and ledger/application labels, accepted exports, desktop/mobile overflow, and report reopen |
 | Production dependency/security audit | Isolated `pip-audit --disable-pip -r Backend/requirements/py312-production.lock.txt`; `npm audit --audit-level=low` | Passed with 0 known Python or npm vulnerabilities |
 | Live LangGraph/LangChain/Vertex approval smoke | Real `gemini-3.5-flash` structured calls through the three LangGraph generation nodes, in-memory checkpoint inspection, then `Command(resume=...)` rejection | Passed: 3 successful provider requests, 11,796 total tokens, durable approval pause, rejection resumed without another provider call, stable proposal revision, and no raw resume/JD/contact values in checkpoint history |
 | Live production Compose stack | `docker compose --env-file .env.production up -d --build migrate backend worker frontend` plus health/readiness/image/runtime checks | Passed on local arm64: clean hash-locked images built; migration exited 0; PostgreSQL/API/frontend healthy; worker and checkpoint reconciler running; `/health`, `/ready`, frontend, and same-origin upload→worker→report smoke passed; `pip check` clean; CrewAI/ChromaDB absent; LangGraph 1.2.9 and PostgreSQL saver 3.1.0 installed. Stack remains on 8050/3050 |
-| OpenClaw regression | `python3 -m unittest discover 'Ai services/openclaw/tests'` plus script compile | Passed: 7 tests; OpenClaw remains unchanged as the thin channel interface |
+| OpenClaw regression | `cd 'Ai services/openclaw' && ../../Backend/.venv/bin/python -m pytest -q tests` plus script compile | Passed: 7 tests; OpenClaw remains unchanged as the thin channel interface |
 | First GitHub-hosted production gate | GitHub Actions run `29074378258` for commit `26fbd21` | Backend, frontend, and browser/accessibility jobs passed; the deployment job failed a fresh Linux/amd64 image because Tectonic's Graphite2 runtime was not declared |
 | Linux/amd64 backend image repair | `docker buildx build --platform linux/amd64 --load --progress=plain -t resumepilot-backend:ci-fix Backend` plus an in-container Tectonic/`ldd`/`pip check`/UID smoke | Passed: checksum verification completed, Tectonic 0.16.9 loaded with no unresolved libraries, Python dependencies were consistent, and the runtime user remained UID 1000 |
 | Backend application workspace focused tests | `cd Backend && .venv/bin/pytest tests/test_applications_api.py tests/test_analysis_api.py tests/test_tenant_isolation.py -q` | Passed: 14 tests covering draft creation, analysis linking, export status, status updates, and tenant isolation |
@@ -713,6 +718,7 @@ Latest verification run: 2026-07-10
 
 ### 2026-07-10
 
+- Added versioned `evidence_v2` score semantics with candidate-attributed tenure evidence, exact-token responsibilities, not-applicable reweighting, unknown-weight reservation at zero, score caps, guarded rollback-safe provenance, a 38-case/14-pair benchmark, and an accessible evidence-fit breakdown with historical-version labels.
 - Replaced multi-commit analysis completion with one correlation-validated, row-locked, replay-repairing transaction; added supersession protection, stale-worker lease fencing, SQLite failure/crash regressions, PostgreSQL concurrent replay proof, and synchronous OpenClaw finalization coverage.
 - Replaced the CrewAI runtime with a consented LangGraph live-draft workflow only after adding durable asynchronous human approval; retained OpenClaw unchanged and restricted LangChain to graph generation nodes.
 - Verified the active provider boundary against real Vertex structured output: three bounded generation calls paused for review, rejection resumed without replay, and checkpoint history excluded raw resume/JD/contact data.

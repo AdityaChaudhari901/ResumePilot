@@ -26,6 +26,8 @@ function pendingApprovalOperation() {
       analysis_id: 777,
       report_id: 777,
       match_score: 82,
+      scoring_version: "evidence_v2",
+      score_status: "scored",
       status: "completed"
     },
     approval: {
@@ -172,6 +174,10 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   await expect(page.getByRole("button", { name: "Download DOCX" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Download LaTeX" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Download PDF" })).toHaveCount(0);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true);
+  await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-score.png");
 
   await page.getByRole("button", { name: "Open tailored resume draft" }).click();
   await expect(page.getByRole("button", { name: "Download DOCX" })).toBeVisible();
@@ -440,12 +446,43 @@ test("dashboard flags unclear job requirement extraction", async ({ page }) => {
   await uploadResume(page);
   await runAiAnalysis(page, { expectDraftComparison: false });
 
-  await expect(page.getByText("Provisional score", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Provisional evidence-fit score", { exact: true })
+  ).toBeVisible();
   await expect(page.getByText("Needs job details", { exact: true })).toBeVisible();
   await expect(page.getByText("Job details need review", { exact: true })).toBeVisible();
   await expect(page.getByText("No evidence-backed matches yet", { exact: true })).toBeVisible();
   await expect(page.getByText("Gaps not available", { exact: true })).toBeVisible();
   await expect(page.getByText("No ATS keywords extracted", { exact: true })).toBeVisible();
+});
+
+test("dashboard labels and preserves a legacy report without a score breakdown", async ({
+  page
+}) => {
+  await mockFixtureJobPreviews(page);
+  await page.goto("/");
+  await enterJobListing(page, { url: jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH) });
+  await uploadResume(page);
+  await page.route(/\/api\/reports\/\d+$/, async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.scoring_version = "legacy_unversioned";
+    payload.score_status = "scored";
+    payload.score_breakdown = null;
+    await route.fulfill({ json: payload, response });
+  });
+
+  await runAiAnalysis(page, { expectDraftComparison: false });
+
+  await expect(page.getByText("Legacy unversioned score", { exact: true })).toBeVisible();
+  await expect(page.getByText("Legacy score", { exact: true })).toBeVisible();
+  await expect(page.getByText("Historical score", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByText(
+      "Detailed evidence components were not recorded for this historical report. " +
+        "Re-running creates a new report whose score may differ; this saved report remains unchanged."
+    )
+  ).toBeVisible();
 });
 
 test("tailored resume explains blocked unsupported edits inline", async ({ page }) => {
@@ -543,11 +580,45 @@ test("report ledger reopens the selected saved report accurately", async ({ page
   await uploadResume(page);
   const firstReportId = (await runAiAnalysis(page)).reportId;
 
+  await page.route("**/api/reports?limit=20", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    const historical = payload.items.find(
+      (item: { report_id: number }) => item.report_id === Number(firstReportId)
+    );
+    if (historical) {
+      historical.scoring_version = "deterministic_v1";
+      historical.score_status = "scored";
+    }
+    await route.fulfill({ json: payload, response });
+  });
+  await page.route("**/api/applications?limit=20", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    const historical = payload.items.find(
+      (item: { report_id: number | null }) => item.report_id === Number(firstReportId)
+    );
+    if (historical) {
+      historical.scoring_version = "deterministic_v1";
+      historical.score_status = "scored";
+    }
+    await route.fulfill({ json: payload, response });
+  });
+
   const secondReportId = await analyzeJob(page, {
     url: jobPostingUrl(page, DATA_API_JOB_PATH)
   });
 
   expect(secondReportId).not.toBe(firstReportId);
+
+  await page.route(new RegExp(`/api/reports/${firstReportId}$`), async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.scoring_version = "deterministic_v1";
+    payload.score_status = "scored";
+    payload.score_breakdown = null;
+    await route.fulfill({ json: payload, response });
+  });
 
   await page.getByText("Workspace review and system status").click();
   await expect(page.getByRole("button", { name: /Data API Engineer/ })).toHaveAttribute(
@@ -560,6 +631,9 @@ test("report ledger reopens the selected saved report accurately", async ({ page
     "aria-current",
     "true"
   );
+  await expect(page.getByText("Deterministic v1 score", { exact: true })).toBeVisible();
+  await expect(page.getByText("Deterministic v1", { exact: true })).toHaveCount(3);
+  await expect(page.getByText("Historical score", { exact: true }).first()).toBeVisible();
   const exportResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -625,7 +699,23 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
 
   const result = await runAiAnalysis(page, { acceptFirstDraft: true });
 
-  await expect(page.getByText("Match score")).toBeVisible();
+  await expect(page.getByText("Evidence-fit score", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("This deterministic comparison is not a hiring probability or ATS guarantee.")
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "How this evidence-fit score is calculated" })
+  ).toBeVisible();
+  await expect(page.getByText("Required skill evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preferred skill evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText("Project/work evidence strength", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Required skill evidence score" })
+  ).toBeVisible();
+  const scoreBreakdown = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "How this evidence-fit score is calculated" })
+  });
+  await expect(scoreBreakdown.getByLabel(/Resume .* evidence\./).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Matched skills" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Missing or weak" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "ATS keywords" })).toBeVisible();
@@ -641,6 +731,13 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
   await expect(page.getByRole("heading", { name: "Plan usage meter" })).toBeVisible();
   await expect(page.getByRole("progressbar", { name: "Analysis runs usage" })).toBeVisible();
   await expect(page.getByRole("progressbar", { name: "Exports usage" })).toBeVisible();
+  const reportAccessibilityScan = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    reportAccessibilityScan.violations.map((violation) => violation.id),
+    JSON.stringify(reportAccessibilityScan.violations, null, 2)
+  ).toEqual([]);
   await expect(page.getByRole("article").filter({ hasText: "Backend Engineer" }).first()).toContainText(
     "Report ready"
   );

@@ -1,6 +1,7 @@
+from app.schemas.report import ApplicationReport
 from app.services.agent_workflow import run_application_agent_workflow
 from app.services.job_parser import parse_job_profile
-from app.services.matcher import match_resume_to_job
+from app.services.matcher import DETERMINISTIC_V1_SCORING_VERSION, match_resume_to_job
 from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import parse_resume_profile
 from app.services.validator import validate_report_against_resume
@@ -165,10 +166,53 @@ def test_unclear_job_requirements_produce_low_confidence_report():
     assert "No ATS keywords were extracted" in markdown
 
 
-def _build_report(resume_text: str, job_text: str):
+def test_report_explains_versioned_score_and_legacy_payloads_remain_valid():
+    report, _resume = _build_report(FRAGMENTED_RESUME_TEXT, FORBES_STYLE_JOB_TEXT)
+    markdown = report_to_markdown(report)
+
+    assert report.scoring_version == "evidence_v2"
+    assert report.score_breakdown is not None
+    assert report.score_breakdown.total_score == report.match_score
+    assert "deterministic evidence-fit score" in markdown
+    assert "not a hiring probability or ATS guarantee" in markdown
+    assert "Required skill evidence" in markdown
+
+    legacy_payload = report.model_dump(mode="json")
+    legacy_payload.pop("scoring_version")
+    legacy_payload.pop("score_status")
+    legacy_payload.pop("score_breakdown")
+    legacy_report = ApplicationReport.model_validate(legacy_payload)
+
+    assert legacy_report.match_score == report.match_score
+    assert legacy_report.scoring_version == "legacy_unversioned"
+    assert legacy_report.score_status == "scored"
+    assert legacy_report.score_breakdown is None
+
+
+def test_deterministic_v1_report_uses_legacy_score_copy():
+    report, _resume = _build_report(
+        FRAGMENTED_RESUME_TEXT,
+        FORBES_STYLE_JOB_TEXT,
+        scoring_version=DETERMINISTIC_V1_SCORING_VERSION,
+    )
+    markdown = report_to_markdown(report)
+
+    assert report.scoring_version == "deterministic_v1"
+    assert report.score_breakdown is None
+    assert "legacy match score" in report.executive_summary
+    assert "## 2. Legacy Match Score" in markdown
+    assert "legacy scoring semantics" in markdown
+    assert "evidence-fit" not in markdown
+
+
+def _build_report(resume_text: str, job_text: str, *, scoring_version=None):
     resume = parse_resume_profile(resume_text, resume_id=1)
     job = parse_job_profile(job_text, job_id=1)
-    match = match_resume_to_job(resume, job)
+    match = (
+        match_resume_to_job(resume, job)
+        if scoring_version is None
+        else match_resume_to_job(resume, job, scoring_version=scoring_version)
+    )
     workflow = run_application_agent_workflow(
         analysis_id=1,
         resume=resume,

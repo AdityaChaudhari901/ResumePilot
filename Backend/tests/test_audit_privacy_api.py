@@ -385,7 +385,7 @@ def test_retention_tombstones_active_leased_workflow_instead_of_deleting_it(
         assert tombstone.status == "cancel_requested"
         assert tombstone.payload_json == {}
         assert tombstone.result_json == {}
-        assert tombstone.lease_owner == "active-retention-worker"
+        assert tombstone.lease_owner == "score-v2:active-retention-worker"
 
 
 def test_retention_purge_noops_when_retention_is_disabled(client):

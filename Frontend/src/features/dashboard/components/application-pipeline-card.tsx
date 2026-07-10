@@ -13,6 +13,7 @@ import type {
   ApplicationItem,
   ApplicationStatus
 } from "@/features/dashboard/types";
+import { scoreMetricLabel } from "@/features/dashboard/utils/report";
 
 interface ApplicationPipelineCardProps {
   activeApplicationId: number | null;
@@ -98,10 +99,17 @@ function ApplicationPipelineRow({
 
       <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <div>
-          <dt className="text-muted-foreground">Match</dt>
+          <dt className="text-muted-foreground">
+            {application.scoring_version === "evidence_v2" ? "Evidence fit" : "Historical score"}
+          </dt>
           <dd className="mt-1 font-semibold text-foreground">
             {application.match_score === null ? "Pending" : `${Math.round(application.match_score)}%`}
           </dd>
+          {application.match_score === null ? null : (
+            <dd className="mt-1 text-[0.7rem] font-normal text-muted-foreground">
+              {scoreMetricLabel(application.scoring_version, application.score_status)}
+            </dd>
+          )}
         </div>
         <div>
           <dt className="text-muted-foreground">Updated</dt>

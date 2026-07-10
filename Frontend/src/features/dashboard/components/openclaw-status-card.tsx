@@ -22,7 +22,7 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
               <MessagesSquare className="h-4 w-4 text-primary" aria-hidden="true" />
               Provider
             </div>
-            <p className="mt-2 font-mono text-xs text-muted-foreground">
+            <p className="mt-2 break-words font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
               {status?.modelReference ?? "google-vertex/gemini-3.5-flash"}
             </p>
           </div>
@@ -42,7 +42,7 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
             <Terminal className="h-4 w-4 text-validation" aria-hidden="true" />
             Local commands
           </div>
-          <div className="space-y-2 font-mono text-xs text-white/80">
+          <div className="min-w-0 space-y-2 break-words font-mono text-xs text-white/80 [overflow-wrap:anywhere]">
             <p>{status?.commands.configure ?? "./Ai services/openclaw/scripts/configure_vertex_gateway.sh"}</p>
             <p>{status?.commands.setModel ?? "openclaw models set google-vertex/<model-id>"}</p>
             <p>{status?.commands.gateway ?? "./Ai services/openclaw/scripts/start_local_gateway.sh"}</p>
@@ -82,7 +82,7 @@ export function OpenClawStatusCard({ status }: OpenClawStatusCardProps) {
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground">
+        <p className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
           {readiness?.dashboardLaunch ??
             "Use Open Fresh Chat to open an authenticated local Control UI tab."}
         </p>

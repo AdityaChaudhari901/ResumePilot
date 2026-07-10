@@ -2,7 +2,7 @@ import re
 
 from app.schemas.common import ValidationWarning
 from app.schemas.job import JobProfile
-from app.schemas.match import MatchResult
+from app.schemas.match import MatchResult, ScoringVersion
 from app.schemas.report import (
     ApplicationReport,
     AtsKeywordSuggestion,
@@ -37,6 +37,7 @@ def generate_report(
         match.score,
         matched_names,
         missing_names,
+        scoring_version=match.scoring_version,
         requirements_unclear=requirements_unclear,
     )
 
@@ -46,6 +47,9 @@ def generate_report(
         job_id=job.job_id,
         executive_summary=summary,
         match_score=match.score,
+        scoring_version=match.scoring_version,
+        score_status=match.score_status,
+        score_breakdown=match.score_breakdown,
         matched_skills=match.matched_skills,
         missing_skills=match.missing_skills,
         weak_skills=match.weak_skills,
@@ -60,17 +64,59 @@ def generate_report(
 
 def report_to_markdown(report: ApplicationReport) -> str:
     requirements_unclear = _has_warning(report.validation_warnings, "required_skills_unclear")
+    is_evidence_v2 = report.scoring_version == ScoringVersion.evidence_v2
+    score_heading = "Evidence-fit Score" if is_evidence_v2 else "Legacy Match Score"
+    score_description = (
+        "This deterministic evidence-fit score compares the resume with the reviewed job "
+        "description; it is not a hiring probability or ATS guarantee."
+        if is_evidence_v2
+        else (
+            "This saved deterministic score uses legacy scoring semantics; it is not a hiring "
+            "probability or ATS guarantee."
+        )
+    )
     lines = [
         "# Job Fit Report",
         "",
         "## 1. Executive Summary",
         report.executive_summary,
         "",
-        "## 2. Match Score",
+        f"## 2. {score_heading}",
         f"{report.match_score:.1f}/100",
+        f"Score model: {report.scoring_version.value} ({report.score_status.value})",
+        score_description,
         "",
-        "## 3. Matched Skills",
+        "### Score breakdown",
     ]
+    if report.score_breakdown:
+        for component in report.score_breakdown.components:
+            label = _score_component_label(component.key.value)
+            if component.score is None:
+                reserved_weight = (
+                    f" {component.effective_weight:.1f}% effective weight is reserved at zero."
+                    if component.status.value == "unknown" and component.effective_weight > 0
+                    else ""
+                )
+                lines.append(
+                    f"- {label}: {component.status.value.replace('_', ' ')}."
+                    f"{reserved_weight} {component.explanation}"
+                )
+            elif component.base_weight == 0:
+                lines.append(
+                    f"- {label}: {component.score:.1f}/100 diagnostic. {component.explanation}"
+                )
+            else:
+                lines.append(
+                    f"- {label}: {component.score:.1f}/100 × "
+                    f"{component.effective_weight:.1f}% = {component.contribution:.1f} points. "
+                    f"{component.explanation}"
+                )
+        if report.score_breakdown.score_cap is not None:
+            lines.append(f"- Provisional score cap: {report.score_breakdown.score_cap:.1f}/100.")
+    else:
+        lines.append("- Detailed score components were not recorded for this historical report.")
+
+    lines.extend(["", "## 3. Matched Skills"])
     lines.extend(
         f"- {item.skill} ({item.match_type}, evidence: {', '.join(item.resume_evidence_ids)})"
         for item in report.matched_skills
@@ -137,6 +183,17 @@ def report_to_markdown(report: ApplicationReport) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _score_component_label(key: str) -> str:
+    return {
+        "required_skills": "Required skill evidence",
+        "responsibilities": "Responsibility evidence",
+        "preferred_skills": "Preferred skill evidence",
+        "experience": "Experience evidence",
+        "domain": "Domain evidence",
+        "evidence_strength": "Project/work evidence strength",
+    }[key]
+
+
 def _executive_summary(
     role: str,
     company: str,
@@ -144,6 +201,7 @@ def _executive_summary(
     matched_names: list[str],
     missing_names: list[str],
     *,
+    scoring_version: ScoringVersion,
     requirements_unclear: bool,
 ) -> str:
     if requirements_unclear and not matched_names and not missing_names:
@@ -156,8 +214,13 @@ def _executive_summary(
     missing = (
         ", ".join(missing_names[:5]) if missing_names else "no critical missing skills detected"
     )
+    score_label = (
+        "an evidence-fit score"
+        if scoring_version == ScoringVersion.evidence_v2
+        else "a legacy match score"
+    )
     return (
-        f"For {role} at {company}, the current resume scores {score:.1f}/100. "
+        f"For {role} at {company}, the current resume has {score_label} of {score:.1f}/100. "
         f"Strongest evidence-backed matches: {matched}. Main gaps: {missing}."
     )
 

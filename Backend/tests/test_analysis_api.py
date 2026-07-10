@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.db.models import UserRecord
+from app.db.models import AnalysisRecord, UserRecord
 from app.schemas.agent import AgentStepName, AgentWorkflowMode
 from tests.api_helpers import successful_analysis
 
@@ -207,7 +207,9 @@ def test_analyze_uses_reviewed_job_profile_without_refetching(
 def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_text):
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
     assert body["status"] == "completed"
-    assert body["match_score"] >= 70
+    assert 60 <= body["match_score"] < 75
+    assert body["scoring_version"] == "evidence_v2"
+    assert body["score_status"] == "scored"
 
     history_response = client.get("/reports")
     assert history_response.status_code == 200
@@ -221,6 +223,8 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert history_item["role"] == "Junior Backend Engineer"
     assert history_item["resume_candidate_name"] == "Aarav Sharma"
     assert history_item["matched_skills_count"] >= 1
+    assert history_item["scoring_version"] == "evidence_v2"
+    assert history_item["score_status"] == "scored"
     assert history_item["created_at"]
 
     resume_response = client.get(f"/resumes/{body['resume_id']}")
@@ -235,12 +239,37 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert report_response.status_code == 200
     report = report_response.json()
     assert report["analysis_id"] == body["analysis_id"]
+    assert report["scoring_version"] == "evidence_v2"
+    assert report["score_status"] == "scored"
+    assert report["score_breakdown"]["total_score"] == report["match_score"]
+    assert {component["key"] for component in report["score_breakdown"]["components"]} == {
+        "required_skills",
+        "responsibilities",
+        "preferred_skills",
+        "experience",
+        "domain",
+        "evidence_strength",
+    }
     assert report["tailored_bullets"]
     assert all(item["evidence_ids"] for item in report["tailored_bullets"])
 
     markdown_response = client.post(f"/reports/{body['report_id']}/markdown")
     assert markdown_response.status_code == 200
     assert "# Job Fit Report" in markdown_response.text
+    assert "not a hiring probability or ATS guarantee" in markdown_response.text
+
+    with client.app.state.session_factory() as db:
+        stored = db.get(AnalysisRecord, body["analysis_id"])
+        assert stored is not None
+        assert stored.scoring_version == "evidence_v2"
+        assert stored.score_status == "scored"
+        assert stored.score_breakdown_json["total_score"] == stored.match_score
+        assert "scoring_version" not in stored.report_json
+        assert "score_status" not in stored.report_json
+        assert "score_breakdown" not in stored.report_json
+        assert "scoring_version" not in stored.match_result_json
+        assert "score_status" not in stored.match_result_json
+        assert "score_breakdown" not in stored.match_result_json
 
     for export_format in ("latex", "docx", "pdf"):
         response = client.post(f"/reports/{body['report_id']}/resume/{export_format}")
@@ -267,6 +296,35 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert trace_body["trace"]["token_usage"] is None
     assert trace_body["trace"]["cost_estimate_usd"] is None
     assert trace_body["trace"]["runtime_metadata"] == {}
+
+
+def test_legacy_report_is_labeled_without_mutating_historical_json(
+    client,
+    sample_resume_text,
+    sample_job_text,
+):
+    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
+    with client.app.state.session_factory() as db:
+        analysis = db.get(AnalysisRecord, body["analysis_id"])
+        assert analysis is not None
+        historical_json = dict(analysis.report_json)
+        analysis.scoring_version = "legacy_unversioned"
+        analysis.score_status = "scored"
+        analysis.score_breakdown_json = None
+        db.commit()
+
+    response = client.get(f"/reports/{body['report_id']}")
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["match_score"] == body["match_score"]
+    assert report["scoring_version"] == "legacy_unversioned"
+    assert report["score_status"] == "scored"
+    assert report["score_breakdown"] is None
+    with client.app.state.session_factory() as db:
+        analysis = db.get(AnalysisRecord, body["analysis_id"])
+        assert analysis is not None
+        assert analysis.report_json == historical_json
 
 
 def test_langgraph_fallback_trace_is_persisted(

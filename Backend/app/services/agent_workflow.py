@@ -24,7 +24,7 @@ from app.schemas.common import (
     validation_status_from_warnings,
 )
 from app.schemas.job import JobProfile
-from app.schemas.match import MatchResult
+from app.schemas.match import MatchResult, ScoringVersion
 from app.schemas.operation import LiveDraftProposal
 from app.schemas.report import ApplicationReport, InterviewQuestionGroup
 from app.schemas.resume import ResumeFact, ResumeProfile
@@ -511,23 +511,31 @@ def _resume_match_agent(
     evidence_ids = _unique(
         evidence_id for item in match.matched_skills[:5] for evidence_id in item.resume_evidence_ids
     )
+    score_label = (
+        "evidence-fit score"
+        if match.scoring_version == ScoringVersion.evidence_v2
+        else "legacy match score"
+    )
+    score_phrase = (
+        f"{'an' if match.scoring_version == ScoringVersion.evidence_v2 else 'a'} {score_label}"
+    )
 
     if not _has_actionable_job_skills(job):
         summary = (
             f"ResumePilot cannot calculate a trustworthy fit for {role} at {company} yet. "
             "The job listing did not expose explicit required or preferred skills, so the "
-            f"provisional score is capped at {match.score:.1f}/100 until the job evidence is "
-            "clearer."
+            f"provisional {score_label} is capped at {match.score:.1f}/100 until the job "
+            "evidence is clearer."
         )
     elif strongest_matches:
         summary = (
-            f"The resume scores {match.score:.1f}/100 for {role} at {company}. "
+            f"The resume has {score_phrase} of {match.score:.1f}/100 for {role} at {company}. "
             f"The strongest supported matches are {_human_list(strongest_matches)}."
         )
     else:
         summary = (
-            f"The resume scores {match.score:.1f}/100 for {role} at {company}, but no "
-            "resume evidence-backed skill matches were found."
+            f"The resume has {score_phrase} of {match.score:.1f}/100 for {role} at {company}, "
+            "but no resume evidence-backed skill matches were found."
         )
     if missing:
         summary += f" Required gaps to handle honestly: {_human_list(missing[:5])}."

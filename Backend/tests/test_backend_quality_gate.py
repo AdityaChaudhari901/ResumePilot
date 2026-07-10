@@ -25,6 +25,8 @@ def test_backend_quality_gate_measures_golden_corpus(tmp_path):
     assert summary["unsupported_warning_count"] == 0
     assert summary["required_skill_routing_gap_count"] == 0
     assert summary["sensitive_output_hit_count"] == 0
+    assert summary["score_benchmark_case_count"] == 38
+    assert summary["score_benchmark_failure_count"] == 0
     assert summary["average_latency_ms"] > 0
     assert summary["p95_latency_ms"] > 0
     assert (tmp_path / "backend_quality_gate.json").exists()
@@ -38,6 +40,7 @@ def test_quality_threshold_failures_explain_regressions():
             "unsupported_warning_count": 1,
             "required_skill_routing_gap_count": 1,
             "sensitive_output_hit_count": 1,
+            "score_benchmark_failure_count": 1,
             "average_latency_ms": 501.0,
             "p95_latency_ms": 1501.0,
         },
@@ -50,6 +53,7 @@ def test_quality_threshold_failures_explain_regressions():
         "unsupported_warning_count 1 > 0",
         "required_skill_routing_gap_count 1 > 0",
         "sensitive_output_hit_count 1 > 0",
+        "score_benchmark_failure_count 1 > 0",
         "average_latency_ms 501.00 > 500.00",
         "p95_latency_ms 1501.00 > 1500.00",
     ]

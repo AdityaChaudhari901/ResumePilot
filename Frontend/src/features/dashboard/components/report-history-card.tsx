@@ -3,7 +3,11 @@ import { Clock3, FileSearch, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import type { ReportHistoryItem } from "@/features/dashboard/types";
-import { formatScore, scoreTone } from "@/features/dashboard/utils/report";
+import {
+  formatScore,
+  scoreMetricLabel,
+  scoreTone
+} from "@/features/dashboard/utils/report";
 
 interface ReportHistoryCardProps {
   isBusy: boolean;
@@ -55,7 +59,20 @@ export function ReportHistoryCard({
                     <p className="truncate text-sm font-semibold text-foreground">{title}</p>
                     <p className="mt-1 truncate text-xs text-muted-foreground">{company}</p>
                   </div>
-                  <Badge tone={scoreTone(item.match_score)}>{formatScore(item.match_score)}</Badge>
+                  <div className="shrink-0 text-right">
+                    <Badge
+                      tone={
+                        item.scoring_version === "evidence_v2"
+                          ? scoreTone(item.match_score)
+                          : "neutral"
+                      }
+                    >
+                      {formatScore(item.match_score)}
+                    </Badge>
+                    <p className="mt-1 text-[0.7rem] text-muted-foreground">
+                      {scoreMetricLabel(item.scoring_version, item.score_status)}
+                    </p>
+                  </div>
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                   <ReportHistoryMetric label="Matched" value={item.matched_skills_count} />

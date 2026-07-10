@@ -6,6 +6,7 @@ from app.db.models import (
     JobRecord,
     ResumeRecord,
     UsageEventRecord,
+    WorkflowJobRecord,
 )
 from app.repositories.analyses import AnalysisRepository
 from app.repositories.usage_events import UsageEventRepository
@@ -13,10 +14,20 @@ from app.repositories.workflow_jobs import WorkflowJobRepository
 from app.schemas.agent import AgentWorkflowResult
 from app.schemas.auth import CurrentUser
 from app.schemas.job import JobAnalysisRequest
+from app.schemas.match import MatchResult
 from app.schemas.report import ApplicationReport
 from app.services.application_service import stage_application_analysis
 from app.services.audit_service import ensure_analysis_audit_event
 from app.services.report_generator import report_to_markdown
+from app.services.score_contract_service import (
+    ScoreContractInvariantError,
+    executable_scoring_version,
+    hydrate_match_score_contract,
+    hydrate_report_score_contract,
+    persisted_report_payload,
+    score_contract_from_analysis,
+    validate_report_score_contract,
+)
 from app.services.usage_service import stage_analysis_usage_finalization
 
 
@@ -35,7 +46,7 @@ def finalize_analysis_transaction(
 ) -> AnalysisRecord:
     """Commit the complete analysis result once, or repair it idempotently on replay."""
 
-    require_active_analysis_workflow_lease(
+    locked_workflow = require_active_analysis_workflow_lease(
         db,
         workflow_job_id=analysis.workflow_job_id,
         user_id=current_user.id,
@@ -60,6 +71,7 @@ def finalize_analysis_transaction(
         analysis=locked_analysis,
         application=application,
         analysis_usage=analysis_usage,
+        workflow_job=locked_workflow,
     )
     linked_application = stage_application_analysis(
         db,
@@ -82,6 +94,8 @@ def finalize_analysis_transaction(
             "analysis_id": locked_analysis.id,
             "report_id": locked_analysis.id,
             "match_score": locked_analysis.match_score,
+            "scoring_version": locked_analysis.scoring_version,
+            "score_status": locked_analysis.score_status,
         },
     )
     ensure_analysis_audit_event(
@@ -97,6 +111,8 @@ def finalize_analysis_transaction(
             "source": linked_application.source_type,
             "workflow_mode": locked_analysis.workflow_mode,
             "match_score": locked_analysis.match_score,
+            "scoring_version": locked_analysis.scoring_version,
+            "score_status": locked_analysis.score_status,
             "validation_warnings_count": len(report.validation_warnings),
             "validation_status": report.validation_status.value,
         },
@@ -129,11 +145,11 @@ def require_active_analysis_workflow_lease(
     workflow_job_id: str | None,
     user_id: int,
     lease_owner: str | None,
-) -> None:
+) -> WorkflowJobRecord | None:
     if workflow_job_id is None:
         if lease_owner is not None:
             raise RuntimeError("A workflow lease owner was supplied without a workflow job")
-        return
+        return None
     if not lease_owner:
         raise RuntimeError("An active workflow lease is required for analysis finalization")
     workflow_job = WorkflowJobRepository(db).get_any_for_update(workflow_job_id)
@@ -145,6 +161,7 @@ def require_active_analysis_workflow_lease(
         or workflow_job.cancel_requested_at is not None
     ):
         raise RuntimeError("The analysis workflow lease is no longer active")
+    return workflow_job
 
 
 def _validate_finalization_context(
@@ -156,6 +173,7 @@ def _validate_finalization_context(
     analysis: AnalysisRecord,
     application: ApplicationRecord | None,
     analysis_usage: UsageEventRecord | None,
+    workflow_job: WorkflowJobRecord | None,
 ) -> None:
     if resume.user_id != current_user.id or job.user_id != current_user.id:
         raise RuntimeError("Analysis dependencies do not belong to the current user")
@@ -177,6 +195,32 @@ def _validate_finalization_context(
         and analysis_usage.reservation_key != analysis.workflow_job_id
     ):
         raise RuntimeError("Usage reservation does not match the analysis workflow job")
+    persisted_match = hydrate_match_score_contract(
+        analysis,
+        MatchResult.model_validate(analysis.match_result_json),
+    )
+    scoring_version, score_status, score_breakdown = score_contract_from_analysis(analysis)
+    validate_report_score_contract(analysis, report)
+    if abs(analysis.match_score - persisted_match.score) > 0.01:
+        raise ScoreContractInvariantError("Analysis and match-result scores are inconsistent")
+    if persisted_match.scoring_version != scoring_version:
+        raise ScoreContractInvariantError(
+            "Analysis and match-result scoring versions are inconsistent"
+        )
+    if persisted_match.score_status != score_status:
+        raise ScoreContractInvariantError(
+            "Analysis and match-result score statuses are inconsistent"
+        )
+    if persisted_match.score_breakdown != score_breakdown:
+        raise ScoreContractInvariantError(
+            "Analysis and match-result score breakdowns are inconsistent"
+        )
+    if workflow_job is not None:
+        expected_version = executable_scoring_version(workflow_job.scoring_version)
+        if executable_scoring_version(scoring_version) != expected_version:
+            raise ScoreContractInvariantError(
+                "Analysis scorer does not match the workflow snapshot"
+            )
 
 
 def _complete_or_validate_analysis(
@@ -187,11 +231,12 @@ def _complete_or_validate_analysis(
     if workflow_result is None:
         if analysis.status != "completed":
             raise RuntimeError("Only completed analyses can be repaired without a workflow result")
-        return ApplicationReport.model_validate(analysis.report_json)
+        report = ApplicationReport.model_validate(analysis.report_json)
+        return hydrate_report_score_contract(analysis, report)
 
     report = workflow_result.report
     analysis.status = "completed"
-    analysis.report_json = report.model_dump(mode="json")
+    analysis.report_json = persisted_report_payload(report)
     analysis.report_markdown = report_to_markdown(report)
     analysis.validation_warnings_json = [
         warning.model_dump(mode="json") for warning in report.validation_warnings

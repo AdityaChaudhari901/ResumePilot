@@ -52,6 +52,8 @@ def test_application_draft_is_completed_by_analysis_and_status_updates(client, s
     assert application["resume_id"] == resume_id
     assert application["report_id"] == report_id
     assert application["match_score"] >= 70
+    assert application["scoring_version"] == "evidence_v2"
+    assert application["score_status"] == "scored"
 
     apply_response = client.patch(
         f"/applications/{draft['id']}/status",

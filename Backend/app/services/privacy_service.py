@@ -624,6 +624,8 @@ def _detach_application_references(
             application.analysis_id = None
             application.report_id = None
             application.match_score = None
+            application.scoring_version = None
+            application.score_status = None
             if application.status != ApplicationStatus.applied.value:
                 application.status = ApplicationStatus.reviewed.value
         if resume_id is not None and application.resume_id == resume_id:

@@ -124,19 +124,30 @@ that boundary; privacy deletion is the next concrete cross-store candidate.
 - **Validation:** a regression backdates three queued reservations beyond the
   configured TTL and requires the fourth request to return `402`.
 
-### DATA-04 — P1 — Match score dimensions overstate what they measure
+### DATA-04 — P1, fixed in this batch — Match score dimensions overstated what they measured
 
 - **Evidence:** `Backend/app/services/matcher.py:24-73,164-177,202-212` and
   `Backend/tests/test_matcher.py:6-37`.
 - **Verified behavior:** a junior resume and a resume stating ten years of
   experience both scored 35 on experience and 78.5 overall for the same senior
   job. `Go` can match inside `ongoing` in responsibility text.
-- **Impact:** the headline score can contradict the evidence-first promise.
-- **Remedy:** treat experience as unknown/neutral until candidate tenure is
-  structured; use token-boundary matching and controlled synonyms for
-  responsibilities. Version score semantics before changing historical bands.
-- **Validation:** add labeled junior/senior ordering, exact-token negatives,
-  score-band expectations, and monotonicity cases to the golden gate.
+- **Impact:** the headline score could contradict the evidence-first promise.
+- **Change:** `evidence_v2` now scores explicit candidate tenure, uses exact-token
+  responsibility evidence, gives missing preferred skills zero rather than
+  neutral credit, removes only not-applicable dimensions, and reserves unknown
+  effective weight at zero contribution. Ambiguous, preferred, company, team,
+  client, and third-party tenure cannot become candidate experience. Required-skill
+  and actionable-evidence caps are explicit in the persisted breakdown.
+- **Compatibility:** analyses, applications, and queued jobs persist relational
+  score provenance. Existing queued work keeps `deterministic_v1`; unclassified
+  history is labeled `legacy_unversioned`; stored report JSON retains its old
+  shape so a pre-migration binary can still read newly written rows during rollback.
+- **Validation:** 38 labeled score cases and 14 pairwise expectations cover
+  junior/senior ordering, candidate/job tenure attribution and ambiguity, the
+  `Go`/`ongoing` negative, missing preferred skills, evidence strength,
+  arithmetic reconciliation, and monotonic score deltas. SQLite and PostgreSQL
+  gates cover backfill, guarded downgrade, provenance restoration, mixed-worker
+  fencing, privacy cascades, and re-upgrade behavior.
 
 ### DATA-05 — P1 — Privacy deletion spans non-atomic stores
 
@@ -227,12 +238,13 @@ already exclude CrewAI.
 
 Baseline evidence:
 
-- backend: 142 passed, 88% measured application coverage, one upstream
+- backend: 220 passed, 88.90% measured application coverage, one upstream
   Starlette/httpx deprecation warning;
 - frontend: lint, TypeScript, production build, auth-runtime guard, npm audit,
-  and 12/12 Chromium E2E passed;
-- quality: 20 golden pairs passed schema/evidence/routing gates with zero
-  unsupported-claim gaps; average local gate latency 9.07 ms and p95 11.61 ms;
+  and 13/13 Chromium E2E passed;
+- quality: 20 golden pairs plus 38 labeled score cases and 14 pairwise
+  expectations passed schema/evidence/routing/score gates with zero
+  unsupported-claim gaps; average local gate latency 8.67 ms and p95 10.15 ms;
 - OpenClaw: 7 tests and Python compilation passed;
 - PostgreSQL migration/checkpoint gate, Compose config, dependency audit,
   container checks, and the baseline GitHub CI run passed.

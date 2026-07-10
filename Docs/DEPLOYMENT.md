@@ -89,6 +89,9 @@ to 300.
 
 ## Start
 
+Use this command only for a fresh stack. Existing installations should follow
+the drained upgrade sequence below.
+
 ```bash
 docker compose --env-file .env.production --progress=plain up --build
 ```
@@ -145,15 +148,71 @@ docker compose --env-file .env.production run --rm migrate
 Do not rely on SQLAlchemy `create_all` in production. The backend disables
 automatic schema creation by default when `APP_ENV=production`.
 
+## Drained Upgrade
+
+Build the replacement images before the maintenance window. Then stop new API
+traffic, let running work settle, stop the old worker, migrate, and start only
+the new processes:
+
+```bash
+docker compose --env-file .env.production build migrate backend worker frontend
+docker compose --env-file .env.production stop frontend backend
+docker compose --env-file .env.production exec -T db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT status, count(*) FROM workflow_jobs WHERE status IN ('"'"'queued'"'"', '"'"'running'"'"', '"'"'retry_scheduled'"'"', '"'"'cancel_requested'"'"', '"'"'waiting_for_approval'"'"') GROUP BY status ORDER BY status"'
+docker compose --env-file .env.production stop worker
+docker compose --env-file .env.production run --rm migrate
+docker compose --env-file .env.production up -d worker
+docker compose --env-file .env.production up -d backend frontend
+```
+
+Do not continue while the status query returns running work. Resume or cancel
+approval-waiting work before the window; queued deterministic work may remain
+only when the target worker supports its persisted scorer snapshot. The current
+worker verifies the Alembic head before polling. PostgreSQL also rejects an old
+worker that tries to claim an `evidence_v2` job, but that fence is a last line of
+defense, not a substitute for stopping old workers.
+
+Verify the exact release after startup:
+
+```bash
+curl -fsS http://127.0.0.1:8050/health
+curl -fsS http://127.0.0.1:8050/ready
+curl -fsS http://127.0.0.1:3050/
+docker compose --env-file .env.production ps
+```
+
 ## Rollback
 
-Before running migrations against persistent data:
+The safe score-version rollback boundary is exactly `20260710_0010` to
+`20260710_0009`. Before crossing it:
 
-1. Take a PostgreSQL backup.
-2. Record the current image tag or commit SHA.
-3. Run migrations.
-4. Confirm `/ready` returns `status: ok`.
+1. Remove public ingress and stop new submissions.
+2. Take and verify a PostgreSQL backup; record the current and target image SHAs.
+3. Resume or cancel every active `evidence_v2` workflow. The migration refuses
+   to downgrade while one is queued, running, retrying, cancellation-pending, or
+   waiting for approval.
+4. Stop frontend, API, and worker processes. The migration also takes exclusive
+   locks on `workflow_jobs`, `analyses`, and `applications` so a late writer
+   cannot slip between the guard and the rollback snapshot.
+5. Run the downgrade with the current `0010` migration image, then deploy the
+   recorded `0009` images.
 
-If deployment fails before data changes, roll back the image. If a migration has
-already run, restore from backup or apply a reviewed Alembic downgrade only after
-checking data-loss risk.
+```bash
+docker compose --env-file .env.production stop frontend backend worker
+docker compose --env-file .env.production run --rm migrate \
+  python -m alembic downgrade 20260710_0009
+# Retag or restore the recorded 0009 images here.
+docker compose --env-file .env.production up -d worker backend frontend
+```
+
+The adjacent downgrade keeps score provenance in foreign-key-backed sidecar
+tables. Re-upgrading to `0010` restores unchanged analyses, applications, and
+terminal/queued scorer snapshots, then removes those sidecars. Tenant deletion
+continues to cascade into the sidecars, so rollback cannot resurrect deleted
+score metadata.
+
+Do not downgrade below `0009` while the sidecars contain `evidence_v2`
+provenance. Migration `0009` blocks that destructive step. If disaster recovery
+requires a deeper rollback, restore the verified backup instead. The explicit
+`RESUMEPILOT_ALLOW_DESTRUCTIVE_SCORE_ROLLBACK=true` override discards preserved
+score provenance and is reserved for a reviewed, backup-backed recovery only.

@@ -37,7 +37,7 @@ from app.schemas.agent import (
 from app.schemas.application import ApplicationStatus
 from app.schemas.auth import CurrentUser
 from app.schemas.job import JobAnalysisRequest, JobProfile
-from app.schemas.match import MatchResult
+from app.schemas.match import MatchResult, ScoringVersion
 from app.schemas.operation import (
     ACTIVE_WORKFLOW_JOB_STATUSES,
     TERMINAL_WORKFLOW_JOB_STATUSES,
@@ -68,8 +68,18 @@ from app.services.langgraph_checkpointer import (
     open_workflow_checkpointer,
 )
 from app.services.langgraph_workflow import LiveDraftGraphRunner
+from app.services.matcher import CURRENT_SCORING_VERSION
 from app.services.provider_pricing import estimate_provider_cost
 from app.services.report_generator import report_to_markdown
+from app.services.score_contract_service import (
+    ScoreContractInvariantError,
+    executable_scoring_version,
+    hydrate_match_score_contract,
+    hydrate_report_score_contract,
+    persisted_report_payload,
+    score_contract_from_analysis,
+    validate_report_score_contract,
+)
 from app.services.tailored_resume_service import (
     draft_export_revision,
     render_tailored_resume_pdf_for_application,
@@ -147,6 +157,7 @@ def enqueue_analysis_job(
         idempotency_key_hash=key_hash,
         request_fingerprint=fingerprint,
         payload_json=payload,
+        scoring_version=CURRENT_SCORING_VERSION.value,
         stage="queued",
         progress_percent=0,
         attempt_count=0,
@@ -664,6 +675,7 @@ def _execute_analysis_job(
         analysis_usage=usage,
         workflow_job_id=record.id,
         workflow_lease_owner=lease_owner,
+        scoring_version=_workflow_scoring_version(record),
         release_usage_on_failure=False,
         progress_callback=lambda stage, progress: _update_progress(
             db,
@@ -681,6 +693,7 @@ def _execute_analysis_job(
         db,
         response.analysis_id,
         user_id=current_user.id,
+        expected_scoring_version=_workflow_scoring_version(record),
     )
     try:
         live_usage = reserve_live_ai_usage(db, current_user, operation_id=record.id)
@@ -764,6 +777,7 @@ def _resume_live_draft_workflow(
         db,
         record.analysis_id,
         user_id=current_user.id,
+        expected_scoring_version=_workflow_scoring_version(record),
     )
     decision = WorkflowApprovalDecision(str(approval_payload.get("decision")))
     proposal_revision = str(approval_payload.get("id", ""))
@@ -847,6 +861,7 @@ def _live_draft_context(
     analysis_id: int,
     *,
     user_id: int,
+    expected_scoring_version: ScoringVersion,
 ) -> tuple[AnalysisRecord, AgentWorkflowResult, ResumeProfile, JobProfile, MatchResult]:
     analysis = db.scalar(
         select(AnalysisRecord)
@@ -857,9 +872,19 @@ def _live_draft_context(
         raise RuntimeError("The analysis for this workflow no longer exists")
     resume = ResumeProfile.model_validate(analysis.resume.profile_json)
     job = JobProfile.model_validate(analysis.job.profile_json)
-    match = MatchResult.model_validate(analysis.match_result_json)
+    match = hydrate_match_score_contract(
+        analysis,
+        MatchResult.model_validate(analysis.match_result_json),
+    )
+    if executable_scoring_version(match.scoring_version) != expected_scoring_version:
+        raise ScoreContractInvariantError(
+            "Analysis scorer does not match the approval workflow snapshot"
+        )
     deterministic_result = AgentWorkflowResult(
-        report=ApplicationReport.model_validate(analysis.report_json),
+        report=hydrate_report_score_contract(
+            analysis,
+            ApplicationReport.model_validate(analysis.report_json),
+        ),
         trace=AgentWorkflowTrace.model_validate(analysis.workflow_trace_json),
     )
     return analysis, deterministic_result, resume, job, match
@@ -872,8 +897,9 @@ def _persist_agent_result(
     *,
     commit: bool = True,
 ) -> None:
+    validate_report_score_contract(analysis, result.report)
     analysis.status = "completed"
-    analysis.report_json = result.report.model_dump(mode="json")
+    analysis.report_json = persisted_report_payload(result.report)
     analysis.report_markdown = report_to_markdown(result.report)
     analysis.validation_warnings_json = [
         warning.model_dump(mode="json") for warning in result.report.validation_warnings
@@ -887,12 +913,19 @@ def _persist_agent_result(
 
 
 def _analysis_result_payload(analysis: AnalysisRecord) -> dict[str, Any]:
+    scoring_version, score_status, _breakdown = score_contract_from_analysis(analysis)
     return {
         "analysis_id": analysis.id,
         "report_id": analysis.id,
         "match_score": analysis.match_score,
+        "scoring_version": scoring_version.value,
+        "score_status": score_status.value,
         "status": analysis.status,
     }
+
+
+def _workflow_scoring_version(record: WorkflowJobRecord) -> ScoringVersion:
+    return executable_scoring_version(record.scoring_version)
 
 
 def _new_approval_payload(graph_result: Any) -> dict[str, Any]:
@@ -1380,12 +1413,16 @@ def _sha256(value: str) -> str:
 
 
 def _is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, ScoreContractInvariantError):
+        return False
     if isinstance(exc, HTTPException):
         return exc.status_code in {408, 425, 429, 500, 502, 503, 504}
     return not isinstance(exc, (ValueError, TypeError))
 
 
 def _public_error(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, ScoreContractInvariantError):
+        return "score_contract_invalid", "Stored score provenance failed an integrity check."
     if isinstance(exc, HTTPException):
         if isinstance(exc.detail, str):
             return f"http_{exc.status_code}", exc.detail[:500]

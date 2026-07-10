@@ -229,6 +229,17 @@ with resume/job/report IDs and match score. `PATCH /applications/{id}/status`
 supports the dashboard pipeline statuses `draft`, `reviewed`, `analyzed`,
 `exported`, and `applied`.
 
+New analyses snapshot `scoring_version=evidence_v2` when queued. The report API
+returns an exact component breakdown for required skills, responsibility
+evidence, preferred skills, explicit tenure evidence, domain alignment, and the
+project/work evidence-strength diagnostic. Not-applicable dimensions are removed
+and reweighted; unknown required evidence keeps its effective weight but contributes
+zero, so missing information cannot raise the score and makes it provisional. The
+UI labels the result as an evidence-fit heuristic rather than a hiring probability.
+Historical scores are returned unchanged as `legacy_unversioned` or
+`deterministic_v1`. Score metadata lives in additive relational columns so the
+stored legacy report/match JSON remains readable by a rollback binary.
+
 `GET /applications/{id}/tailored-resume` creates or returns the application-linked
 tailored resume review draft. Users can edit, accept, reject, or reset each
 evidence-backed bullet through the item patch route. Application-specific DOCX,

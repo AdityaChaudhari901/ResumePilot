@@ -857,6 +857,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       analysis_id: item.analysis_id,
       match_score: item.match_score,
       report_id: item.report_id,
+      scoring_version: item.scoring_version,
+      score_status: item.score_status,
       status: item.status
     };
     setAnalysis(nextAnalysis);
@@ -1069,6 +1071,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
           analysis_id: detail.analysis_id,
           match_score: detail.match_score ?? 0,
           report_id: detail.report_id,
+          scoring_version: detail.scoring_version ?? undefined,
+          score_status: detail.score_status ?? undefined,
           status: "completed"
         });
         setReport(null);
@@ -1472,7 +1476,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               aria-hidden="true"
             />
           </summary>
-          <div className="grid gap-4 border-t border-border p-4 xl:grid-cols-2">
+          <div className="grid min-w-0 gap-4 border-t border-border p-4 [&>*]:min-w-0 xl:grid-cols-2">
             <Panel as="aside" eyebrow="Runtime" title="FastAPI status">
               <HealthStrip health={health} isLoading={isLoadingStatus} />
             </Panel>

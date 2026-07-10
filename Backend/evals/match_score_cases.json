@@ -1,0 +1,534 @@
+{
+  "schema_version": 1,
+  "scoring_version": "evidence_v2",
+  "cases": [
+    {
+      "id": "junior_candidate_for_senior_role",
+      "resume_text": "Junior Candidate\n\nSummary\n1 year of professional experience.\n\nSkills\nPython\n\nProjects\nBuilt Python services for a student project.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities:\n- Build Python services and lead platform reliability.\n\nRequirements:\n- Required Python experience.\n\nExperience: 5+ years.",
+      "score_band": [70, 80],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [20, 20]
+        }
+      }
+    },
+    {
+      "id": "senior_candidate_for_senior_role",
+      "resume_text": "Senior Candidate\n\nSummary\n10 years of professional experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities:\n- Build Python services and lead platform reliability.\n\nRequirements:\n- Required Python experience.\n\nExperience: 5+ years.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "apostrophe_tenure_is_candidate_tenure",
+      "resume_text": "Senior Candidate\n\nSummary\n10 years’ professional experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "total_experience_label_is_candidate_tenure",
+      "resume_text": "Senior Candidate\n\nSummary\nTotal experience: 10 years.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "broad_role_prefix_is_candidate_tenure",
+      "resume_text": "Senior Product Manager\n\nSummary\nSenior Product Manager with 10 years of professional experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "experience_label_is_candidate_tenure",
+      "resume_text": "Senior Candidate\n\nSummary\nExperience: 10 years.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "multiword_domain_tenure_is_candidate_tenure",
+      "resume_text": "Senior Candidate\n\nSummary\n10 years of backend engineering experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "data_science_tenure_is_candidate_tenure",
+      "resume_text": "Senior Candidate\n\nSummary\n10 years of data science experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "cloud_platform_tenure_is_candidate_tenure",
+      "resume_text": "Senior Candidate\n\nSummary\n10 years of cloud platform engineering experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "word_number_tenure_is_candidate_tenure",
+      "resume_text": "Senior Candidate\n\nSummary\nI have ten years of professional experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities\n- Build Python services and lead platform reliability.\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "mentee_tenure_is_not_candidate_tenure",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nExperience\nMentored engineers with 10 years of professional experience while building Python services.",
+      "job_text": "Role: Senior Backend Engineer\n\nResponsibilities:\n- Build Python services and lead platform reliability.\n\nRequirements:\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [66, 67],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "collective_tenure_is_not_candidate_tenure",
+      "resume_text": "Candidate\n\nSummary\n10 years of professional experience across the engineering team while building Python services.\n\nSkills\nPython",
+      "job_text": "Role: Senior Backend Engineer\n\nRequirements\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [38, 39],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "company_history_is_not_candidate_requirement",
+      "resume_text": "Senior Candidate\n\nSummary\n10 years of professional experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Senior Backend Engineer\nCompany: Acme\n\nAbout us\nAcme has served customers for 20 years across global markets.\n\nResponsibilities:\n- Build Python services and lead platform reliability.\n\nRequirements:\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "collective_company_tenure_is_not_candidate_requirement",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nAbout us\n20 years of experience across our engineering team.\n\nRequirements\n- Required Python experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "not_applicable",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "preferred_tenure_is_not_required_tenure",
+      "resume_text": "Candidate\n\nSummary\n5 years of professional experience.\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n\nPreferred qualifications\n- 10+ years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "not_applicable",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "junior_team_responsibility_is_not_entry_level_requirement",
+      "resume_text": "Candidate\n\nSkills\nGo\n\nProjects\nBuilt Go services for internal systems.",
+      "job_text": "Role: Engineering Manager\nCompany: Acme\n\nResponsibilities\n- Mentor junior engineers and lead platform delivery.\n\nRequirements\n- Required Python experience.",
+      "score_band": [0, 0],
+      "components": {
+        "experience": {
+          "status": "not_applicable",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "candidate_joins_tenured_team",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- The candidate will join a team with 10 years of experience.",
+      "score_band": [76, 77],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "object_tenure_requirement_is_unknown",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- Experience managing engineers with 10+ years of professional experience.",
+      "score_band": [76, 77],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "conflicting_required_tenure_is_unknown",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- At least 3 years of professional experience.\n- A minimum of 5 years of professional experience.",
+      "score_band": [76, 77],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "word_number_required_tenure_is_unknown",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- A minimum of five years of professional experience.",
+      "score_band": [76, 77],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "demonstrated_required_tenure_is_scored",
+      "resume_text": "Candidate\n\nSummary\n5 years of professional experience.\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- Demonstrated 5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "applicants_with_required_tenure_is_scored",
+      "resume_text": "Candidate\n\nSummary\n5 years of professional experience.\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- Applicants with at least 5 years of professional experience should apply.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "unicode_tenure_range_uses_lower_bound",
+      "resume_text": "Candidate\n\nSummary\n3 years of professional experience.\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- 3–5 years of professional experience.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "upper_bound_tenure_is_not_a_minimum",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- Up to 2 years of professional experience.",
+      "score_band": [76, 77],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "suffix_upper_bound_tenure_is_not_a_minimum",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- 2 years or less of professional experience.",
+      "score_band": [76, 77],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "post_experience_upper_bound_is_not_a_minimum",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n- 2 years of professional experience or less.",
+      "score_band": [76, 77],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "explicit_required_tenure_exits_preferred_context",
+      "resume_text": "Candidate\n\nSummary\n5 years of professional experience.\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nRequirements\n- Required Python experience.\n\nPreferred qualifications\n- Familiarity with Docker.\n- Must have at least 5 years of professional experience.",
+      "score_band": [86, 87],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "same_line_required_tenure_precedes_preferred_tenure",
+      "resume_text": "Candidate\n\nSummary\n3 years of professional experience.\n\nSkills\nPython\n\nProjects\nBuilt Python services for production systems.",
+      "job_text": "Role: Backend Engineer\nCompany: Acme\n\nQualifications\n- Required Python experience.\n- 3 years of professional experience required; 5 years preferred.",
+      "score_band": [95, 100],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    },
+    {
+      "id": "unknown_tenure_for_five_year_role",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Backend Engineer\n\nResponsibilities:\n- Build Python services and lead platform reliability.\n\nRequirements:\n- Required Python experience.\n\nAt least 5 years of experience.",
+      "score_band": [82, 83],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "explicit_one_year_for_five_year_role",
+      "resume_text": "Candidate\n\nSummary\n1 year of professional experience.\n\nSkills\nPython\n\nExperience\nBuilt Python services and led platform reliability.",
+      "job_text": "Role: Backend Engineer\n\nResponsibilities:\n- Build Python services and lead platform reliability.\n\nRequirements:\n- Required Python experience.\n\nAt least 5 years of experience.",
+      "score_band": [85, 90],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [20, 20]
+        }
+      }
+    },
+    {
+      "id": "skills_only_unknown_tenure",
+      "resume_text": "Candidate\n\nSkills\nPython",
+      "job_text": "Role: Backend Engineer\n\nRequirements:\n- Required Python experience.\n\nAt least 5 years of experience.",
+      "score_band": [38, 39],
+      "components": {
+        "experience": {
+          "status": "unknown",
+          "score_band": null
+        }
+      }
+    },
+    {
+      "id": "skills_only_explicit_one_year",
+      "resume_text": "Candidate\n\nSummary\n1 year of professional experience.\n\nSkills\nPython",
+      "job_text": "Role: Backend Engineer\n\nRequirements:\n- Required Python experience.\n\nAt least 5 years of experience.",
+      "score_band": [43, 44],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [20, 20]
+        }
+      }
+    },
+    {
+      "id": "skills_only_explicit_zero_years",
+      "resume_text": "Candidate\n\nSummary\n0 years of professional experience.\n\nSkills\nPython",
+      "job_text": "Role: Backend Engineer\n\nRequirements:\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [38, 39],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [0, 0]
+        }
+      }
+    },
+    {
+      "id": "skills_only_explicit_half_year",
+      "resume_text": "Candidate\n\nSummary\n0.5 years of professional experience.\n\nSkills\nPython",
+      "job_text": "Role: Backend Engineer\n\nRequirements:\n- Required Python experience.\n- At least 5 years of professional experience.",
+      "score_band": [40, 41],
+      "components": {
+        "experience": {
+          "status": "scored",
+          "score_band": [10, 10]
+        }
+      }
+    },
+    {
+      "id": "go_does_not_match_ongoing",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nMaintained an ongoing Python project.",
+      "job_text": "Role: Go Engineer\n\nResponsibilities:\n- Go ownership delivery excellence.\n\nRequirements:\n- Required Python experience.",
+      "score_band": [65, 75],
+      "components": {
+        "responsibilities": {
+          "status": "scored",
+          "score_band": [0, 0]
+        }
+      }
+    },
+    {
+      "id": "missing_preferred_skill_has_zero_credit",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt a Python service.",
+      "job_text": "Role: Backend Engineer\n\nRequirements:\n- Required Python experience.\n- Preferred Docker experience.",
+      "score_band": [80, 90],
+      "components": {
+        "preferred_skills": {
+          "status": "scored",
+          "score_band": [0, 0]
+        }
+      }
+    },
+    {
+      "id": "skills_section_only_is_weak_evidence",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nEducation\nB.Tech Computer Science",
+      "job_text": "Role: Backend Engineer\n\nRequirements:\n- Required Python experience.",
+      "score_band": [45, 55],
+      "components": {
+        "evidence_strength": {
+          "status": "scored",
+          "score_band": [50, 50]
+        }
+      }
+    },
+    {
+      "id": "project_fact_is_strong_evidence",
+      "resume_text": "Candidate\n\nSkills\nPython\n\nProjects\nBuilt a Python service.",
+      "job_text": "Role: Backend Engineer\n\nRequirements:\n- Required Python experience.",
+      "score_band": [95, 100],
+      "components": {
+        "evidence_strength": {
+          "status": "scored",
+          "score_band": [100, 100]
+        }
+      }
+    }
+  ],
+  "pairwise_expectations": [
+    {
+      "higher": "senior_candidate_for_senior_role",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "apostrophe_tenure_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "total_experience_label_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "broad_role_prefix_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "experience_label_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "multiword_domain_tenure_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "data_science_tenure_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "cloud_platform_tenure_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "word_number_tenure_is_candidate_tenure",
+      "lower": "junior_candidate_for_senior_role",
+      "minimum_delta": 20
+    },
+    {
+      "higher": "senior_candidate_for_senior_role",
+      "lower": "mentee_tenure_is_not_candidate_tenure",
+      "minimum_delta": 15
+    },
+    {
+      "higher": "project_fact_is_strong_evidence",
+      "lower": "skills_section_only_is_weak_evidence",
+      "minimum_delta": 40
+    },
+    {
+      "higher": "explicit_one_year_for_five_year_role",
+      "lower": "unknown_tenure_for_five_year_role",
+      "minimum_delta": 3
+    },
+    {
+      "higher": "skills_only_explicit_one_year",
+      "lower": "skills_only_unknown_tenure",
+      "minimum_delta": 4
+    },
+    {
+      "higher": "skills_only_explicit_half_year",
+      "lower": "skills_only_explicit_zero_years",
+      "minimum_delta": 2
+    }
+  ]
+}

@@ -11,6 +11,39 @@ export type Confidence = "high" | "medium" | "low";
 export type JobSourceType = "url" | "pasted_text";
 export type ValidationSeverity = "pass" | "warn" | "block";
 export type ValidationStatus = ValidationSeverity;
+export type ScoringVersion = "legacy_unversioned" | "deterministic_v1" | "evidence_v2";
+export type MatchScoreStatus = "scored" | "provisional";
+export type MatchScoreComponentStatus = "scored" | "unknown" | "not_applicable";
+export type MatchScoreComponentKey =
+  | "required_skills"
+  | "responsibilities"
+  | "preferred_skills"
+  | "experience"
+  | "domain"
+  | "evidence_strength";
+
+export interface MatchScoreComponent {
+  key: MatchScoreComponentKey;
+  status: MatchScoreComponentStatus;
+  score: number | null;
+  base_weight: number;
+  effective_weight: number;
+  contribution: number;
+  matched_count: number | null;
+  total_count: number | null;
+  evidence_ids: string[];
+  explanation: string;
+}
+
+export interface MatchScoreBreakdown {
+  scoring_version: ScoringVersion;
+  score_kind: "deterministic_evidence_fit";
+  score_status: MatchScoreStatus;
+  uncapped_score: number;
+  score_cap: number | null;
+  total_score: number;
+  components: MatchScoreComponent[];
+}
 
 export interface CandidateProfile {
   name: string | null;
@@ -50,6 +83,8 @@ export interface JobAnalysisResponse {
   analysis_id: number;
   report_id: number;
   match_score: number;
+  scoring_version?: ScoringVersion;
+  score_status?: MatchScoreStatus;
   status: string;
 }
 
@@ -183,6 +218,8 @@ export interface ApplicationItem {
   analysis_id: number | null;
   report_id: number | null;
   match_score: number | null;
+  scoring_version?: ScoringVersion | null;
+  score_status?: MatchScoreStatus | null;
   created_at: string;
   updated_at: string;
 }
@@ -343,6 +380,9 @@ export interface ApplicationReport {
   job_id: number;
   executive_summary: string;
   match_score: number;
+  scoring_version?: ScoringVersion;
+  score_status?: MatchScoreStatus;
+  score_breakdown?: MatchScoreBreakdown | null;
   matched_skills: MatchedSkill[];
   missing_skills: MissingSkill[];
   weak_skills: WeakSkill[];
@@ -366,6 +406,8 @@ export interface ReportHistoryItem {
   resume_candidate_name: string | null;
   status: string;
   match_score: number;
+  scoring_version?: ScoringVersion;
+  score_status?: MatchScoreStatus;
   workflow_mode: string;
   validation_warnings_count: number;
   matched_skills_count: number;

@@ -27,6 +27,7 @@ RESUME_DIR = EVALS_ROOT / "resumes"
 JOB_DIR = EVALS_ROOT / "jobs"
 OUTPUT_DIR = EVALS_ROOT / "outputs"
 DEFAULT_OUTPUT_PATH = OUTPUT_DIR / "backend_quality_gate.json"
+MATCH_SCORE_CASES_PATH = EVALS_ROOT / "match_score_cases.json"
 
 EVIDENCE_GAP_WARNING_CODES = frozenset(
     {
@@ -53,6 +54,7 @@ class QualityThresholds:
     max_unsupported_warning_count: int = 0
     max_required_skill_routing_gap_count: int = 0
     max_sensitive_output_hit_count: int = 0
+    max_score_benchmark_failure_count: int = 0
     max_average_latency_ms: float = 500.0
     max_p95_latency_ms: float = 1500.0
 
@@ -94,6 +96,14 @@ def evaluate_backend_quality(
         pairs=pairs,
         latencies_ms=latencies_ms,
     )
+    score_benchmark = _evaluate_match_score_benchmark()
+    summary.update(
+        {
+            "score_benchmark_case_count": score_benchmark["case_count"],
+            "score_benchmark_failure_count": score_benchmark["failure_count"],
+            "score_benchmark_failures": score_benchmark["failures"],
+        }
+    )
     threshold_failures = quality_threshold_failures(summary, thresholds)
     report = {
         "gate": "backend_quality",
@@ -102,6 +112,7 @@ def evaluate_backend_quality(
         "passed": not threshold_failures,
         "threshold_failures": threshold_failures,
         "summary": summary,
+        "score_benchmark": score_benchmark,
         "pairs": pairs,
     }
 
@@ -146,6 +157,12 @@ def quality_threshold_failures(
             "sensitive_output_hit_count "
             f"{summary['sensitive_output_hit_count']} > "
             f"{thresholds.max_sensitive_output_hit_count}"
+        )
+    if summary["score_benchmark_failure_count"] > thresholds.max_score_benchmark_failure_count:
+        failures.append(
+            "score_benchmark_failure_count "
+            f"{summary['score_benchmark_failure_count']} > "
+            f"{thresholds.max_score_benchmark_failure_count}"
         )
     if summary["average_latency_ms"] > thresholds.max_average_latency_ms:
         failures.append(
@@ -265,6 +282,98 @@ def _build_summary(
     }
 
 
+def _evaluate_match_score_benchmark() -> dict[str, Any]:
+    corpus = json.loads(MATCH_SCORE_CASES_PATH.read_text(encoding="utf-8"))
+    expected_version = str(corpus["scoring_version"])
+    failures: list[str] = []
+    results: dict[str, dict[str, Any]] = {}
+
+    for index, case in enumerate(corpus["cases"], start=1):
+        case_id = str(case["id"])
+        resume = parse_resume_profile(str(case["resume_text"]), resume_id=index)
+        job = parse_job_profile(str(case["job_text"]), job_id=index)
+        match = match_resume_to_job(resume, job)
+        breakdown = match.score_breakdown
+        case_failures: list[str] = []
+        if match.scoring_version.value != expected_version:
+            case_failures.append(f"version {match.scoring_version.value} != {expected_version}")
+        if breakdown is None:
+            case_failures.append("score breakdown missing")
+            components: dict[str, Any] = {}
+        else:
+            components = {component.key.value: component for component in breakdown.components}
+            contribution = round(
+                sum(component.contribution for component in breakdown.components),
+                2,
+            )
+            if contribution != breakdown.uncapped_score:
+                case_failures.append("component contributions do not reconcile")
+            if breakdown.total_score != match.score:
+                case_failures.append("breakdown total does not match result score")
+
+        _append_band_failure(
+            case_failures,
+            label="total score",
+            actual=match.score,
+            score_band=case["score_band"],
+        )
+        for component_key, expectation in case.get("components", {}).items():
+            component = components.get(component_key)
+            if component is None:
+                case_failures.append(f"component {component_key} missing")
+                continue
+            expected_status = str(expectation["status"])
+            if component.status.value != expected_status:
+                case_failures.append(
+                    f"component {component_key} status {component.status.value} "
+                    f"!= {expected_status}"
+                )
+            if component.score is not None:
+                _append_band_failure(
+                    case_failures,
+                    label=f"component {component_key}",
+                    actual=component.score,
+                    score_band=expectation["score_band"],
+                )
+        failures.extend(f"{case_id}: {failure}" for failure in case_failures)
+        results[case_id] = {
+            "score": match.score,
+            "score_status": match.score_status.value,
+            "failures": case_failures,
+        }
+
+    for expectation in corpus.get("pairwise_expectations", []):
+        higher_id = str(expectation["higher"])
+        lower_id = str(expectation["lower"])
+        minimum_delta = float(expectation["minimum_delta"])
+        actual_delta = round(results[higher_id]["score"] - results[lower_id]["score"], 2)
+        if actual_delta < minimum_delta:
+            failures.append(
+                f"pairwise {higher_id} > {lower_id}: delta {actual_delta} < {minimum_delta}"
+            )
+
+    return {
+        "schema_version": corpus["schema_version"],
+        "scoring_version": expected_version,
+        "case_count": len(results),
+        "failure_count": len(failures),
+        "failures": failures,
+        "results": results,
+    }
+
+
+def _append_band_failure(
+    failures: list[str],
+    *,
+    label: str,
+    actual: float,
+    score_band: list[float],
+) -> None:
+    minimum, maximum = (float(value) for value in score_band)
+    if not minimum <= actual <= maximum:
+        failures.append(f"{label} {actual} outside [{minimum}, {maximum}]")
+
+
 def _required_skill_routing_gaps(
     job: JobProfile,
     report: ApplicationReport,
@@ -363,6 +472,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--max-unsupported-warning-count", type=int, default=0)
     parser.add_argument("--max-required-skill-routing-gap-count", type=int, default=0)
     parser.add_argument("--max-sensitive-output-hit-count", type=int, default=0)
+    parser.add_argument("--max-score-benchmark-failure-count", type=int, default=0)
     parser.add_argument("--max-average-latency-ms", type=float, default=500.0)
     parser.add_argument("--max-p95-latency-ms", type=float, default=1500.0)
     return parser.parse_args()
@@ -376,6 +486,7 @@ def main() -> None:
         max_unsupported_warning_count=args.max_unsupported_warning_count,
         max_required_skill_routing_gap_count=args.max_required_skill_routing_gap_count,
         max_sensitive_output_hit_count=args.max_sensitive_output_hit_count,
+        max_score_benchmark_failure_count=args.max_score_benchmark_failure_count,
         max_average_latency_ms=args.max_average_latency_ms,
         max_p95_latency_ms=args.max_p95_latency_ms,
     )
@@ -389,6 +500,7 @@ def main() -> None:
         f"evidence gaps {summary['evidence_gap_count']}, "
         f"unsupported warnings {summary['unsupported_warning_count']}, "
         f"required-skill routing gaps {summary['required_skill_routing_gap_count']}, "
+        f"score benchmark failures {summary['score_benchmark_failure_count']}, "
         f"avg {summary['average_latency_ms']:.2f} ms, "
         f"p95 {summary['p95_latency_ms']:.2f} ms."
     )

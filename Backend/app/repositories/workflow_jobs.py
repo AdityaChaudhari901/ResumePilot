@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.db.models import WorkflowJobRecord
 from app.schemas.operation import WorkflowJobStatus
 
+SCORE_V2_WORKER_PREFIX = "score-v2:"
+
 
 class WorkflowJobRepository:
     def __init__(self, db: Session) -> None:
@@ -119,7 +121,7 @@ class WorkflowJobRepository:
         record.stage = "starting"
         record.progress_percent = max(record.progress_percent, 5)
         record.attempt_count += 1
-        record.lease_owner = worker_id
+        record.lease_owner = _compatible_lease_owner(record, worker_id)
         record.lease_expires_at = lease_expires_at
         record.heartbeat_at = now
         record.started_at = record.started_at or now
@@ -158,7 +160,7 @@ class WorkflowJobRepository:
         record.stage = "starting"
         record.progress_percent = max(record.progress_percent, 5)
         record.attempt_count += 1
-        record.lease_owner = worker_id
+        record.lease_owner = _compatible_lease_owner(record, worker_id)
         record.lease_expires_at = lease_expires_at
         record.heartbeat_at = now
         record.started_at = record.started_at or now
@@ -167,3 +169,13 @@ class WorkflowJobRepository:
         self.db.commit()
         self.db.refresh(record)
         return record
+
+
+def _compatible_lease_owner(record: WorkflowJobRecord, worker_id: str) -> str:
+    if (
+        record.kind == "analysis"
+        and record.scoring_version == "evidence_v2"
+        and not worker_id.startswith(SCORE_V2_WORKER_PREFIX)
+    ):
+        return f"{SCORE_V2_WORKER_PREFIX}{worker_id}"[:255]
+    return worker_id[:255]

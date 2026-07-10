@@ -56,6 +56,8 @@ def run_golden_evals() -> dict[str, object]:
                     "resume": resume_path.name,
                     "job": job_path.name,
                     "match_score": match.score,
+                    "scoring_version": match.scoring_version.value,
+                    "score_status": match.score_status.value,
                     "matched_skills": [skill.skill for skill in match.matched_skills],
                     "missing_skills": [skill.skill for skill in match.missing_skills],
                     "validation_warning_count": len(report.validation_warnings),

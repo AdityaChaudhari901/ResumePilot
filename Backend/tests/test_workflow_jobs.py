@@ -153,6 +153,9 @@ def test_worker_executes_a_queued_analysis_and_exposes_progress_result(
     assert queued is not None
 
     with client.app.state.session_factory() as db:
+        persisted = db.get(WorkflowJobRecord, queued["id"])
+        assert persisted is not None
+        assert persisted.scoring_version == "evidence_v2"
         settled = execute_workflow_job(
             db,
             queued["id"],
@@ -168,6 +171,145 @@ def test_worker_executes_a_queued_analysis_and_exposes_progress_result(
     assert operation["progress_percent"] == 100
     assert operation["attempt_count"] == 1
     assert operation["result"]["status"] == "completed"
+    assert operation["result"]["scoring_version"] == "evidence_v2"
+    assert operation["result"]["score_status"] == "scored"
+
+
+def test_worker_uses_the_scoring_version_snapshotted_at_enqueue(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-version-snapshot",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    with client.app.state.session_factory() as db:
+        record = db.get(WorkflowJobRecord, queued["id"])
+        assert record is not None
+        record.scoring_version = "deterministic_v1"
+        db.commit()
+        settled = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="versioned-worker",
+        )
+
+    assert settled.status == "succeeded"
+    assert settled.result_json["scoring_version"] == "deterministic_v1"
+    with client.app.state.session_factory() as db:
+        analysis = db.scalar(
+            select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == queued["id"])
+        )
+        assert analysis is not None
+        assert analysis.scoring_version == "deterministic_v1"
+        assert analysis.score_breakdown_json is None
+
+
+def test_new_worker_replays_an_old_writer_v1_analysis_with_legacy_metadata(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-old-writer-v1-replay",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    with client.app.state.session_factory() as db:
+        record = db.get(WorkflowJobRecord, queued["id"])
+        assert record is not None
+        record.scoring_version = "deterministic_v1"
+        db.commit()
+        completed = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="old-writer-worker",
+        )
+        assert completed.status == "succeeded"
+
+        analysis = db.scalar(
+            select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == queued["id"])
+        )
+        assert analysis is not None
+        analysis.scoring_version = "legacy_unversioned"
+        completed.status = "retry_scheduled"
+        completed.stage = "retry_scheduled"
+        completed.available_at = datetime.now(UTC) - timedelta(seconds=1)
+        completed.finished_at = None
+        db.commit()
+
+        replay = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="new-v1-compatible-worker",
+        )
+
+    assert replay.status == "succeeded"
+    assert replay.result_json["scoring_version"] == "legacy_unversioned"
+
+
+def test_completed_replay_rejects_analysis_version_that_differs_from_job_snapshot(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    response, queued = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": sample_job_text},
+        idempotency_key="analysis-version-mismatch",
+    )
+    assert response.status_code == 202
+    assert queued is not None
+
+    with client.app.state.session_factory() as db:
+        completed = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="version-baseline-worker",
+        )
+        assert completed.status == "succeeded"
+        analysis = db.scalar(
+            select(AnalysisRecord).where(AnalysisRecord.workflow_job_id == queued["id"])
+        )
+        assert analysis is not None
+        analysis.scoring_version = "deterministic_v1"
+        analysis.score_breakdown_json = None
+        completed.status = "retry_scheduled"
+        completed.stage = "retry_scheduled"
+        completed.available_at = datetime.now(UTC) - timedelta(seconds=1)
+        completed.finished_at = None
+        db.commit()
+
+        replay = execute_workflow_job(
+            db,
+            queued["id"],
+            settings=settings,
+            worker_id="version-mismatch-worker",
+        )
+
+    assert replay.status == "failed"
+    assert replay.error_code == "score_contract_invalid"
 
 
 def test_analysis_finalization_rolls_back_and_retry_converges(
@@ -531,7 +673,7 @@ def test_stale_worker_cannot_overwrite_reclaimed_workflow_state(
             replacement = replacement_db.get(WorkflowJobRecord, queued["id"])
             assert replacement is not None
             replacement.status = "running"
-            replacement.lease_owner = "replacement-worker"
+            replacement.lease_owner = "score-v2:replacement-worker"
             replacement.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
             replacement_db.commit()
         raise RuntimeError("stale worker resumed after lease reassignment")
@@ -549,14 +691,14 @@ def test_stale_worker_cannot_overwrite_reclaimed_workflow_state(
         )
 
     assert observed.status == "running"
-    assert observed.lease_owner == "replacement-worker"
+    assert observed.lease_owner == "score-v2:replacement-worker"
     with client.app.state.session_factory() as db:
         persisted = db.get(WorkflowJobRecord, queued["id"])
         usage = db.get(UsageEventRecord, observed.usage_event_id)
         assert persisted is not None
         assert persisted.status == "running"
         assert persisted.stage == "starting"
-        assert persisted.lease_owner == "replacement-worker"
+        assert persisted.lease_owner == "score-v2:replacement-worker"
         assert persisted.error_code is None
         assert usage is not None
         assert usage.state == "reserved"
@@ -583,7 +725,7 @@ def test_worker_reaps_expired_cancel_request_without_consuming_quota(
         assert record is not None
         record.status = "cancel_requested"
         record.cancel_requested_at = datetime.now(UTC)
-        record.lease_owner = "crashed-worker"
+        record.lease_owner = "score-v2:crashed-worker"
         record.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
         db.commit()
 
@@ -620,7 +762,7 @@ def test_worker_dead_letters_expired_lease_after_maximum_attempts(
         assert record is not None
         record.status = "running"
         record.attempt_count = record.max_attempts
-        record.lease_owner = "crashed-worker"
+        record.lease_owner = "score-v2:crashed-worker"
         record.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
         db.commit()
 
@@ -658,7 +800,7 @@ def test_worker_heartbeat_renews_only_the_current_owner_lease(
         record = db.get(WorkflowJobRecord, queued["id"])
         assert record is not None
         record.status = "running"
-        record.lease_owner = "active-worker"
+        record.lease_owner = "score-v2:active-worker"
         record.lease_expires_at = heartbeat_at + timedelta(seconds=1)
         db.commit()
 
@@ -672,7 +814,7 @@ def test_worker_heartbeat_renews_only_the_current_owner_lease(
         assert _renew_workflow_lease(
             db,
             record_id=record.id,
-            lease_owner="active-worker",
+            lease_owner="score-v2:active-worker",
             lease_seconds=60,
             now=heartbeat_at,
         )
@@ -704,7 +846,7 @@ def test_worker_progress_updates_only_the_current_lease_owner(
         record.status = "running"
         record.stage = "replacement_started"
         record.progress_percent = 35
-        record.lease_owner = "replacement-worker"
+        record.lease_owner = "score-v2:replacement-worker"
         record.lease_expires_at = datetime.now(UTC) + timedelta(minutes=5)
         db.commit()
 
@@ -724,7 +866,7 @@ def test_worker_progress_updates_only_the_current_lease_owner(
             record.id,
             stage="current_progress",
             progress=80,
-            lease_owner="replacement-worker",
+            lease_owner="score-v2:replacement-worker",
         )
         db.refresh(record)
         assert record.stage == "current_progress"

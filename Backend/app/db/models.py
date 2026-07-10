@@ -1,7 +1,16 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Float, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -81,6 +90,13 @@ class AnalysisRecord(Base):
     )
     status: Mapped[str] = mapped_column(String(64), default="completed")
     match_score: Mapped[float] = mapped_column(Float)
+    scoring_version: Mapped[str] = mapped_column(
+        String(64),
+        default="deterministic_v1",
+        server_default="deterministic_v1",
+    )
+    score_status: Mapped[str] = mapped_column(String(32), default="scored", server_default="scored")
+    score_breakdown_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     match_result_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     report_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     report_markdown: Mapped[str] = mapped_column(Text)
@@ -126,6 +142,8 @@ class ApplicationRecord(Base):
     analysis_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
     report_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
     match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    scoring_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    score_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
 
@@ -247,6 +265,12 @@ class WorkflowJobRecord(Base):
         ),
         Index("ix_workflow_jobs_stale_lease", "status", "lease_expires_at"),
         Index("ix_workflow_jobs_user_created_id", "user_id", "created_at", "id"),
+        CheckConstraint(
+            "kind <> 'analysis' OR scoring_version IS NULL OR "
+            "scoring_version <> 'evidence_v2' OR status <> 'running' OR "
+            "lease_owner LIKE 'score-v2:%'",
+            name="ck_workflow_jobs_evidence_v2_worker",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -256,6 +280,7 @@ class WorkflowJobRecord(Base):
     idempotency_key_hash: Mapped[str] = mapped_column(String(64))
     request_fingerprint: Mapped[str] = mapped_column(String(64))
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    scoring_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     stage: Mapped[str] = mapped_column(String(64), default="queued")
     progress_percent: Mapped[int] = mapped_column(default=0)
     attempt_count: Mapped[int] = mapped_column(default=0)

@@ -17,6 +17,7 @@ from app.services.langgraph_checkpointer import (
     close_workflow_checkpointers,
     reconcile_terminal_workflow_checkpoints,
 )
+from app.services.readiness_service import check_application_readiness
 from app.services.workflow_job_service import execute_next_workflow_job
 
 LOGGER = logging.getLogger("resumepilot.worker")
@@ -35,6 +36,11 @@ def run_worker(*, once: bool = False) -> int:
     validate_production_settings(settings)
     configure_logging(settings.debug)
     engine = create_database_engine(settings)
+    try:
+        ensure_worker_readiness(engine, settings)
+    except Exception:
+        engine.dispose()
+        raise
     session_factory = create_session_factory(engine)
     worker_id = f"{socket.gethostname()}-{os.getpid()}-{str(uuid4())[:8]}"
     shutdown = ShutdownSignal()
@@ -91,6 +97,16 @@ def run_worker(*, once: bool = False) -> int:
 
     LOGGER.info("workflow worker stopped", extra={"worker_id": worker_id})
     return 0
+
+
+def ensure_worker_readiness(engine, settings: Settings) -> None:
+    readiness = check_application_readiness(engine, settings)
+    if readiness.status == "ok":
+        return
+    failed_checks = "; ".join(
+        f"{check.name}: {check.detail}" for check in readiness.checks if check.status == "failed"
+    )
+    raise RuntimeError(f"Workflow worker readiness failed: {failed_checks}")
 
 
 def main() -> None:

@@ -17,14 +17,14 @@ export function scoreBand(score: number): "strong" | "moderate" | "low" {
 export function scoreLabel(score: number): string {
   const band = scoreBand(score);
   if (band === "strong") {
-    return "Strong match";
+    return "Strong evidence coverage";
   }
 
   if (band === "moderate") {
-    return "Partial match";
+    return "Partial evidence coverage";
   }
 
-  return "Needs evidence";
+  return "Limited evidence";
 }
 
 export function scoreTone(score: number): "success" | "warning" | "danger" {
@@ -39,3 +39,20 @@ export function scoreTone(score: number): "success" | "warning" | "danger" {
 
   return "danger";
 }
+
+export function scoreMetricLabel(
+  version: ScoringVersion | null | undefined,
+  status?: MatchScoreStatus | null
+): string {
+  const metric =
+    version === "evidence_v2"
+      ? "Evidence fit"
+      : version === "deterministic_v1"
+        ? "Deterministic v1"
+        : "Legacy score";
+  return status === "provisional" ? `${metric} · Provisional` : metric;
+}
+import type {
+  MatchScoreStatus,
+  ScoringVersion
+} from "@/features/dashboard/types";

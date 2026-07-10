@@ -822,17 +822,25 @@ Result: weak match; suggest adding project evidence if true.
 
 ## Match score formula
 
-MVP scoring formula:
+Current score contract: `evidence_v2`.
 
 ```text
 total_score =
-  required_skill_score * 0.40 +
+  required_skill_score * 0.50 +
   responsibility_alignment_score * 0.20 +
-  preferred_skill_score * 0.15 +
-  experience_level_score * 0.10 +
-  domain_keyword_score * 0.10 +
-  resume_quality_score * 0.05
+  preferred_skill_score * 0.10 +
+  experience_level_score * 0.15 +
+  domain_keyword_score * 0.05
 ```
+
+Not-applicable dimensions are removed before the remaining base weights are
+normalized to 100%. Scored dimensions contribute normally. Unknown dimensions
+keep their normalized effective weight but contribute zero, which prevents
+missing information from increasing the score and marks the result provisional.
+The breakdown records each component's effective weight, contribution, evidence,
+and explanation. This is a deterministic resume-to-job evidence heuristic, not
+a hiring probability or ATS guarantee. Historical reports retain their original
+score and version rather than being recomputed.
 
 ### Required skill score
 
@@ -840,11 +848,14 @@ total_score =
 required_skill_score = matched_required_skills / total_required_skills * 100
 ```
 
-Partial matches count as 0.5.
+Project/work-backed exact matches count as 1.0. Inferred and section-only
+evidence receives explicit partial credit. Missing required or preferred skills
+receive zero credit.
 
 ### Responsibility alignment score
 
-Calculated from semantic alignment between job responsibilities and resume projects/experience.
+Calculated with exact token boundaries and controlled word aliases against
+project/work facts only.
 
 Example:
 
@@ -859,12 +870,13 @@ Preferred skills should not dominate the score. They are useful but less importa
 
 ### Experience level score
 
-Rules:
-
-- If JD asks 0-2 years and resume indicates fresher/junior: 100
-- If JD asks 3-5 years and resume has only internship/project experience: 40-60
-- If JD asks 5+ years and resume is fresher: 20-40
-- If unclear: neutral 70
+The job minimum and an explicit candidate tenure claim must both be available.
+ResumePilot does not guess tenure by summing dates or attribute company, team,
+mentee, client, or preferred tenure to the candidate. Conflicting, upper-bound,
+or unparsed job tenure stays `unknown`; missing candidate tenure is also
+`unknown`. Either case contributes zero while reserving the dimension's weight
+and makes the result provisional. Entry-level or zero-year minimum roles score
+this component at 100.
 
 ### Domain keyword score
 
@@ -878,7 +890,13 @@ Measures relevant terms:
 - security
 - analytics
 
-### Resume quality score
+### Evidence-strength diagnostic
+
+Evidence strength is displayed but is not added to role fit. It distinguishes
+matched skills backed by project/work facts from summary or skills-section-only
+evidence. Resume quality remains a separate diagnostic.
+
+### Resume quality diagnostic
 
 Measures whether the resume has:
 

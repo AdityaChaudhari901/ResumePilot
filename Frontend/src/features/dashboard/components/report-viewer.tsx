@@ -19,6 +19,8 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { EvidenceIdBadges } from "@/features/dashboard/components/evidence-id-badges";
+import { MatchScoreBreakdownView } from "@/features/dashboard/components/match-score-breakdown";
 import { ReportCoverLetterPanel } from "@/features/dashboard/components/report-cover-letter-panel";
 import { ReportInterviewPrepPanel } from "@/features/dashboard/components/report-interview-prep-panel";
 import type {
@@ -33,7 +35,6 @@ import type {
   ValidationStatus,
   ValidationWarning
 } from "@/features/dashboard/types";
-import { formatEvidenceSource } from "@/features/dashboard/utils/evidence";
 import { formatScore, scoreLabel, scoreTone } from "@/features/dashboard/utils/report";
 
 interface ReportViewerProps {
@@ -77,10 +78,40 @@ export function ReportViewer({
   const hasUnclearJobRequirements = report.validation_warnings.some(
     (warning) => warning.code === "required_skills_unclear"
   );
-  const scoreBadgeTone = hasUnclearJobRequirements ? "danger" : matchTone;
+  const hasProvisionalScore =
+    hasUnclearJobRequirements || report.score_status === "provisional";
+  const usesEvidenceV2 =
+    report.scoring_version === "evidence_v2" ||
+    report.score_breakdown?.scoring_version === "evidence_v2";
+  const displayedScoringVersion =
+    report.score_breakdown?.scoring_version ?? report.scoring_version;
+  const scoreHeading = usesEvidenceV2
+    ? hasProvisionalScore
+      ? "Provisional evidence-fit score"
+      : "Evidence-fit score"
+    : displayedScoringVersion === "deterministic_v1"
+      ? hasProvisionalScore
+        ? "Provisional deterministic v1 score"
+        : "Deterministic v1 score"
+      : hasProvisionalScore
+        ? "Provisional legacy score"
+        : "Legacy unversioned score";
+  const scoreBadgeTone = hasUnclearJobRequirements
+    ? "danger"
+    : hasProvisionalScore
+      ? "warning"
+      : usesEvidenceV2
+        ? matchTone
+        : "neutral";
   const scoreBadgeLabel = hasUnclearJobRequirements
     ? "Needs job details"
-    : scoreLabel(report.match_score);
+    : hasProvisionalScore
+      ? usesEvidenceV2
+        ? "Provisional — evidence incomplete"
+        : "Historical score — provisional"
+      : usesEvidenceV2
+        ? scoreLabel(report.match_score)
+        : "Historical score";
   const topKeywords = report.ats_keywords.slice(0, 10);
   const validationStatus = reportValidationStatus(report);
   const coverLetterWarnings = report.validation_warnings.filter((warning) =>
@@ -128,7 +159,7 @@ export function ReportViewer({
         <div className="grid gap-3 md:grid-cols-[12rem_1fr]">
           <div className="rounded-lg border border-border bg-surface p-4">
             <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
-              {hasUnclearJobRequirements ? "Provisional score" : "Match score"}
+              {scoreHeading}
             </p>
             <p className="mt-2 font-mono text-5xl font-semibold tabular-nums">
               {formatScore(report.match_score)}
@@ -136,12 +167,20 @@ export function ReportViewer({
             <Badge className="mt-3" tone={scoreBadgeTone}>
               {scoreBadgeLabel}
             </Badge>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              This deterministic comparison is not a hiring probability or ATS guarantee.
+            </p>
           </div>
           <div className="rounded-lg border border-border bg-surface p-4">
             <p className="text-sm font-semibold">Executive summary</p>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{report.executive_summary}</p>
           </div>
         </div>
+
+        <MatchScoreBreakdownView
+          breakdown={report.score_breakdown}
+          scoringVersion={report.scoring_version}
+        />
 
         {hasUnclearJobRequirements ? (
           <div
@@ -443,30 +482,6 @@ function EmptyReportState({
     <div className={`rounded-md border p-3 ${toneClass}`}>
       <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">{children}</p>
-    </div>
-  );
-}
-
-function EvidenceIdBadges({ evidenceIds }: { evidenceIds: string[] }) {
-  if (evidenceIds.length === 0) {
-    return null;
-  }
-  return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {evidenceIds.map((evidenceId) => {
-        const evidence = formatEvidenceSource(evidenceId);
-
-        return (
-          <Badge
-            aria-label={evidence.description}
-            key={evidenceId}
-            title={evidence.description}
-            tone={evidence.tone}
-          >
-            {evidence.label}
-          </Badge>
-        );
-      })}
     </div>
   );
 }

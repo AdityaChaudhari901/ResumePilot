@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -36,6 +37,7 @@ from app.db.models import (
 from app.repositories.workflow_jobs import WorkflowJobRepository
 from app.schemas.auth import CurrentUser
 from app.schemas.job import JobAnalysisRequest
+from app.schemas.match import MatchScoreBreakdown
 from app.services.analysis_finalization_service import finalize_analysis_transaction
 from app.services.langgraph_checkpointer import (
     close_workflow_checkpointers,
@@ -91,6 +93,9 @@ SEEDED_IDS = {
     "applications": 11000,
     "tailored_resume_drafts": 12000,
 }
+ROLLBACK_V2_WORKFLOW_ID = "33333333-3333-4333-8333-333333333333"
+ROLLBACK_V2_USAGE_ID = 10003
+ROLLBACK_DELETE_ANALYSIS_ID = 8001
 
 
 class _CheckpointGateState(TypedDict, total=False):
@@ -110,6 +115,7 @@ def main() -> None:
     _run_alembic(fresh_url, "check")
     _verify_head_schema(fresh_url, expect_seed=False)
     _verify_postgres_job_claiming(fresh_url)
+    _verify_incompatible_worker_fence(fresh_url)
     _verify_analysis_finalization_concurrency(fresh_url)
     _verify_langgraph_interrupt_resume(fresh_url)
 
@@ -120,6 +126,20 @@ def main() -> None:
     _setup_langgraph(upgrade_url)
     _run_alembic(upgrade_url, "check")
     _verify_head_schema(upgrade_url, expect_seed=True)
+    _verify_old_writer_analysis_default(upgrade_url)
+
+    _seed_v2_rollback_contract(upgrade_url)
+    _assert_active_v2_downgrade_guard(upgrade_url)
+    _run_alembic(upgrade_url, "downgrade", "20260710_0009")
+    _run_alembic(upgrade_url, "upgrade", "head")
+    _verify_v2_rollback_round_trip(upgrade_url)
+
+    _run_alembic(upgrade_url, "downgrade", "20260710_0009")
+    _assert_deep_score_downgrade_guard(upgrade_url)
+    _delete_rollback_privacy_fixture(upgrade_url)
+    _seed_score_version_upgrade(upgrade_url)
+    _run_alembic(upgrade_url, "upgrade", "head")
+    _verify_score_version_upgrade(upgrade_url)
 
     _run_alembic(upgrade_url, "downgrade", BASELINE_REVISION)
     _verify_baseline_round_trip(upgrade_url)
@@ -130,8 +150,10 @@ def main() -> None:
 
     print(
         "PostgreSQL migration gate passed: fresh upgrade, prior-release upgrade, "
-        "schema drift check, concurrent analysis finalization, durable LangGraph "
-        "interrupt/resume, seed preservation, sequence advancement, and downgrade round trip."
+        "score-version backfill, provenance-preserving rollback, schema drift check, "
+        "concurrent analysis finalization, "
+        "durable LangGraph interrupt/resume, seed preservation, sequence advancement, and "
+        "downgrade round trip."
     )
 
 
@@ -438,6 +460,7 @@ def _verify_head_schema(database_url: str, *, expect_seed: bool) -> None:
         _assert_resume_unique_constraint(inspector)
         _assert_history_indexes(inspector)
         _assert_workflow_schema(inspector)
+        _assert_score_contract_schema(inspector)
         if expect_seed:
             _assert_seed_preserved(engine)
             _assert_seed_backfill(engine)
@@ -543,6 +566,71 @@ def _assert_workflow_schema(inspector: Inspector) -> None:
         "idempotency_key_hash",
     ]:
         raise AssertionError("Workflow idempotency uniqueness is missing")
+    workflow_checks = {
+        constraint["name"] for constraint in inspector.get_check_constraints("workflow_jobs")
+    }
+    if "ck_workflow_jobs_evidence_v2_worker" not in workflow_checks:
+        raise AssertionError("Evidence v2 worker compatibility constraint is missing")
+
+
+def _assert_score_contract_schema(inspector: Inspector) -> None:
+    expected_columns = {
+        "analyses": {"scoring_version", "score_status", "score_breakdown_json"},
+        "applications": {"scoring_version", "score_status"},
+        "workflow_jobs": {"scoring_version"},
+    }
+    for table_name, expected in expected_columns.items():
+        actual = {column["name"] for column in inspector.get_columns(table_name)}
+        missing = expected - actual
+        if missing:
+            raise AssertionError(f"Missing {table_name} score-contract columns: {sorted(missing)}")
+
+    analysis_columns = {column["name"]: column for column in inspector.get_columns("analyses")}
+    scoring_default = str(analysis_columns["scoring_version"].get("default") or "")
+    if "deterministic_v1" not in scoring_default:
+        raise AssertionError("Old-writer analysis fallback is not deterministic_v1")
+
+
+def _verify_old_writer_analysis_default(database_url: str) -> None:
+    engine = sa.create_engine(database_url)
+    old_writer_analysis_id = 8002
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO analyses (
+                        id, user_id, resume_id, job_id, status, match_score,
+                        match_result_json, report_json, report_markdown,
+                        validation_warnings_json, workflow_mode, workflow_trace_json,
+                        created_at
+                    ) VALUES (
+                        :id, :user_id, :resume_id, :job_id, 'completed', 50,
+                        CAST('{}' AS JSON), CAST('{}' AS JSON), 'old writer report',
+                        CAST('[]' AS JSON), 'deterministic_fallback', CAST('{}' AS JSON),
+                        CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                {
+                    "id": old_writer_analysis_id,
+                    "user_id": SEEDED_IDS["users"],
+                    "resume_id": SEEDED_IDS["resumes"],
+                    "job_id": SEEDED_IDS["jobs"],
+                },
+            )
+            scoring_version = connection.scalar(
+                sa.text("SELECT scoring_version FROM analyses WHERE id = :id"),
+                {"id": old_writer_analysis_id},
+            )
+            if scoring_version != "deterministic_v1":
+                raise AssertionError("Old writer analysis did not receive deterministic v1")
+            connection.execute(
+                sa.text("DELETE FROM analyses WHERE id = :id"),
+                {"id": old_writer_analysis_id},
+            )
+    finally:
+        engine.dispose()
 
 
 def _assert_seed_backfill(engine: Engine) -> None:
@@ -572,6 +660,403 @@ def _assert_seed_backfill(engine: Engine) -> None:
         )
         if usage_state != "consumed":
             raise AssertionError("Legacy completed usage was not backfilled as consumed")
+
+        analysis_score_contract = (
+            connection.execute(
+                sa.text(
+                    "SELECT scoring_version, score_status, score_breakdown_json "
+                    "FROM analyses WHERE id = :id"
+                ),
+                {"id": SEEDED_IDS["analyses"]},
+            )
+            .mappings()
+            .one()
+        )
+        if analysis_score_contract["scoring_version"] != "legacy_unversioned":
+            raise AssertionError("Historical analysis score version was not preserved as legacy")
+        if analysis_score_contract["score_status"] != "scored":
+            raise AssertionError("Historical analysis score status was not backfilled")
+        if analysis_score_contract["score_breakdown_json"] is not None:
+            raise AssertionError("Historical analysis received an invented score breakdown")
+
+        application_score_contract = (
+            connection.execute(
+                sa.text("SELECT scoring_version, score_status FROM applications WHERE id = :id"),
+                {"id": SEEDED_IDS["applications"]},
+            )
+            .mappings()
+            .one()
+        )
+        if application_score_contract["scoring_version"] != "legacy_unversioned":
+            raise AssertionError("Historical application score version was not backfilled")
+        if application_score_contract["score_status"] != "scored":
+            raise AssertionError("Historical application score status was not backfilled")
+
+
+def _seed_score_version_upgrade(database_url: str) -> None:
+    engine = sa.create_engine(database_url)
+    linked_job_id = "11111111-1111-4111-8111-111111111111"
+    queued_job_id = "22222222-2222-4222-8222-222222222222"
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO usage_events (
+                        id, user_id, event_type, quantity, cost_estimate_usd,
+                        metadata_json, state, reservation_key, reserved_at, settled_at,
+                        created_at
+                    ) VALUES
+                        (10001, :user_id, 'analysis_created', 1, NULL, CAST('{}' AS JSON),
+                         'consumed', :linked_job_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                         CURRENT_TIMESTAMP),
+                        (10002, :user_id, 'analysis_created', 1, NULL, CAST('{}' AS JSON),
+                         'reserved', :queued_job_id, CURRENT_TIMESTAMP, NULL, CURRENT_TIMESTAMP)
+                    """
+                ),
+                {
+                    "user_id": SEEDED_IDS["users"],
+                    "linked_job_id": linked_job_id,
+                    "queued_job_id": queued_job_id,
+                },
+            )
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO workflow_jobs (
+                        id, user_id, kind, status, idempotency_key_hash,
+                        request_fingerprint, payload_json, stage, progress_percent,
+                        attempt_count, max_attempts, priority, available_at, lease_owner,
+                        lease_expires_at, heartbeat_at, cancel_requested_at, usage_event_id,
+                        analysis_id, result_json, error_code, error_message, request_id,
+                        created_at, updated_at, started_at, finished_at
+                    ) VALUES
+                        (:linked_job_id, :user_id, 'analysis', 'succeeded', :linked_hash,
+                         :linked_fingerprint, CAST('{}' AS JSON), 'completed', 100, 1, 3, 0,
+                         CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, 10001, :analysis_id,
+                         CAST('{}' AS JSON), NULL, NULL, NULL, CURRENT_TIMESTAMP,
+                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                        (:queued_job_id, :user_id, 'analysis', 'queued', :queued_hash,
+                         :queued_fingerprint, CAST('{}' AS JSON), 'queued', 0, 0, 3, 0,
+                         CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, 10002, NULL,
+                         CAST('{}' AS JSON), NULL, NULL, NULL, CURRENT_TIMESTAMP,
+                         CURRENT_TIMESTAMP, NULL, NULL)
+                    """
+                ),
+                {
+                    "linked_job_id": linked_job_id,
+                    "queued_job_id": queued_job_id,
+                    "user_id": SEEDED_IDS["users"],
+                    "analysis_id": SEEDED_IDS["analyses"],
+                    "linked_hash": "c" * 64,
+                    "linked_fingerprint": "d" * 64,
+                    "queued_hash": "e" * 64,
+                    "queued_fingerprint": "f" * 64,
+                },
+            )
+            connection.execute(
+                sa.text("UPDATE analyses SET workflow_job_id = :job_id WHERE id = :analysis_id"),
+                {"job_id": linked_job_id, "analysis_id": SEEDED_IDS["analyses"]},
+            )
+    finally:
+        engine.dispose()
+
+
+def _seed_v2_rollback_contract(database_url: str) -> None:
+    breakdown = MatchScoreBreakdown.model_validate(
+        {
+            "scoring_version": "evidence_v2",
+            "score_status": "scored",
+            "uncapped_score": 80,
+            "score_cap": None,
+            "total_score": 80,
+            "components": [
+                {
+                    "key": "required_skills",
+                    "status": "scored",
+                    "score": 80,
+                    "base_weight": 50,
+                    "effective_weight": 100,
+                    "contribution": 80,
+                    "matched_count": 1,
+                    "total_count": 1,
+                    "evidence_ids": ["migration_seed_001"],
+                    "explanation": "Migration rollback seed required-skill evidence.",
+                },
+                *[
+                    {
+                        "key": key,
+                        "status": "not_applicable",
+                        "score": None,
+                        "base_weight": weight,
+                        "effective_weight": 0,
+                        "contribution": 0,
+                        "matched_count": None,
+                        "total_count": None,
+                        "evidence_ids": [],
+                        "explanation": "Migration rollback seed does not use this component.",
+                    }
+                    for key, weight in (
+                        ("responsibilities", 20),
+                        ("preferred_skills", 10),
+                        ("experience", 15),
+                        ("domain", 5),
+                        ("evidence_strength", 0),
+                    )
+                ],
+            ],
+        }
+    )
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "UPDATE analyses SET scoring_version = 'evidence_v2', "
+                    "score_status = 'scored', score_breakdown_json = CAST(:breakdown AS JSON) "
+                    "WHERE id = :analysis_id"
+                ),
+                {
+                    "analysis_id": SEEDED_IDS["analyses"],
+                    "breakdown": json.dumps(breakdown.model_dump(mode="json")),
+                },
+            )
+            connection.execute(
+                sa.text(
+                    "UPDATE applications SET scoring_version = 'evidence_v2', "
+                    "score_status = 'scored' WHERE id = :application_id"
+                ),
+                {"application_id": SEEDED_IDS["applications"]},
+            )
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO analyses (
+                        id, user_id, resume_id, job_id, workflow_job_id, status, match_score,
+                        scoring_version, score_status, score_breakdown_json, match_result_json,
+                        report_json, report_markdown, validation_warnings_json, workflow_mode,
+                        workflow_trace_json, created_at
+                    )
+                    SELECT :new_id, user_id, resume_id, job_id, NULL, status, match_score,
+                        scoring_version, score_status, score_breakdown_json, match_result_json,
+                        report_json, report_markdown, validation_warnings_json, workflow_mode,
+                        workflow_trace_json, CURRENT_TIMESTAMP
+                    FROM analyses WHERE id = :source_id
+                    """
+                ),
+                {
+                    "new_id": ROLLBACK_DELETE_ANALYSIS_ID,
+                    "source_id": SEEDED_IDS["analyses"],
+                },
+            )
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO usage_events (
+                        id, user_id, event_type, quantity, cost_estimate_usd,
+                        metadata_json, state, reservation_key, reserved_at, settled_at,
+                        created_at
+                    ) VALUES (
+                        :id, :user_id, 'analysis_created', 1, NULL, CAST('{}' AS JSON),
+                        'reserved', :workflow_id, CURRENT_TIMESTAMP, NULL, CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                {
+                    "id": ROLLBACK_V2_USAGE_ID,
+                    "user_id": SEEDED_IDS["users"],
+                    "workflow_id": ROLLBACK_V2_WORKFLOW_ID,
+                },
+            )
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO workflow_jobs (
+                        id, user_id, kind, status, idempotency_key_hash,
+                        request_fingerprint, payload_json, scoring_version, stage,
+                        progress_percent, attempt_count, max_attempts, priority, available_at,
+                        lease_owner, lease_expires_at, heartbeat_at, cancel_requested_at,
+                        usage_event_id, analysis_id, result_json, error_code, error_message,
+                        request_id, created_at, updated_at, started_at, finished_at
+                    ) VALUES (
+                        :id, :user_id, 'analysis', 'queued', :key_hash, :fingerprint,
+                        CAST('{}' AS JSON), 'evidence_v2', 'queued', 0, 0, 3, 0,
+                        CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, :usage_id, NULL,
+                        CAST('{}' AS JSON), NULL, NULL, NULL, CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP, NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "id": ROLLBACK_V2_WORKFLOW_ID,
+                    "user_id": SEEDED_IDS["users"],
+                    "key_hash": "7" * 64,
+                    "fingerprint": "8" * 64,
+                    "usage_id": ROLLBACK_V2_USAGE_ID,
+                },
+            )
+    finally:
+        engine.dispose()
+
+
+def _assert_active_v2_downgrade_guard(database_url: str) -> None:
+    try:
+        _run_alembic(database_url, "downgrade", "20260710_0009")
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("Active evidence_v2 workflow did not block schema downgrade")
+
+    engine = sa.create_engine(database_url)
+    try:
+        _assert_revision(engine, _head_revision())
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "UPDATE workflow_jobs SET status = 'failed', stage = 'failed', "
+                    "finished_at = CURRENT_TIMESTAMP WHERE id = :workflow_id"
+                ),
+                {"workflow_id": ROLLBACK_V2_WORKFLOW_ID},
+            )
+    finally:
+        engine.dispose()
+
+
+def _assert_deep_score_downgrade_guard(database_url: str) -> None:
+    try:
+        _run_alembic(database_url, "downgrade", BASELINE_REVISION)
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("Evidence v2 provenance did not block a destructive deep downgrade")
+
+    engine = sa.create_engine(database_url)
+    try:
+        _assert_revision(engine, "20260710_0009")
+        inspector = sa.inspect(engine)
+        expected_sidecars = {
+            "score_contract_0010_analysis_rollback",
+            "score_contract_0010_workflow_rollback",
+        }
+        if not expected_sidecars <= set(inspector.get_table_names()):
+            raise AssertionError("Blocked deep downgrade did not retain score rollback sidecars")
+    finally:
+        engine.dispose()
+
+
+def _delete_rollback_privacy_fixture(database_url: str) -> None:
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text("DELETE FROM analyses WHERE id = :analysis_id"),
+                {"analysis_id": ROLLBACK_DELETE_ANALYSIS_ID},
+            )
+            connection.execute(
+                sa.text("DELETE FROM workflow_jobs WHERE id = :workflow_id"),
+                {"workflow_id": ROLLBACK_V2_WORKFLOW_ID},
+            )
+            analysis_backup_count = connection.scalar(
+                sa.text(
+                    "SELECT COUNT(*) FROM score_contract_0010_analysis_rollback "
+                    "WHERE analysis_id = :analysis_id"
+                ),
+                {"analysis_id": ROLLBACK_DELETE_ANALYSIS_ID},
+            )
+            workflow_backup_count = connection.scalar(
+                sa.text(
+                    "SELECT COUNT(*) FROM score_contract_0010_workflow_rollback "
+                    "WHERE workflow_job_id = :workflow_id"
+                ),
+                {"workflow_id": ROLLBACK_V2_WORKFLOW_ID},
+            )
+        if analysis_backup_count or workflow_backup_count:
+            raise AssertionError("Rollback sidecars retained deleted tenant score metadata")
+    finally:
+        engine.dispose()
+
+
+def _verify_v2_rollback_round_trip(database_url: str) -> None:
+    engine = sa.create_engine(database_url)
+    try:
+        inspector = sa.inspect(engine)
+        with engine.connect() as connection:
+            analysis = (
+                connection.execute(
+                    sa.text(
+                        "SELECT scoring_version, score_status, score_breakdown_json "
+                        "FROM analyses WHERE id = :analysis_id"
+                    ),
+                    {"analysis_id": SEEDED_IDS["analyses"]},
+                )
+                .mappings()
+                .one()
+            )
+            application_version = connection.scalar(
+                sa.text("SELECT scoring_version FROM applications WHERE id = :application_id"),
+                {"application_id": SEEDED_IDS["applications"]},
+            )
+            workflow_version = connection.scalar(
+                sa.text("SELECT scoring_version FROM workflow_jobs WHERE id = :workflow_id"),
+                {"workflow_id": ROLLBACK_V2_WORKFLOW_ID},
+            )
+        if analysis["scoring_version"] != "evidence_v2":
+            raise AssertionError("Rollback round trip lost the analysis scoring version")
+        if analysis["score_status"] != "scored":
+            raise AssertionError("Rollback round trip lost the analysis score status")
+        if analysis["score_breakdown_json"]["total_score"] != 80:
+            raise AssertionError("Rollback round trip lost the analysis score breakdown")
+        if application_version != "evidence_v2":
+            raise AssertionError("Rollback round trip lost linked application provenance")
+        if workflow_version != "evidence_v2":
+            raise AssertionError("Rollback round trip lost the terminal workflow scorer snapshot")
+        rollback_tables = {
+            "score_contract_0010_analysis_rollback",
+            "score_contract_0010_workflow_rollback",
+        }
+        if rollback_tables & set(inspector.get_table_names()):
+            raise AssertionError("Rollback sidecar tables were not removed after restoration")
+    finally:
+        engine.dispose()
+
+
+def _verify_score_version_upgrade(database_url: str) -> None:
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            analysis_version = connection.scalar(
+                sa.text("SELECT scoring_version FROM analyses WHERE id = :id"),
+                {"id": SEEDED_IDS["analyses"]},
+            )
+            application_version = connection.scalar(
+                sa.text("SELECT scoring_version FROM applications WHERE id = :id"),
+                {"id": SEEDED_IDS["applications"]},
+            )
+            workflow_versions = dict(
+                connection.execute(
+                    sa.text("SELECT id, scoring_version FROM workflow_jobs WHERE kind = 'analysis'")
+                ).all()
+            )
+            deleted_analysis_count = connection.scalar(
+                sa.text("SELECT COUNT(*) FROM analyses WHERE id = :analysis_id"),
+                {"analysis_id": ROLLBACK_DELETE_ANALYSIS_ID},
+            )
+        if analysis_version != "deterministic_v1":
+            raise AssertionError("Workflow-linked analysis did not retain deterministic v1")
+        if application_version != "deterministic_v1":
+            raise AssertionError("Linked application did not inherit its analysis score version")
+        expected_versions = {
+            "11111111-1111-4111-8111-111111111111": "deterministic_v1",
+            "22222222-2222-4222-8222-222222222222": "deterministic_v1",
+        }
+        if workflow_versions != expected_versions:
+            raise AssertionError(
+                f"Queued and completed workflows were not versioned safely: {workflow_versions}"
+            )
+        if deleted_analysis_count:
+            raise AssertionError("Re-upgrade resurrected deleted tenant score metadata")
+    finally:
+        engine.dispose()
 
 
 def _verify_postgres_job_claiming(database_url: str) -> None:
@@ -653,6 +1138,77 @@ def _verify_postgres_job_claiming(database_url: str) -> None:
     engine.dispose()
 
 
+def _verify_incompatible_worker_fence(database_url: str) -> None:
+    engine = sa.create_engine(database_url, pool_pre_ping=True)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    job_id = str(uuid4())
+    now = datetime.now(UTC)
+    with session_factory() as db:
+        user = UserRecord(
+            external_id=f"worker-fence-{job_id}",
+            plan="premium",
+            subscription_status="active",
+        )
+        db.add(user)
+        db.flush()
+        usage = UsageEventRecord(
+            user_id=user.id,
+            event_type="analysis_created",
+            quantity=1,
+            metadata_json={"status": "reserved"},
+            state="reserved",
+            reservation_key=job_id,
+            reserved_at=now,
+        )
+        db.add(usage)
+        db.flush()
+        db.add(
+            WorkflowJobRecord(
+                id=job_id,
+                user_id=user.id,
+                kind="analysis",
+                status="queued",
+                idempotency_key_hash="9" * 64,
+                request_fingerprint="a" * 64,
+                payload_json={"resume_id": 1, "job_text": "worker fence placeholder"},
+                scoring_version="evidence_v2",
+                stage="queued",
+                progress_percent=0,
+                attempt_count=0,
+                max_attempts=3,
+                priority=0,
+                available_at=now,
+                usage_event_id=usage.id,
+                result_json={},
+            )
+        )
+        db.commit()
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "UPDATE workflow_jobs SET status = 'running', lease_owner = 'old-worker' "
+                    "WHERE id = :job_id"
+                ),
+                {"job_id": job_id},
+            )
+    except sa.exc.IntegrityError:
+        pass
+    else:
+        raise AssertionError("An incompatible worker claimed an evidence_v2 workflow")
+
+    with session_factory() as db:
+        claimed = WorkflowJobRepository(db).claim_by_id(
+            job_id,
+            worker_id="postgres-compatible-worker",
+            lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        if claimed is None or claimed.lease_owner != "score-v2:postgres-compatible-worker":
+            raise AssertionError("Compatible worker did not claim the evidence_v2 workflow")
+    engine.dispose()
+
+
 def _verify_analysis_finalization_concurrency(database_url: str) -> None:
     """Prove PostgreSQL serializes replay repair into one complete finalization."""
 
@@ -703,7 +1259,19 @@ def _verify_analysis_finalization_concurrency(database_url: str) -> None:
             job_id=job.id,
             status="completed",
             match_score=91.0,
-            match_result_json={},
+            match_result_json={
+                "score": 91.0,
+                "required_skill_score": 91.0,
+                "preferred_skill_score": 91.0,
+                "responsibility_alignment_score": 91.0,
+                "experience_level_score": 91.0,
+                "domain_keyword_score": 91.0,
+                "resume_quality_score": 91.0,
+                "matched_skills": [],
+                "missing_skills": [],
+                "weak_skills": [],
+                "confidence": "medium",
+            },
             report_json={
                 "analysis_id": 0,
                 "resume_id": resume.id,

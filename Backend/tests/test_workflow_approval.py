@@ -1,21 +1,25 @@
 from datetime import UTC, datetime
 
+import pytest
 from fastapi import HTTPException, status
 from sqlalchemy import select
 
-from app.db.models import UsageEventRecord, UserRecord, WorkflowJobRecord
+from app.db.models import AnalysisRecord, UsageEventRecord, UserRecord, WorkflowJobRecord
 from app.schemas.agent import (
     AgentStepName,
     AgentTokenUsage,
     AgentWorkflowMode,
+    AgentWorkflowResult,
+    AgentWorkflowTrace,
     CoverLetterAgentOutput,
     InterviewCoachAgentOutput,
     LiveDraftSections,
     ResumeMatchAgentOutput,
 )
 from app.schemas.operation import LiveDraftProposal
-from app.schemas.report import InterviewQuestionGroup
+from app.schemas.report import ApplicationReport, InterviewQuestionGroup
 from app.services.langgraph_workflow import LiveDraftGraphResult
+from app.services.workflow_job_service import _persist_agent_result
 from tests.api_helpers import submit_analysis
 
 USER_A_HEADERS = {
@@ -53,6 +57,8 @@ def test_live_analysis_waits_for_approval_and_releases_worker_lease(
     assert operation["finished_at"] is None
     assert operation["approval"]["status"] == "pending"
     assert operation["approval"]["id"] == "a" * 64
+    assert operation["result"]["scoring_version"] == "evidence_v2"
+    assert operation["result"]["score_status"] == "scored"
     assert "_approval" not in (operation["result"] or {})
     assert calls == {"start": 1, "resume": 0}
 
@@ -266,6 +272,10 @@ def test_approved_live_proposal_updates_report_and_consumes_live_usage_once(
         "The deterministic match is supported by linked resume evidence."
     )
     assert final_report["cover_letter"].startswith("Dear Hiring Team")
+    assert final_report["match_score"] == baseline["match_score"]
+    assert final_report["scoring_version"] == baseline["scoring_version"] == "evidence_v2"
+    assert final_report["score_status"] == baseline["score_status"]
+    assert final_report["score_breakdown"] == baseline["score_breakdown"]
     assert trace["mode"] == "langgraph"
     assert trace["steps"][-1]["name"] == "human_approval"
     assert _usage_limit(client, "live_ai_runs") == {
@@ -279,6 +289,40 @@ def test_approved_live_proposal_updates_report_and_consumes_live_usage_once(
     assert replay.status_code == 202
     assert _usage_limit(client, "live_ai_runs")["used"] == 1
     assert calls == {"start": 1, "resume": 1}
+
+
+def test_live_result_persistence_rejects_score_contract_tampering(
+    client,
+    monkeypatch,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    _install_fake_graph_runner(monkeypatch)
+    operation = _start_live_analysis(
+        client,
+        settings,
+        sample_resume_text,
+        sample_job_text,
+        idempotency_key="langgraph-score-contract-tamper",
+    )
+    baseline_payload = client.get(f"/reports/{operation['result']['report_id']}").json()
+
+    with client.app.state.session_factory() as db:
+        analysis = db.get(AnalysisRecord, operation["result"]["analysis_id"])
+        assert analysis is not None
+        original_report_json = dict(analysis.report_json)
+        tampered_report = ApplicationReport.model_validate(baseline_payload).model_copy(
+            update={"match_score": baseline_payload["match_score"] + 1}
+        )
+        tampered_result = AgentWorkflowResult(
+            report=tampered_report,
+            trace=AgentWorkflowTrace.model_validate(analysis.workflow_trace_json),
+        )
+
+        with pytest.raises(RuntimeError, match="Analysis and report match scores"):
+            _persist_agent_result(db, analysis, tampered_result)
+        assert analysis.report_json == original_report_json
 
 
 def test_rejected_live_proposal_keeps_deterministic_report(

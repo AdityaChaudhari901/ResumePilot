@@ -9,7 +9,14 @@ from app.schemas.common import (
     ValidationWarning,
     validation_status_from_warnings,
 )
-from app.schemas.match import MatchedSkill, MissingSkill, WeakSkill
+from app.schemas.match import (
+    MatchedSkill,
+    MatchScoreBreakdown,
+    MatchScoreStatus,
+    MissingSkill,
+    ScoringVersion,
+    WeakSkill,
+)
 
 
 class TailoredBullet(StrictBaseModel):
@@ -38,6 +45,9 @@ class ApplicationReport(StrictBaseModel):
     job_id: int
     executive_summary: str = Field(min_length=1)
     match_score: float = Field(ge=0, le=100)
+    scoring_version: ScoringVersion = ScoringVersion.legacy_unversioned
+    score_status: MatchScoreStatus = MatchScoreStatus.scored
+    score_breakdown: MatchScoreBreakdown | None = None
     matched_skills: list[MatchedSkill] = Field(default_factory=list)
     missing_skills: list[MissingSkill] = Field(default_factory=list)
     weak_skills: list[WeakSkill] = Field(default_factory=list)
@@ -74,6 +84,8 @@ class ReportHistoryItem(StrictBaseModel):
     resume_candidate_name: str | None = None
     status: str
     match_score: float = Field(ge=0, le=100)
+    scoring_version: ScoringVersion = ScoringVersion.legacy_unversioned
+    score_status: MatchScoreStatus = MatchScoreStatus.scored
     workflow_mode: str
     validation_warnings_count: int = Field(ge=0)
     matched_skills_count: int = Field(ge=0)

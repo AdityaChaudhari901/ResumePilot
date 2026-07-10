@@ -5,6 +5,7 @@ from pydantic import Field, HttpUrl, model_validator
 
 from app.schemas.common import StrictBaseModel
 from app.schemas.job import MAX_JOB_TEXT_CHARS, MIN_JOB_TEXT_CHARS, JobProfile, JobSourceType
+from app.schemas.match import MatchScoreStatus, ScoringVersion
 
 
 class ApplicationStatus(StrEnum):
@@ -56,6 +57,8 @@ class ApplicationItem(StrictBaseModel):
     analysis_id: int | None
     report_id: int | None
     match_score: float | None = Field(default=None, ge=0, le=100)
+    scoring_version: ScoringVersion | None = None
+    score_status: MatchScoreStatus | None = None
     created_at: datetime
     updated_at: datetime
 

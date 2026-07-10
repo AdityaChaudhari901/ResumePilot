@@ -3,6 +3,7 @@ from enum import StrEnum
 from pydantic import Field, HttpUrl, model_validator
 
 from app.schemas.common import Confidence, StrictBaseModel, ValidationWarning
+from app.schemas.match import MatchScoreStatus, ScoringVersion
 
 MIN_JOB_TEXT_CHARS = 40
 MAX_JOB_TEXT_CHARS = 50_000
@@ -84,6 +85,8 @@ class JobAnalysisResponse(StrictBaseModel):
     analysis_id: int
     report_id: int
     match_score: float = Field(ge=0, le=100)
+    scoring_version: ScoringVersion = ScoringVersion.legacy_unversioned
+    score_status: MatchScoreStatus = MatchScoreStatus.scored
     status: str
 
 

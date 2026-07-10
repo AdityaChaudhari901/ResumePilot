@@ -18,16 +18,16 @@ baseline. It is not ready for a public multi-tenant launch and is not ready to
 charge users. The deterministic workflow, durable operation queue, tenant
 scoping, LangGraph approval checkpointing, validation gates, migration gate,
 and broad automated tests are materially stronger than a typical prototype.
-The remaining risks are concentrated in score validity, privacy operations,
-abuse controls, deployment/restore capability, worker observability, and billing
-lifecycle enforcement.
+The remaining risks are concentrated in privacy operations, abuse controls,
+deployment/restore capability, worker observability, and billing lifecycle
+enforcement.
 
 No confirmed P0 vulnerability was found, and no data loss was observed during
-the audit. Several P1 defects can still produce misleading scores, missing
-files/checkpoints after a failed cross-store deletion, excess paid usage, or
-retained sensitive data. The single most important next move is to correct and
-version match-score semantics before expanding traffic or billing. The audited
-partial-analysis-finalization defect was closed in the first post-audit batch.
+the audit. Several P1 defects can still produce missing files/checkpoints after
+a failed cross-store deletion, excess usage under unresolved races, or retained
+sensitive data. Versioned evidence-fit scoring and the audited partial analysis
+finalization defect are now closed. The next engineering move is to expand
+PostgreSQL workflow race coverage before broadening traffic or billing.
 
 ## Product and users
 
@@ -51,12 +51,12 @@ and after application, where tracking stops at `applied`.
 
 | Area | Status | Evidence and reason |
 |---|---|---|
-| Correctness | AMBER | Validation, idempotent jobs, atomic replay-repairing finalization, and lease fencing are strong; the matcher still does not use candidate evidence for its experience component. |
+| Correctness | AMBER | Validation, versioned evidence-fit scoring, idempotent jobs, atomic replay-repairing finalization, and lease fencing are strong; full workflow races and cross-store privacy deletion still need hardening. |
 | Security | AMBER | Signed internal identity, tenant-scoped repositories, upload bounds, SSRF controls, and non-root images are present. Public ingress rate/body limits, CSP, least-privilege database roles, and cloud controls are absent. |
 | Architecture | AMBER | The modular monolith is the correct shape. Commit ownership is spread across large orchestration services and committing repositories, making partial-state defects difficult to prevent. |
 | Database | AMBER | Alembic and the PostgreSQL migration gate now cover concurrent finalization in addition to migrations, locks, and checkpoints. Full workflows are still primarily tested on SQLite; timestamp columns are timezone-naive and cross-resource deletion is not atomic. |
 | Performance | AMBER | Queue leasing and `SKIP LOCKED` support horizontal workers, but the shipped Compose topology has one serial worker and no measured load/queue budget. |
-| Testing | GREEN | 148 backend tests at 88% measured application coverage, 12 Chromium E2E tests, 20 golden pairs, build/lint/type checks, migration checks, dependency gates, and a PostgreSQL concurrent-finalization check passed. Broader PostgreSQL races and labeled match-quality evaluation remain gaps. |
+| Testing | GREEN | 220 backend tests at 88.90% measured application coverage, 13 Chromium E2E tests, 20 golden pairs, 38 labeled score cases with 14 monotonic pairwise expectations, build/lint/type checks, migration checks, dependency gates, and PostgreSQL finalization/score-migration checks passed. Broader load and full-workflow PostgreSQL races remain gaps. |
 | UI/UX | AMBER | The evidence editor and guarded export are differentiated. The main workspace mixes user outcomes with developer diagnostics, repeats navigation, and overuses equal card surfaces. |
 | Accessibility | AMBER | Initial axe coverage and semantic controls pass, but dynamic steps lack consistent focus movement/`aria-current`, and complex approval/report/mobile states are not scanned. |
 | Deployment | RED | `docker-compose.yml` is explicitly a local production-like baseline. There is no selected public target, TLS ingress, staging promotion, IaC, or automated rollback. |
