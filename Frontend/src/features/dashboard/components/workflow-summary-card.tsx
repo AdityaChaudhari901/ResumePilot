@@ -8,6 +8,7 @@ import type {
   AgentWorkflowTrace,
   JobAnalysisResponse,
   JobPreviewResponse,
+  JobSourceType,
   ResumeUploadResponse,
   TailoredResumeDraft
 } from "@/features/dashboard/types";
@@ -18,6 +19,8 @@ interface WorkflowSummaryCardProps {
   isJobReady: boolean;
   isResumeReady: boolean;
   jobPreview: JobPreviewResponse | null;
+  jobSourceType: JobSourceType;
+  jobText: string;
   jobUrl: string;
   resume: ResumeUploadResponse | null;
   tailoredResumeDraft: TailoredResumeDraft | null;
@@ -36,6 +39,8 @@ export function WorkflowSummaryCard({
   isJobReady,
   isResumeReady,
   jobPreview,
+  jobSourceType,
+  jobText,
   jobUrl,
   onEditJob,
   onEditResume,
@@ -55,12 +60,14 @@ export function WorkflowSummaryCard({
         <SummaryRow
           actionLabel="Edit"
           actionName="Edit job listing"
-          detail={formatJobDetail(jobUrl)}
+          detail={formatJobDetail(jobSourceType, jobUrl, jobText)}
           icon={<BriefcaseBusiness className="h-4 w-4 text-primary" aria-hidden="true" />}
           isActionDisabled={false}
           label="Job listing"
           status={isJobReady ? "ready" : "pending"}
-          statusLabel={isJobReady ? "URL added" : "Needed first"}
+          statusLabel={
+            isJobReady ? (jobSourceType === "url" ? "URL added" : "Text added") : "Needed first"
+          }
           onAction={onEditJob}
         />
         <SummaryRow
@@ -177,7 +184,12 @@ function SummaryRow({
   );
 }
 
-function formatJobDetail(jobUrl: string): string {
+function formatJobDetail(jobSourceType: JobSourceType, jobUrl: string, jobText: string): string {
+  if (jobSourceType === "pasted_text") {
+    return jobText.trim()
+      ? `Pasted description · ${jobText.trim().length.toLocaleString()} characters`
+      : "No pasted job description yet";
+  }
   if (!jobUrl.trim()) {
     return "No job listing URL yet";
   }

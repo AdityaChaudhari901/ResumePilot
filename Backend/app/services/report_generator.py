@@ -113,13 +113,21 @@ def report_to_markdown(report: ApplicationReport) -> str:
         lines.append("- No ATS keywords were extracted from this job listing.")
 
     lines.extend(["", "## 7. Cover Letter Draft", report.cover_letter])
+    if report.cover_letter_evidence_ids:
+        lines.append(f"Evidence: {', '.join(report.cover_letter_evidence_ids)}")
 
     lines.extend(["", "## 8. Interview Preparation"])
     for group in report.interview_questions:
         lines.append(f"### {group.category}")
         lines.extend(f"- {question}" for question in group.questions)
 
-    lines.extend(["", "## 9. Validation Warnings"])
+    lines.extend(
+        [
+            "",
+            "## 9. Validation Warnings",
+            f"- Overall status: {report.validation_status.value}",
+        ]
+    )
     lines.extend(f"- {warning.code}: {warning.message}" for warning in report.validation_warnings)
     if not report.validation_warnings:
         lines.append("- No validation warnings.")

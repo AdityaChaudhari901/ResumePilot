@@ -1,3 +1,5 @@
+from tests.api_helpers import submit_analysis, successful_analysis
+
 USER_A_HEADERS = {
     "X-ResumePilot-User": "applications-user-a",
     "X-ResumePilot-Email": "applications-a@example.com",
@@ -17,7 +19,9 @@ def test_application_draft_is_completed_by_analysis_and_status_updates(client, s
     draft_response = client.post(
         "/applications",
         json={
+            "source_type": "url",
             "job_url": "https://example.com/jobs/backend-engineer",
+            "reviewed_job_text": _reviewed_job_text(),
             "reviewed_job_profile": reviewed_profile,
         },
         headers=USER_A_HEADERS,
@@ -28,19 +32,15 @@ def test_application_draft_is_completed_by_analysis_and_status_updates(client, s
     assert draft["status"] == "reviewed"
     assert draft["report_id"] is None
 
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={
+    analysis = successful_analysis(
+        client,
+        {
             "application_id": draft["id"],
             "resume_id": resume_id,
-            "job_url": "https://example.com/jobs/backend-engineer",
-            "reviewed_job_profile": reviewed_profile,
         },
         headers=USER_A_HEADERS,
     )
-
-    assert analyze_response.status_code == 200
-    report_id = analyze_response.json()["report_id"]
+    report_id = analysis["report_id"]
 
     applications_response = client.get("/applications", headers=USER_A_HEADERS)
     assert applications_response.status_code == 200
@@ -63,33 +63,33 @@ def test_application_draft_is_completed_by_analysis_and_status_updates(client, s
     assert apply_response.json()["status"] == "applied"
 
 
-def test_report_export_marks_application_exported(client, sample_resume_text):
+def test_markdown_report_export_does_not_mark_application_exported(client, sample_resume_text):
     resume_id = _upload_resume(client, sample_resume_text, headers=USER_A_HEADERS)
     reviewed_profile = _reviewed_job_profile()
     draft_id = client.post(
         "/applications",
         json={
+            "source_type": "url",
             "job_url": "https://example.com/jobs/export-engineer",
+            "reviewed_job_text": _reviewed_job_text(),
             "reviewed_job_profile": reviewed_profile,
         },
         headers=USER_A_HEADERS,
     ).json()["id"]
-    report_id = client.post(
-        "/jobs/analyze",
-        json={
+    report_id = successful_analysis(
+        client,
+        {
             "application_id": draft_id,
             "resume_id": resume_id,
-            "job_url": "https://example.com/jobs/export-engineer",
-            "reviewed_job_profile": reviewed_profile,
         },
         headers=USER_A_HEADERS,
-    ).json()["report_id"]
+    )["report_id"]
 
     export_response = client.post(f"/reports/{report_id}/markdown", headers=USER_A_HEADERS)
 
     assert export_response.status_code == 200
     application = client.get("/applications", headers=USER_A_HEADERS).json()["items"][0]
-    assert application["status"] == "exported"
+    assert application["status"] == "analyzed"
 
 
 def test_applications_are_tenant_scoped(client, sample_resume_text):
@@ -98,7 +98,9 @@ def test_applications_are_tenant_scoped(client, sample_resume_text):
     draft_id = client.post(
         "/applications",
         json={
+            "source_type": "url",
             "job_url": "https://example.com/jobs/tenant-engineer",
+            "reviewed_job_text": _reviewed_job_text(),
             "reviewed_job_profile": reviewed_profile,
         },
         headers=USER_A_HEADERS,
@@ -113,19 +115,15 @@ def test_applications_are_tenant_scoped(client, sample_resume_text):
         ).status_code
         == 404
     )
-    assert (
-        client.post(
-            "/jobs/analyze",
-            json={
-                "application_id": draft_id,
-                "resume_id": resume_id,
-                "job_url": "https://example.com/jobs/tenant-engineer",
-                "reviewed_job_profile": reviewed_profile,
-            },
-            headers=USER_B_HEADERS,
-        ).status_code
-        == 404
+    response, operation = submit_analysis(
+        client,
+        {"application_id": draft_id, "resume_id": resume_id},
+        headers=USER_B_HEADERS,
     )
+    assert response.status_code == 202
+    assert operation is not None
+    assert operation["status"] == "failed"
+    assert operation["error"]["code"] == "http_404"
 
 
 def _upload_resume(client, resume_text: str, *, headers: dict[str, str]) -> int:
@@ -176,3 +174,19 @@ def _reviewed_job_profile() -> dict:
         "unclear_items": [],
         "warnings": [],
     }
+
+
+def _reviewed_job_text() -> str:
+    return """Role: Backend Engineer
+Company: NovaHire AI
+
+Responsibilities:
+- Build REST APIs for hiring workflows.
+
+Requirements:
+- Required Python experience.
+- Required FastAPI experience.
+- Required SQL database experience.
+
+Experience: 0-2 years.
+"""

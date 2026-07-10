@@ -8,9 +8,6 @@ import {
   CircleX,
   ClipboardList,
   Download,
-  FileCode2,
-  FileDown,
-  FileText,
   GitBranch,
   ListChecks,
   SearchCheck,
@@ -21,6 +18,8 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { ReportCoverLetterPanel } from "@/features/dashboard/components/report-cover-letter-panel";
+import { ReportInterviewPrepPanel } from "@/features/dashboard/components/report-interview-prep-panel";
 import type {
   AgentStepName,
   AgentStepStatus,
@@ -28,7 +27,10 @@ import type {
   AgentWorkflowTrace,
   ApplicationReport,
   JobAnalysisResponse,
-  ReportExportFormat
+  ReportExportFormat,
+  ResumeProfile,
+  ValidationStatus,
+  ValidationWarning
 } from "@/features/dashboard/types";
 import { formatEvidenceSource } from "@/features/dashboard/utils/evidence";
 import { formatScore, scoreLabel, scoreTone } from "@/features/dashboard/utils/report";
@@ -38,6 +40,7 @@ interface ReportViewerProps {
   isExporting: ReportExportFormat | null;
   onExport: (format: ReportExportFormat) => Promise<void>;
   report: ApplicationReport | null;
+  resumeProfile: ResumeProfile | null;
   workflowTrace: AgentWorkflowTrace | null;
 }
 
@@ -46,6 +49,7 @@ export function ReportViewer({
   isExporting,
   onExport,
   report,
+  resumeProfile,
   workflowTrace
 }: ReportViewerProps) {
   if (!report || !analysis) {
@@ -56,7 +60,7 @@ export function ReportViewer({
             <ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
             <p className="mt-3 text-sm font-medium text-foreground">No analysis yet</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Add a job listing URL, upload a resume, and run AI analysis to generate a report.
+              Add a job URL or paste the description, upload a resume, and run AI analysis.
             </p>
           </div>
         </div>
@@ -73,11 +77,21 @@ export function ReportViewer({
     ? "Needs job details"
     : scoreLabel(report.match_score);
   const topKeywords = report.ats_keywords.slice(0, 10);
+  const validationStatus = reportValidationStatus(report);
+  const coverLetterWarnings = report.validation_warnings.filter((warning) =>
+    warning.code.startsWith("cover_letter")
+  );
+  const interviewWarnings = report.validation_warnings.filter((warning) =>
+    warning.code.startsWith("interview")
+  );
 
   return (
     <Panel
       action={
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <Badge tone={validationStatusTone(validationStatus)}>
+            Validation: {validationStatusLabel(validationStatus)}
+          </Badge>
           <ReportExportButton
             icon={<Download className="h-4 w-4" aria-hidden="true" />}
             isExporting={isExporting === "markdown"}
@@ -87,36 +101,6 @@ export function ReportViewer({
             variant="secondary"
           >
             Markdown
-          </ReportExportButton>
-          <ReportExportButton
-            icon={<FileText className="h-4 w-4" aria-hidden="true" />}
-            isExporting={isExporting === "docx"}
-            isUnavailable={Boolean(isExporting)}
-            label="DOCX"
-            onClick={() => void onExport("docx")}
-            variant="secondary"
-          >
-            DOCX
-          </ReportExportButton>
-          <ReportExportButton
-            icon={<FileCode2 className="h-4 w-4" aria-hidden="true" />}
-            isExporting={isExporting === "latex"}
-            isUnavailable={Boolean(isExporting)}
-            label="LaTeX"
-            onClick={() => void onExport("latex")}
-            variant="secondary"
-          >
-            LaTeX
-          </ReportExportButton>
-          <ReportExportButton
-            icon={<FileDown className="h-4 w-4" aria-hidden="true" />}
-            isExporting={isExporting === "pdf"}
-            isUnavailable={Boolean(isExporting)}
-            label="PDF"
-            onClick={() => void onExport("pdf")}
-            variant="primary"
-          >
-            PDF
           </ReportExportButton>
         </div>
       }
@@ -337,6 +321,20 @@ export function ReportViewer({
           </div>
         </section>
 
+        <section className="grid gap-4 xl:grid-cols-2" aria-label="Application materials">
+          <ReportCoverLetterPanel
+            coverLetter={report.cover_letter}
+            evidenceIds={report.cover_letter_evidence_ids ?? []}
+            resumeProfile={resumeProfile}
+            warnings={coverLetterWarnings}
+          />
+          <ReportInterviewPrepPanel
+            groups={report.interview_questions}
+            resumeProfile={resumeProfile}
+            warnings={interviewWarnings}
+          />
+        </section>
+
         {report.validation_warnings.length > 0 ? (
           <section>
             <div className="mb-3 flex items-center gap-2">
@@ -347,7 +345,10 @@ export function ReportViewer({
               {report.validation_warnings.map((warning) => (
                 <div className="rounded-md border border-border bg-surface p-3" key={warning.code}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="warning">{warning.code}</Badge>
+                    <Badge tone={validationSeverityTone(warning)}>
+                      {validationSeverityLabel(warning)}
+                    </Badge>
+                    <span className="font-mono text-xs text-muted-foreground">{warning.code}</span>
                   </div>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
                     {warning.message}
@@ -463,6 +464,40 @@ function confidenceTone(confidence: ApplicationReport["matched_skills"][number][
   return "neutral";
 }
 
+function reportValidationStatus(report: ApplicationReport): ValidationStatus {
+  if (report.validation_status) {
+    return report.validation_status;
+  }
+  if (report.validation_warnings.some((warning) => warning.severity === "block")) {
+    return "block";
+  }
+  return report.validation_warnings.length > 0 ? "warn" : "pass";
+}
+
+function validationStatusTone(status: ValidationStatus): "success" | "warning" | "danger" {
+  if (status === "block") {
+    return "danger";
+  }
+  return status === "warn" ? "warning" : "success";
+}
+
+function validationStatusLabel(status: ValidationStatus): string {
+  if (status === "block") {
+    return "Blocked";
+  }
+  return status === "warn" ? "Needs review" : "Passed";
+}
+
+function validationSeverityTone(
+  warning: ValidationWarning
+): "success" | "warning" | "danger" {
+  return validationStatusTone(warning.severity ?? "warn");
+}
+
+function validationSeverityLabel(warning: ValidationWarning): string {
+  return validationStatusLabel(warning.severity ?? "warn");
+}
+
 interface WorkflowTracePanelProps {
   trace: AgentWorkflowTrace | null;
 }
@@ -517,6 +552,9 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Badge tone={validationStatusTone(trace.validation_status ?? "pass")}>
+            {validationStatusLabel(trace.validation_status ?? "pass")}
+          </Badge>
           <Badge tone={workflowModeTone(trace.mode)}>{workflowModeLabel(trace.mode)}</Badge>
           <ChevronIndicator />
         </div>

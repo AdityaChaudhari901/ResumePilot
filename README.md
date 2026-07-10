@@ -2,8 +2,9 @@
 
 ResumePilot is organized into four implementation areas:
 
-- `Frontend/` - Next.js dashboard and backend-for-frontend proxy routes, including report downloads.
-- `Backend/` - FastAPI backend, deterministic parsing, matching, validation, DOCX/LaTeX/PDF report exports, tests, migrations, and evals.
+- `Frontend/` - Next.js dashboard and authenticated backend-for-frontend proxy routes.
+- `Backend/` - FastAPI API/worker, deterministic parsing, matching, claim validation,
+  accepted-draft exports, durable operations, tests, migrations, and evals.
 - `Ai services/` - OpenClaw local skill workspace and AI workflow support.
 - `Docs/` - MVP documentation pack and supporting docs.
 
@@ -65,8 +66,9 @@ GitHub Actions runs `.github/workflows/ci.yml` on pushes and pull requests to
 - Deployment job: Compose validation plus backend/frontend container builds.
 
 Live Vertex/CrewAI smokes remain local/manual because CI has no provider secret.
-The default production image excludes the CrewAI/ChromaDB dependency tree while
-ChromaDB `CVE-2026-45829` has no patched release.
+The default production image excludes the CrewAI/ChromaDB dependency tree because
+CrewAI 1.15.2 constrains ChromaDB to the affected 1.1.x line; patched ChromaDB
+1.5.9 is outside that compatibility range.
 
 The backend runtime is standardized on Python 3.12 because live CrewAI execution
 does not currently support Python 3.14.

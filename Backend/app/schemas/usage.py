@@ -15,6 +15,12 @@ class UsageEventType(StrEnum):
     crewai_run = "crewai_run"
 
 
+class UsageEventState(StrEnum):
+    reserved = "reserved"
+    consumed = "consumed"
+    released = "released"
+
+
 class UsageLimitMetric(StrEnum):
     analyses = "analyses"
     exports = "exports"

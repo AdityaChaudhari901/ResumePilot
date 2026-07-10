@@ -1,8 +1,9 @@
 from enum import StrEnum
+from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from app.schemas.common import Confidence, StrictBaseModel
+from app.schemas.common import Confidence, StrictBaseModel, ValidationSeverity
 from app.schemas.report import (
     ApplicationReport,
     AtsKeywordSuggestion,
@@ -72,12 +73,26 @@ class AgentWorkflowTrace(StrictBaseModel):
     mode: AgentWorkflowMode
     steps: list[AgentStepTrace] = Field(min_length=1)
     validation_warning_codes: list[str] = Field(default_factory=list)
+    validation_status: ValidationSeverity = ValidationSeverity.pass_
     duration_ms: int | None = Field(default=None, ge=0)
     provider: str | None = Field(default=None, min_length=1)
     model: str | None = Field(default=None, min_length=1)
     token_usage: AgentTokenUsage | None = None
     cost_estimate_usd: float | None = Field(default=None, ge=0)
     runtime_metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_legacy_validation_status(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "validation_status" in value:
+            return value
+        payload = dict(value)
+        payload["validation_status"] = (
+            ValidationSeverity.warn
+            if payload.get("validation_warning_codes")
+            else ValidationSeverity.pass_
+        )
+        return payload
 
 
 class AgentWorkflowResult(StrictBaseModel):

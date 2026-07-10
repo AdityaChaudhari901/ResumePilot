@@ -12,6 +12,9 @@ class ReportDeleteResponse(StrictBaseModel):
     job_id: int
     deleted_reports: int = Field(ge=0)
     deleted_orphan_jobs: int = Field(ge=0)
+    deleted_workflow_jobs: int = Field(default=0, ge=0)
+    scrubbed_workflow_jobs: int = Field(default=0, ge=0)
+    deleted_export_files: int = Field(default=0, ge=0)
     audit_event_id: int
 
 
@@ -21,6 +24,9 @@ class ResumeDeleteResponse(StrictBaseModel):
     deleted_reports: int = Field(ge=0)
     deleted_orphan_jobs: int = Field(ge=0)
     deleted_upload_files: int = Field(ge=0)
+    deleted_workflow_jobs: int = Field(default=0, ge=0)
+    scrubbed_workflow_jobs: int = Field(default=0, ge=0)
+    deleted_export_files: int = Field(default=0, ge=0)
     audit_event_id: int
 
 
@@ -32,4 +38,20 @@ class RetentionPurgeResponse(StrictBaseModel):
     deleted_reports: int = Field(ge=0)
     deleted_orphan_jobs: int = Field(ge=0)
     deleted_upload_files: int = Field(ge=0)
+    deleted_workflow_jobs: int = Field(default=0, ge=0)
+    scrubbed_workflow_jobs: int = Field(default=0, ge=0)
+    deleted_export_files: int = Field(default=0, ge=0)
     audit_event_id: int | None = None
+
+
+class AccountDeleteResponse(StrictBaseModel):
+    account_deleted: bool
+    deleted_resumes: int = Field(ge=0)
+    deleted_reports: int = Field(ge=0)
+    deleted_jobs: int = Field(ge=0)
+    deleted_applications: int = Field(ge=0)
+    deleted_audit_events: int = Field(ge=0)
+    deleted_usage_events: int = Field(ge=0)
+    deleted_workflow_jobs: int = Field(ge=0)
+    deleted_upload_files: int = Field(ge=0)
+    deleted_export_files: int = Field(ge=0)

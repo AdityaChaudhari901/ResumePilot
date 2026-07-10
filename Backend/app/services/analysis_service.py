@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_cached_settings
 from app.db.models import (
     AnalysisRecord,
+    ApplicationRecord,
     JobRecord,
     ResumeRecord,
     UsageEventRecord,
@@ -26,6 +28,7 @@ from app.schemas.job import (
     JobPreviewResponse,
     JobPreviewStatus,
     JobProfile,
+    JobSourceType,
 )
 from app.schemas.report import ApplicationReport, ReportHistoryItem, ReportHistoryResponse
 from app.schemas.resume import ResumeProfile
@@ -35,25 +38,16 @@ from app.services.application_service import (
     validate_application_for_analysis,
 )
 from app.services.audit_service import record_audit_event
-from app.services.docx_resume_renderer import render_tailored_resume_docx
 from app.services.file_storage import StoredUpload, persist_resume_upload
 from app.services.job_parser import fetch_job_text, job_content_hash, parse_job_profile
-from app.services.latex_resume_renderer import render_tailored_resume_latex
 from app.services.matcher import match_resume_to_job
-from app.services.pdf_resume_compiler import (
-    PdfCompilationFailed,
-    PdfCompilationTimedOut,
-    PdfCompilerBusy,
-    PdfCompilerUnavailable,
-    PdfOutputTooLarge,
-    compile_latex_to_pdf,
-)
 from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import ResumeParseError, extract_resume_text, parse_resume_profile
 from app.services.usage_service import (
     finalize_analysis_usage,
     finalize_crewai_usage,
     is_live_crewai_enabled,
+    release_usage_reservation,
     reserve_analysis_usage,
     reserve_crewai_usage,
 )
@@ -131,51 +125,104 @@ def analyze_job(
     request: JobAnalysisRequest,
     current_user: CurrentUser,
     settings: Settings | None = None,
+    *,
+    analysis_usage: UsageEventRecord | None = None,
+    workflow_job_id: str | None = None,
+    release_usage_on_failure: bool = True,
+    progress_callback: Callable[[str, int], None] | None = None,
 ) -> JobAnalysisResponse:
     resolved_settings = settings or get_cached_settings()
     resumes = ResumeRepository(db)
     jobs = JobRepository(db)
     analyses = AnalysisRepository(db)
 
+    if workflow_job_id:
+        existing = analyses.get_by_workflow_job_id(workflow_job_id, user_id=current_user.id)
+        if existing and existing.status == "completed":
+            if analysis_usage and analysis_usage.state == "reserved":
+                finalize_analysis_usage(
+                    db,
+                    analysis_usage,
+                    analysis_id=existing.id,
+                    report_id=existing.id,
+                    workflow_mode=existing.workflow_mode,
+                )
+            return _analysis_response(existing)
+        if existing:
+            db.delete(existing)
+            db.commit()
+
     resume_record = resumes.get(request.resume_id, user_id=current_user.id)
     if not resume_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
     application_record = validate_application_for_analysis(db, request.application_id, current_user)
-    analysis_usage = reserve_analysis_usage(db, current_user)
+    if analysis_usage is None:
+        analysis_usage = reserve_analysis_usage(db, current_user)
 
-    resume = ResumeProfile.model_validate(resume_record.profile_json)
-    raw_job_text = _job_text_from_request(request, resolved_settings)
-    content_hash = job_content_hash(raw_job_text)
-    job_record = _create_job_record(
-        jobs,
-        raw_job_text,
-        content_hash,
-        request,
-        current_user=current_user,
-    )
-    job = JobProfile.model_validate(job_record.profile_json)
-
-    match = match_resume_to_job(resume, job)
-    analysis_record = AnalysisRecord(
-        user_id=current_user.id,
-        resume_id=resume_record.id,
-        job_id=job_record.id,
-        status="running",
-        match_score=match.score,
-        match_result_json=match.model_dump(mode="json"),
-        report_json={},
-        report_markdown="",
-        validation_warnings_json=[],
-    )
-    analyses.add(analysis_record)
-
-    workflow_settings, crewai_usage = _settings_for_user_plan(
-        resolved_settings,
-        db,
-        current_user,
-        allow_live_ai_processing=request.allow_live_ai_processing,
-    )
+    analysis_record: AnalysisRecord | None = None
+    crewai_usage: UsageEventRecord | None = None
+    workflow_settings = resolved_settings
     try:
+        _report_progress(progress_callback, "fetching_job", 15)
+        resume = ResumeProfile.model_validate(resume_record.profile_json)
+        raw_job_text = _job_text_from_request(
+            request,
+            resolved_settings,
+            application=application_record,
+        )
+        content_hash = job_content_hash(raw_job_text)
+        if application_record and application_record.source_content_hash != content_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The reviewed job snapshot changed. Reopen the application and retry.",
+            )
+        reviewed_profile = (
+            JobProfile.model_validate(application_record.reviewed_job_profile_json)
+            if application_record
+            else request.reviewed_job_profile
+        )
+        source_url = (
+            application_record.source_url
+            if application_record
+            else str(request.job_url)
+            if request.job_url
+            else None
+        )
+        _report_progress(progress_callback, "parsing_job", 30)
+        job_record = _create_job_record(
+            jobs,
+            raw_job_text,
+            content_hash,
+            request,
+            current_user=current_user,
+            reviewed_profile=reviewed_profile,
+            source_url=source_url,
+        )
+        job = JobProfile.model_validate(job_record.profile_json)
+
+        _report_progress(progress_callback, "matching_evidence", 45)
+        match = match_resume_to_job(resume, job)
+        analysis_record = AnalysisRecord(
+            user_id=current_user.id,
+            resume_id=resume_record.id,
+            job_id=job_record.id,
+            workflow_job_id=workflow_job_id,
+            status="running",
+            match_score=match.score,
+            match_result_json=match.model_dump(mode="json"),
+            report_json={},
+            report_markdown="",
+            validation_warnings_json=[],
+        )
+        analyses.add(analysis_record)
+        _report_progress(progress_callback, "generating_report", 60)
+
+        workflow_settings, crewai_usage = _settings_for_user_plan(
+            resolved_settings,
+            db,
+            current_user,
+            allow_live_ai_processing=request.allow_live_ai_processing,
+        )
         workflow_result = run_application_agent_workflow(
             analysis_id=analysis_record.id,
             resume=resume,
@@ -183,59 +230,21 @@ def analyze_job(
             match=match,
             settings=workflow_settings,
         )
-    except Exception:
-        analysis_record.status = "failed"
-        analysis_record.workflow_mode = workflow_settings.agent_workflow_mode.value
-        analyses.save(analysis_record)
-        finalize_analysis_usage(
-            db,
-            analysis_usage,
-            analysis_id=analysis_record.id,
-            report_id=analysis_record.id,
-            workflow_mode=analysis_record.workflow_mode,
-            runtime_status="failed",
-        )
-        if crewai_usage:
-            finalize_crewai_usage(
-                db,
-                crewai_usage,
-                analysis_id=analysis_record.id,
-                runtime_status="failed",
-                cost_estimate_usd=None,
-            )
-        raise
-    report = workflow_result.report
-    markdown = report_to_markdown(report)
+        _report_progress(progress_callback, "validating_claims", 80)
+        report = workflow_result.report
+        markdown = report_to_markdown(report)
 
-    analysis_record.status = "completed"
-    analysis_record.report_json = report.model_dump(mode="json")
-    analysis_record.report_markdown = markdown
-    analysis_record.validation_warnings_json = [
-        warning.model_dump(mode="json") for warning in report.validation_warnings
-    ]
-    analysis_record.workflow_mode = workflow_result.trace.mode.value
-    analysis_record.workflow_trace_json = workflow_result.trace.model_dump(mode="json")
-    analyses.save(analysis_record)
-    finalize_analysis_usage(
-        db,
-        analysis_usage,
-        analysis_id=analysis_record.id,
-        report_id=analysis_record.id,
-        workflow_mode=analysis_record.workflow_mode,
-    )
-    if crewai_usage:
-        finalize_crewai_usage(
-            db,
-            crewai_usage,
-            analysis_id=analysis_record.id,
-            runtime_status=(
-                "completed"
-                if workflow_result.trace.mode == AgentWorkflowMode.crewai
-                else "fallback"
-            ),
-            cost_estimate_usd=workflow_result.trace.cost_estimate_usd,
-        )
-    if request.job_url or application_record:
+        analysis_record.status = "completed"
+        analysis_record.report_json = report.model_dump(mode="json")
+        analysis_record.report_markdown = markdown
+        analysis_record.validation_warnings_json = [
+            warning.model_dump(mode="json") for warning in report.validation_warnings
+        ]
+        analysis_record.workflow_mode = workflow_result.trace.mode.value
+        analysis_record.workflow_trace_json = workflow_result.trace.model_dump(mode="json")
+        analyses.save(analysis_record)
+
+        _report_progress(progress_callback, "saving_application", 90)
         record_application_analysis(
             db,
             request=request,
@@ -245,28 +254,72 @@ def analyze_job(
             analysis=analysis_record,
             application=application_record,
         )
-    record_audit_event(
-        db,
-        event_type="job.analyzed",
-        user_id=current_user.id,
-        payload={
-            "analysis_id": analysis_record.id,
-            "report_id": analysis_record.id,
-            "resume_id": resume_record.id,
-            "job_id": job_record.id,
-            "source": "url" if request.job_url else "paste",
-            "workflow_mode": analysis_record.workflow_mode,
-            "match_score": analysis_record.match_score,
-            "validation_warnings_count": len(report.validation_warnings),
-        },
-    )
-
-    return JobAnalysisResponse(
-        analysis_id=analysis_record.id,
-        report_id=analysis_record.id,
-        match_score=analysis_record.match_score,
-        status=analysis_record.status,
-    )
+        record_audit_event(
+            db,
+            event_type="job.analyzed",
+            user_id=current_user.id,
+            payload={
+                "analysis_id": analysis_record.id,
+                "report_id": analysis_record.id,
+                "resume_id": resume_record.id,
+                "job_id": job_record.id,
+                "source": (
+                    application_record.source_type
+                    if application_record
+                    else "url"
+                    if request.job_url
+                    else "pasted_text"
+                ),
+                "workflow_mode": analysis_record.workflow_mode,
+                "match_score": analysis_record.match_score,
+                "validation_warnings_count": len(report.validation_warnings),
+                "validation_status": report.validation_status.value,
+            },
+        )
+        finalize_analysis_usage(
+            db,
+            analysis_usage,
+            analysis_id=analysis_record.id,
+            report_id=analysis_record.id,
+            workflow_mode=analysis_record.workflow_mode,
+        )
+        if crewai_usage:
+            finalize_crewai_usage(
+                db,
+                crewai_usage,
+                analysis_id=analysis_record.id,
+                runtime_status=(
+                    "completed"
+                    if workflow_result.trace.mode == AgentWorkflowMode.crewai
+                    else "fallback"
+                ),
+                cost_estimate_usd=workflow_result.trace.cost_estimate_usd,
+            )
+        return _analysis_response(analysis_record)
+    except Exception:
+        if analysis_record is not None and analysis_record.status != "completed":
+            analysis_record.status = "failed"
+            analysis_record.workflow_mode = workflow_settings.agent_workflow_mode.value
+            analyses.save(analysis_record)
+        if crewai_usage:
+            finalize_crewai_usage(
+                db,
+                crewai_usage,
+                analysis_id=analysis_record.id if analysis_record else 0,
+                runtime_status="failed",
+                cost_estimate_usd=None,
+            )
+        if release_usage_on_failure:
+            release_usage_reservation(
+                db,
+                analysis_usage,
+                runtime_status="failed",
+                metadata={
+                    "analysis_id": analysis_record.id if analysis_record else None,
+                    "operation_id": workflow_job_id,
+                },
+            )
+        raise
 
 
 def preview_job(
@@ -274,34 +327,48 @@ def preview_job(
     settings: Settings | None = None,
 ) -> JobPreviewResponse:
     resolved_settings = settings or get_cached_settings()
-    parser_name = _parser_name_for_url(str(request.job_url))
-    try:
-        raw_job_text = fetch_job_text(str(request.job_url), settings=resolved_settings)
-    except HTTPException as exc:
-        preview_status = _preview_status_from_fetch_error(exc)
-        message = _preview_error_message(preview_status, exc)
-        return JobPreviewResponse(
-            job_url=request.job_url,
-            profile=JobProfile(
-                job_id=0,
-                warnings=[_preview_warning(preview_status.value, message)],
-            ),
-            raw_text_char_count=0,
-            status=preview_status,
-            parser=parser_name,
-            quality_checks=[
-                JobPreviewQualityCheck(
-                    code=preview_status.value,
-                    status="fail",
-                    message=message,
-                )
-            ],
-        )
+    source_type = JobSourceType.url if request.job_url else JobSourceType.pasted_text
+    parser_name = (
+        _parser_name_for_url(str(request.job_url))
+        if request.job_url
+        else JobSourceType.pasted_text.value
+    )
+    if request.job_text:
+        raw_job_text = request.job_text
+    else:
+        try:
+            raw_job_text = fetch_job_text(str(request.job_url), settings=resolved_settings)
+        except HTTPException as exc:
+            preview_status = _preview_status_from_fetch_error(exc)
+            message = _preview_error_message(preview_status, exc)
+            return JobPreviewResponse(
+                source_type=source_type,
+                job_url=request.job_url,
+                reviewed_job_text=None,
+                source_content_hash=None,
+                profile=JobProfile(
+                    job_id=0,
+                    warnings=[_preview_warning(preview_status.value, message)],
+                ),
+                raw_text_char_count=0,
+                status=preview_status,
+                parser=parser_name,
+                quality_checks=[
+                    JobPreviewQualityCheck(
+                        code=preview_status.value,
+                        status="fail",
+                        message=message,
+                    )
+                ],
+            )
 
     profile = parse_job_profile(raw_job_text, job_id=0)
     quality_checks = _job_preview_quality_checks(profile, raw_text_length=len(raw_job_text))
     return JobPreviewResponse(
+        source_type=source_type,
         job_url=request.job_url,
+        reviewed_job_text=raw_job_text,
+        source_content_hash=job_content_hash(raw_job_text),
         profile=profile,
         raw_text_char_count=len(raw_job_text),
         status=_job_preview_status(quality_checks),
@@ -366,64 +433,6 @@ def get_report_trace(
     )
 
 
-def get_tailored_resume_latex(db: Session, report_id: int, current_user: CurrentUser) -> str:
-    analysis = AnalysisRepository(db).get(report_id, user_id=current_user.id)
-    if not analysis:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    report = ApplicationReport.model_validate(analysis.report_json)
-    resume = ResumeProfile.model_validate(analysis.resume.profile_json)
-    job = JobProfile.model_validate(analysis.job.profile_json)
-    return render_tailored_resume_latex(report=report, resume=resume, job=job)
-
-
-def get_tailored_resume_docx(db: Session, report_id: int, current_user: CurrentUser) -> bytes:
-    analysis = AnalysisRepository(db).get(report_id, user_id=current_user.id)
-    if not analysis:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    report = ApplicationReport.model_validate(analysis.report_json)
-    resume = ResumeProfile.model_validate(analysis.resume.profile_json)
-    job = JobProfile.model_validate(analysis.job.profile_json)
-    return render_tailored_resume_docx(report=report, resume=resume, job=job)
-
-
-def get_tailored_resume_pdf(
-    db: Session, report_id: int, settings: Settings, current_user: CurrentUser
-) -> bytes:
-    latex = get_tailored_resume_latex(db, report_id, current_user)
-    try:
-        return compile_latex_to_pdf(
-            latex,
-            timeout_seconds=settings.latex_compile_timeout_seconds,
-            max_output_bytes=settings.latex_pdf_max_bytes,
-        )
-    except PdfCompilerUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PDF export requires tectonic or pdflatex on the server.",
-        ) from exc
-    except PdfCompilerBusy as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PDF compiler is busy. Retry the export shortly.",
-            headers={"Retry-After": "2"},
-        ) from exc
-    except PdfCompilationTimedOut as exc:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="PDF export timed out while compiling the generated resume.",
-        ) from exc
-    except PdfOutputTooLarge as exc:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Generated PDF exceeds the configured export size limit.",
-        ) from exc
-    except PdfCompilationFailed as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Generated LaTeX could not be compiled into PDF.",
-        ) from exc
-
-
 def _parser_name_for_url(job_url: str) -> str:
     hostname = urlparse(job_url).hostname or ""
     if "greenhouse.io" in hostname:
@@ -466,7 +475,7 @@ def _job_preview_quality_checks(
     checks = [
         JobPreviewQualityCheck(
             code="readable_text",
-            status="pass" if raw_text_length >= MIN_CONFIDENT_PREVIEW_TEXT_CHARS else "warn",
+            status="pass" if raw_text_length >= MIN_CONFIDENT_PREVIEW_TEXT_CHARS else "fail",
             message=(
                 "Job page has enough readable text."
                 if raw_text_length >= MIN_CONFIDENT_PREVIEW_TEXT_CHARS
@@ -511,37 +520,21 @@ def _preview_warning(code: str, message: str) -> ValidationWarning:
     return ValidationWarning(code=code, message=message)
 
 
-def _job_text_from_reviewed_profile(profile: JobProfile) -> str:
-    lines = [
-        f"Role: {profile.role_title}" if profile.role_title else "Role: Unknown",
-        f"Company: {profile.company}" if profile.company else "Company: Unknown",
-        "",
-        "Requirements:",
-    ]
-    lines.extend(
-        f"- Required {skill.name}. {skill.evidence_text}" for skill in profile.required_skills
-    )
-    lines.extend(
-        f"- Preferred {skill.name}. {skill.evidence_text}" for skill in profile.preferred_skills
-    )
-    if profile.responsibilities:
-        lines.extend(["", "Responsibilities:"])
-        lines.extend(f"- {responsibility}" for responsibility in profile.responsibilities)
-    if profile.experience_level:
-        lines.extend(["", f"Experience: {profile.experience_level}"])
-    return "\n".join(lines).strip()
-
-
-def _job_text_from_request(request: JobAnalysisRequest, settings: Settings) -> str:
-    if request.reviewed_job_profile:
-        return _job_text_from_reviewed_profile(request.reviewed_job_profile)
+def _job_text_from_request(
+    request: JobAnalysisRequest,
+    settings: Settings,
+    *,
+    application: ApplicationRecord | None,
+) -> str:
+    if application:
+        return application.reviewed_job_text
     if request.job_text:
         return request.job_text
     if request.job_url:
         return fetch_job_text(str(request.job_url), settings=settings)
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Either job_text, job_url, or reviewed_job_profile is required",
+        detail="Either application_id, job_text, or job_url is required",
     )
 
 
@@ -552,12 +545,18 @@ def _create_job_record(
     request: JobAnalysisRequest,
     *,
     current_user: CurrentUser,
+    reviewed_profile: JobProfile | None,
+    source_url: str | None,
 ) -> JobRecord:
-    existing = jobs.get_by_content_hash(content_hash, user_id=current_user.id)
+    existing = jobs.get_by_source_snapshot(
+        content_hash,
+        user_id=current_user.id,
+        source_url=source_url,
+    )
     if existing:
         return existing
 
-    profile = request.reviewed_job_profile or parse_job_profile(
+    profile = reviewed_profile or parse_job_profile(
         raw_job_text,
         job_id=0,
         company=request.company,
@@ -565,7 +564,7 @@ def _create_job_record(
     )
     record = JobRecord(
         user_id=current_user.id,
-        source_url=str(request.job_url) if request.job_url else None,
+        source_url=source_url,
         content_hash=content_hash,
         company=profile.company,
         role=profile.role_title,
@@ -603,6 +602,24 @@ def _workflow_trace_from_record(analysis: AnalysisRecord) -> AgentWorkflowTrace:
         return AgentWorkflowTrace.model_validate(trace_json)
     except ValidationError:
         return AgentWorkflowTrace.model_validate(default_workflow_trace())
+
+
+def _analysis_response(analysis: AnalysisRecord) -> JobAnalysisResponse:
+    return JobAnalysisResponse(
+        analysis_id=analysis.id,
+        report_id=analysis.id,
+        match_score=analysis.match_score,
+        status=analysis.status,
+    )
+
+
+def _report_progress(
+    callback: Callable[[str, int], None] | None,
+    stage: str,
+    progress: int,
+) -> None:
+    if callback:
+        callback(stage, progress)
 
 
 def _report_history_item_from_record(analysis: AnalysisRecord) -> ReportHistoryItem:

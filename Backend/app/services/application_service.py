@@ -6,6 +6,7 @@ from app.repositories.applications import ApplicationRepository
 from app.repositories.resumes import ResumeRepository
 from app.repositories.tailored_resumes import TailoredResumeRepository
 from app.schemas.application import (
+    ApplicationDetail,
     ApplicationDraftRequest,
     ApplicationItem,
     ApplicationListResponse,
@@ -13,8 +14,9 @@ from app.schemas.application import (
     ApplicationStatusUpdateRequest,
 )
 from app.schemas.auth import CurrentUser
-from app.schemas.job import JobAnalysisRequest
+from app.schemas.job import JobAnalysisRequest, JobProfile, JobSourceType
 from app.services.audit_service import record_audit_event
+from app.services.hashing import sha256_text
 
 
 def list_applications(
@@ -28,6 +30,17 @@ def list_applications(
     return ApplicationListResponse(items=items, count=len(items))
 
 
+def get_application(
+    db: Session,
+    application_id: int,
+    current_user: CurrentUser,
+) -> ApplicationDetail:
+    record = ApplicationRepository(db).get(application_id, user_id=current_user.id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    return _application_detail_from_record(record)
+
+
 def create_application_draft(
     db: Session,
     request: ApplicationDraftRequest,
@@ -37,9 +50,13 @@ def create_application_draft(
         _ensure_resume_exists(db, request.resume_id, current_user)
 
     profile = request.reviewed_job_profile
+    reviewed_job_text = request.reviewed_job_text
     record = ApplicationRecord(
         user_id=current_user.id,
-        source_url=str(request.job_url),
+        source_type=request.source_type.value,
+        source_url=str(request.job_url) if request.job_url else None,
+        reviewed_job_text=reviewed_job_text,
+        source_content_hash=sha256_text(reviewed_job_text),
         status=ApplicationStatus.reviewed.value,
         company=profile.company,
         role=profile.role_title,
@@ -57,6 +74,8 @@ def create_application_draft(
             "application_id": saved.id,
             "resume_id": saved.resume_id,
             "source_url": saved.source_url,
+            "source_type": saved.source_type,
+            "source_content_hash": saved.source_content_hash,
             "company": saved.company,
             "role": saved.role,
         },
@@ -90,9 +109,18 @@ def record_application_analysis(
     repository = ApplicationRepository(db)
     record = application or ApplicationRecord(
         user_id=current_user.id,
-        source_url=str(request.job_url) if request.job_url else "",
+        source_type=(
+            JobSourceType.url.value if request.job_url else JobSourceType.pasted_text.value
+        ),
+        source_url=str(request.job_url) if request.job_url else None,
+        reviewed_job_text=job.raw_text,
+        source_content_hash=job.content_hash,
         status=ApplicationStatus.draft.value,
-        reviewed_job_profile_json=(request.reviewed_job_profile or job.profile_json),
+        reviewed_job_profile_json=(
+            request.reviewed_job_profile.model_dump(mode="json")
+            if request.reviewed_job_profile
+            else job.profile_json
+        ),
     )
     previous_report_id = record.report_id
     profile_json = (
@@ -101,7 +129,6 @@ def record_application_analysis(
         else job.profile_json
     )
     record.user_id = current_user.id
-    record.source_url = str(request.job_url) if request.job_url else record.source_url
     record.status = ApplicationStatus.analyzed.value
     record.company = job.company
     record.role = job.role
@@ -197,7 +224,9 @@ def _application_item_from_record(record: ApplicationRecord) -> ApplicationItem:
     return ApplicationItem(
         id=record.id,
         status=ApplicationStatus(record.status),
+        source_type=JobSourceType(record.source_type),
         job_url=record.source_url,
+        source_content_hash=record.source_content_hash,
         company=record.company,
         role=record.role,
         resume_id=record.resume_id,
@@ -207,4 +236,13 @@ def _application_item_from_record(record: ApplicationRecord) -> ApplicationItem:
         match_score=record.match_score,
         created_at=record.created_at,
         updated_at=record.updated_at,
+    )
+
+
+def _application_detail_from_record(record: ApplicationRecord) -> ApplicationDetail:
+    item = _application_item_from_record(record)
+    return ApplicationDetail(
+        **item.model_dump(),
+        reviewed_job_text=record.reviewed_job_text,
+        reviewed_job_profile=JobProfile.model_validate(record.reviewed_job_profile_json),
     )

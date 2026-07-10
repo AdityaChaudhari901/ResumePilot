@@ -12,7 +12,12 @@ export async function POST(request: Request, context: RouteContext) {
   const { applicationId } = await context.params;
   return proxyBackendResponse(
     `/applications/${encodeURIComponent(applicationId)}/tailored-resume/pdf`,
-    undefined,
+    {
+      method: "POST",
+      headers: {
+        "idempotency-key": request.headers.get("idempotency-key") ?? crypto.randomUUID()
+      }
+    },
     {
       request
     }

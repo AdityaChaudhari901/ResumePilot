@@ -7,7 +7,8 @@ export async function POST(request: Request) {
   return proxyBackendResponse("/jobs/analyze", {
     method: "POST",
     headers: {
-      "content-type": "application/json"
+      "content-type": "application/json",
+      "idempotency-key": request.headers.get("idempotency-key") ?? crypto.randomUUID()
     },
     body
   }, {

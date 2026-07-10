@@ -80,6 +80,99 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  postgres-migrations:
+    name: PostgreSQL 16 migration gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: resumepilot
+          POSTGRES_PASSWORD: resumepilot-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U resumepilot -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: Backend
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_PYTHON_VERSION_WARNING: "1"
+      POSTGRES_ADMIN_URL: postgresql+psycopg://resumepilot:resumepilot-ci@127.0.0.1:5432/postgres
+      DATABASE_URL: postgresql+psycopg://resumepilot:resumepilot-ci@127.0.0.1:5432/resumepilot_ci_fresh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            Backend/pyproject.toml
+            Backend/requirements/py312-dev-ai.constraints.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements/py312-build.lock.txt
+          python -m pip install -e ".[dev]" -c requirements/py312-dev-ai.constraints.txt
+          python -m pip check
+
+      - name: Run fresh and prior-release PostgreSQL migrations
+        run: python scripts/run_postgres_migration_gate.py
+
+      - name: Smoke production migration readiness
+        env:
+          APP_ENV: production
+          APP_DEBUG: "false"
+          AUTO_CREATE_DB_SCHEMA: "false"
+          REQUIRE_DB_MIGRATIONS: "true"
+          AUTH_REQUIRED: "true"
+          AUTH_TRUSTED_PROXY_SECRET: ci-trusted-proxy-secret-with-32-characters
+          JOBCOPILOT_API_TOKEN: ci-openclaw-token-with-at-least-32-characters
+          RESUMEPILOT_DATA_DIR: ${{ runner.temp }}/resumepilot-postgres-ready
+        run: |
+          log_file="${RUNNER_TEMP}/resumepilot-ready.log"
+          response_file="${RUNNER_TEMP}/resumepilot-ready.json"
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8090 >"${log_file}" 2>&1 &
+          api_pid=$!
+          cleanup() {
+            kill "${api_pid}" 2>/dev/null || true
+            wait "${api_pid}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for _attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:8090/ready --output "${response_file}"; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "${ready}" != "true" ]; then
+            cat "${log_file}"
+            exit 1
+          fi
+          python - "${response_file}" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as response_file:
+              payload = json.load(response_file)
+          assert payload["status"] == "ok", payload
+          checks = {check["name"]: check["status"] for check in payload["checks"]}
+          assert checks == {"database": "ok", "migrations": "ok"}, payload
+          PY
+
   frontend:
     name: Frontend quality gate
     runs-on: ubuntu-latest

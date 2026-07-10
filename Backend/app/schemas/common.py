@@ -13,6 +13,12 @@ class Confidence(StrEnum):
     low = "low"
 
 
+class ValidationSeverity(StrEnum):
+    pass_ = "pass"
+    warn = "warn"
+    block = "block"
+
+
 class SkillCategory(StrEnum):
     programming_language = "programming_language"
     backend_framework = "backend_framework"
@@ -32,3 +38,14 @@ class ValidationWarning(StrictBaseModel):
     code: str = Field(min_length=1)
     message: str = Field(min_length=1)
     evidence_ids: list[str] = Field(default_factory=list)
+    severity: ValidationSeverity = ValidationSeverity.warn
+
+
+def validation_status_from_warnings(
+    warnings: list[ValidationWarning],
+) -> ValidationSeverity:
+    if any(warning.severity == ValidationSeverity.block for warning in warnings):
+        return ValidationSeverity.block
+    if warnings:
+        return ValidationSeverity.warn
+    return ValidationSeverity.pass_

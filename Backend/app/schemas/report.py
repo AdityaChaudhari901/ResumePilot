@@ -1,8 +1,14 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from app.schemas.common import StrictBaseModel, ValidationWarning
+from app.schemas.common import (
+    StrictBaseModel,
+    ValidationSeverity,
+    ValidationWarning,
+    validation_status_from_warnings,
+)
 from app.schemas.match import MatchedSkill, MissingSkill, WeakSkill
 
 
@@ -38,9 +44,24 @@ class ApplicationReport(StrictBaseModel):
     tailored_bullets: list[TailoredBullet] = Field(default_factory=list)
     ats_keywords: list[AtsKeywordSuggestion] = Field(default_factory=list)
     cover_letter: str = Field(min_length=1)
+    cover_letter_evidence_ids: list[str] = Field(default_factory=list)
     interview_questions: list[InterviewQuestionGroup] = Field(default_factory=list)
     validation_warnings: list[ValidationWarning] = Field(default_factory=list)
+    validation_status: ValidationSeverity = ValidationSeverity.pass_
     next_actions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_legacy_validation_status(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "validation_status" in value:
+            return value
+        payload = dict(value)
+        warnings = [
+            ValidationWarning.model_validate(warning)
+            for warning in payload.get("validation_warnings") or []
+        ]
+        payload["validation_status"] = validation_status_from_warnings(warnings)
+        return payload
 
 
 class ReportHistoryItem(StrictBaseModel):

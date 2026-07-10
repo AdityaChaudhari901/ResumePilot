@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from time import perf_counter
 
 from app.core.config import Settings, get_cached_settings
@@ -14,15 +15,32 @@ from app.schemas.agent import (
     InterviewCoachAgentOutput,
     ResumeMatchAgentOutput,
 )
-from app.schemas.common import Confidence, ValidationWarning
+from app.schemas.common import (
+    Confidence,
+    ValidationSeverity,
+    ValidationWarning,
+    validation_status_from_warnings,
+)
 from app.schemas.job import JobProfile
 from app.schemas.match import MatchResult
 from app.schemas.report import ApplicationReport, InterviewQuestionGroup
 from app.schemas.resume import ResumeFact, ResumeProfile
-from app.services.crewai_workflow import build_crewai_workflow_runner
+from app.services.claim_validation import find_unsupported_claims
+from app.services.crewai_workflow import CrewAIWorkflowSections, build_crewai_workflow_runner
 from app.services.provider_pricing import ProviderCostEstimate, estimate_provider_cost
 from app.services.report_generator import generate_report
+from app.services.skill_normalizer import find_skills
 from app.services.validator import validate_report_against_resume
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedLiveSections:
+    executive_summary: str
+    cover_letter: str
+    cover_letter_evidence_ids: list[str]
+    interview_questions: list[InterviewQuestionGroup]
+    warnings: list[ValidationWarning]
+    blocked_sections: frozenset[str]
 
 
 def run_application_agent_workflow(
@@ -134,6 +152,7 @@ def _run_deterministic_application_agent_workflow(
             "tailored_bullets": ats.tailored_bullets,
             "ats_keywords": ats.keyword_suggestions,
             "cover_letter": cover_letter.draft,
+            "cover_letter_evidence_ids": cover_letter.evidence_ids,
             "interview_questions": interview.question_groups,
             "next_actions": _next_actions(base_report, fit, ats),
         }
@@ -143,16 +162,12 @@ def _run_deterministic_application_agent_workflow(
     validation_warnings = _dedupe_warnings(
         [*report.validation_warnings, *validate_report_against_resume(report, resume)]
     )
-    report.validation_warnings = validation_warnings
+    validation_status = _set_report_validation(report, validation_warnings)
     traces.append(
         _step_trace(
             name=AgentStepName.validation_gate,
-            status="completed" if not validation_warnings else "degraded",
-            summary=(
-                "Validation passed without warnings."
-                if not validation_warnings
-                else f"Validation returned {len(validation_warnings)} warning(s)."
-            ),
+            status=_validation_step_status(validation_status),
+            summary=_validation_summary(validation_status, validation_warnings),
             started_at=validation_step_start,
         )
     )
@@ -163,6 +178,7 @@ def _run_deterministic_application_agent_workflow(
             mode=AgentWorkflowMode.deterministic_fallback,
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
+            validation_status=validation_status,
             duration_ms=_elapsed_ms(workflow_start),
         ),
     )
@@ -197,22 +213,33 @@ def _run_crewai_application_agent_workflow(
     ats, ats_duration_ms = _timed_call(
         lambda: _ats_optimizer_agent(deterministic_result.report, match)
     )
+    validated_live = _validate_live_sections(
+        sections=sections,
+        deterministic_report=deterministic_result.report,
+        resume=resume,
+        job=job,
+    )
     report = deterministic_result.report.model_copy(
         deep=True,
         update={
-            "executive_summary": _build_executive_summary(sections.resume_match),
+            "executive_summary": validated_live.executive_summary,
             "tailored_bullets": ats.tailored_bullets,
             "ats_keywords": ats.keyword_suggestions,
-            "cover_letter": sections.cover_letter.draft,
-            "interview_questions": sections.interview_coach.question_groups,
+            "cover_letter": validated_live.cover_letter,
+            "cover_letter_evidence_ids": validated_live.cover_letter_evidence_ids,
+            "interview_questions": validated_live.interview_questions,
             "next_actions": _next_actions(deterministic_result.report, sections.resume_match, ats),
         },
     )
     validation_step_start = perf_counter()
     validation_warnings = _dedupe_warnings(
-        [*report.validation_warnings, *validate_report_against_resume(report, resume)]
+        [
+            *report.validation_warnings,
+            *validated_live.warnings,
+            *validate_report_against_resume(report, resume),
+        ]
     )
-    report.validation_warnings = validation_warnings
+    validation_status = _set_report_validation(report, validation_warnings)
     provider = _runtime_provider(settings)
     model = _runtime_model(settings)
     cost_estimate = estimate_provider_cost(
@@ -246,10 +273,18 @@ def _run_crewai_application_agent_workflow(
         ),
         AgentStepTrace(
             name=AgentStepName.resume_match,
-            status="completed",
+            status=(
+                "degraded"
+                if AgentStepName.resume_match.value in validated_live.blocked_sections
+                else "completed"
+            ),
             summary=(
-                "CrewAI explained deterministic fit with "
-                f"{len(sections.resume_match.evidence_ids)} resume evidence references."
+                "Unsafe live resume-match text was replaced with deterministic content."
+                if AgentStepName.resume_match.value in validated_live.blocked_sections
+                else (
+                    "CrewAI explained deterministic fit with "
+                    f"{len(sections.resume_match.evidence_ids)} resume evidence references."
+                )
             ),
             duration_ms=sections.step_durations_ms.get(AgentStepName.resume_match.value),
         ),
@@ -264,30 +299,43 @@ def _run_crewai_application_agent_workflow(
         ),
         AgentStepTrace(
             name=AgentStepName.cover_letter,
-            status="completed",
+            status=(
+                "degraded"
+                if AgentStepName.cover_letter.value in validated_live.blocked_sections
+                else "completed"
+            ),
             summary=(
-                "CrewAI drafted cover letter from validated evidence; "
-                f"{len(sections.cover_letter.evidence_ids)} evidence references used."
+                "Unsafe live cover-letter text was replaced with deterministic content."
+                if AgentStepName.cover_letter.value in validated_live.blocked_sections
+                else (
+                    "CrewAI drafted cover letter from validated evidence; "
+                    f"{len(sections.cover_letter.evidence_ids)} evidence references used."
+                )
             ),
             duration_ms=sections.step_durations_ms.get(AgentStepName.cover_letter.value),
         ),
         AgentStepTrace(
             name=AgentStepName.interview_coach,
-            status="completed",
+            status=(
+                "degraded"
+                if AgentStepName.interview_coach.value in validated_live.blocked_sections
+                else "completed"
+            ),
             summary=(
-                "CrewAI prepared "
-                f"{len(sections.interview_coach.question_groups)} interview question groups."
+                "Live interview content with invalid evidence was replaced with "
+                "deterministic content."
+                if AgentStepName.interview_coach.value in validated_live.blocked_sections
+                else (
+                    "CrewAI prepared "
+                    f"{len(sections.interview_coach.question_groups)} interview question groups."
+                )
             ),
             duration_ms=sections.step_durations_ms.get(AgentStepName.interview_coach.value),
         ),
         _step_trace(
             name=AgentStepName.validation_gate,
-            status="completed" if not validation_warnings else "degraded",
-            summary=(
-                "Validation passed without warnings."
-                if not validation_warnings
-                else f"Validation returned {len(validation_warnings)} warning(s)."
-            ),
+            status=_validation_step_status(validation_status),
+            summary=_validation_summary(validation_status, validation_warnings),
             started_at=validation_step_start,
         ),
     ]
@@ -297,6 +345,7 @@ def _run_crewai_application_agent_workflow(
             mode=AgentWorkflowMode.crewai,
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
+            validation_status=validation_status,
             duration_ms=_elapsed_ms(workflow_start) + (deterministic_result.trace.duration_ms or 0),
             provider=provider,
             model=model,
@@ -307,6 +356,7 @@ def _run_crewai_application_agent_workflow(
                 status="completed",
                 token_usage=sections.token_usage,
                 cost_estimate=cost_estimate,
+                blocked_live_sections=validated_live.blocked_sections,
             ),
         ),
     )
@@ -328,7 +378,7 @@ def _with_crewai_fallback_warning(
         ),
     )
     validation_warnings = _dedupe_warnings([*report.validation_warnings, warning])
-    report.validation_warnings = validation_warnings
+    validation_status = _set_report_validation(report, validation_warnings)
     traces = [
         AgentStepTrace(
             name=AgentStepName.crewai_runtime,
@@ -347,6 +397,7 @@ def _with_crewai_fallback_warning(
             mode=AgentWorkflowMode.deterministic_fallback,
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
+            validation_status=validation_status,
             duration_ms=(deterministic_result.trace.duration_ms or 0) + (crewai_duration_ms or 0),
             provider=_runtime_provider(settings),
             model=_runtime_model(settings),
@@ -587,20 +638,181 @@ def _facts_for_ids(resume: ResumeProfile, evidence_ids: list[str]) -> list[Resum
     return [facts_by_id[evidence_id] for evidence_id in evidence_ids if evidence_id in facts_by_id]
 
 
+def _validate_live_sections(
+    *,
+    sections: CrewAIWorkflowSections,
+    deterministic_report: ApplicationReport,
+    resume: ResumeProfile,
+    job: JobProfile,
+) -> _ValidatedLiveSections:
+    warnings: list[ValidationWarning] = []
+    blocked_sections: set[str] = set()
+
+    executive_summary = _build_executive_summary(sections.resume_match)
+    fit_warning = _live_text_block_warning(
+        section=AgentStepName.resume_match,
+        label="resume-match",
+        text=executive_summary,
+        evidence_ids=sections.resume_match.evidence_ids,
+        resume=resume,
+        job=job,
+        require_evidence=True,
+        validate_skills=False,
+    )
+    if fit_warning:
+        warnings.append(fit_warning)
+        blocked_sections.add(AgentStepName.resume_match.value)
+        executive_summary = deterministic_report.executive_summary
+
+    cover_letter = sections.cover_letter.draft
+    cover_letter_evidence_ids = sections.cover_letter.evidence_ids
+    cover_warning = _live_text_block_warning(
+        section=AgentStepName.cover_letter,
+        label="cover-letter",
+        text=cover_letter,
+        evidence_ids=cover_letter_evidence_ids,
+        resume=resume,
+        job=job,
+        require_evidence=True,
+        validate_skills=True,
+    )
+    if cover_warning:
+        warnings.append(cover_warning)
+        blocked_sections.add(AgentStepName.cover_letter.value)
+        cover_letter = deterministic_report.cover_letter
+        cover_letter_evidence_ids = deterministic_report.cover_letter_evidence_ids
+
+    interview_questions = sections.interview_coach.question_groups
+    missing_interview_evidence = _missing_interview_evidence_ids(interview_questions, resume)
+    if missing_interview_evidence:
+        warnings.append(
+            ValidationWarning(
+                code="live_interview_coach_blocked",
+                message=(
+                    "Live interview content was replaced with deterministic content because "
+                    "its evidence references were invalid."
+                ),
+                evidence_ids=missing_interview_evidence,
+                severity=ValidationSeverity.block,
+            )
+        )
+        blocked_sections.add(AgentStepName.interview_coach.value)
+        interview_questions = deterministic_report.interview_questions
+
+    return _ValidatedLiveSections(
+        executive_summary=executive_summary,
+        cover_letter=cover_letter,
+        cover_letter_evidence_ids=cover_letter_evidence_ids,
+        interview_questions=interview_questions,
+        warnings=warnings,
+        blocked_sections=frozenset(blocked_sections),
+    )
+
+
+def _live_text_block_warning(
+    *,
+    section: AgentStepName,
+    label: str,
+    text: str,
+    evidence_ids: list[str],
+    resume: ResumeProfile,
+    job: JobProfile,
+    require_evidence: bool,
+    validate_skills: bool,
+) -> ValidationWarning | None:
+    facts_by_id = {fact.id: fact for fact in resume.facts}
+    missing_evidence_ids = [
+        evidence_id for evidence_id in evidence_ids if evidence_id not in facts_by_id
+    ]
+    evidence_text = " ".join(
+        facts_by_id[evidence_id].text for evidence_id in evidence_ids if evidence_id in facts_by_id
+    )
+    reasons: set[str] = set()
+    if missing_evidence_ids or (require_evidence and not evidence_ids):
+        reasons.add("evidence references")
+
+    unsupported_claims = find_unsupported_claims(
+        text,
+        evidence_text,
+        allowed_organizations=(job.company,) if job.company else (),
+    )
+    reasons.update(finding.category.value for finding in unsupported_claims)
+
+    if validate_skills:
+        evidence_skills = set(find_skills(evidence_text))
+        if any(skill not in evidence_skills for skill in find_skills(text)):
+            reasons.add("skills")
+
+    if not reasons:
+        return None
+    reason_text = ", ".join(sorted(reasons))
+    return ValidationWarning(
+        code=f"live_{section.value}_blocked",
+        message=(
+            f"Live {label} text was replaced with deterministic content because it contained "
+            f"unsupported {reason_text}."
+        ),
+        evidence_ids=list(dict.fromkeys([*evidence_ids, *missing_evidence_ids])),
+        severity=ValidationSeverity.block,
+    )
+
+
+def _missing_interview_evidence_ids(
+    groups: list[InterviewQuestionGroup], resume: ResumeProfile
+) -> list[str]:
+    known_ids = {fact.id for fact in resume.facts}
+    return list(
+        dict.fromkeys(
+            evidence_id
+            for group in groups
+            for evidence_id in group.suggested_answer_evidence_ids
+            if evidence_id not in known_ids
+        )
+    )
+
+
 def _safe_fact_sentence(fact: ResumeFact) -> str:
     return fact.text.rstrip(".") + "."
 
 
 def _dedupe_warnings(warnings: list[ValidationWarning]) -> list[ValidationWarning]:
-    seen: set[tuple[str, tuple[str, ...], str]] = set()
+    seen: set[tuple[str, tuple[str, ...], str, ValidationSeverity]] = set()
     deduped: list[ValidationWarning] = []
     for warning in warnings:
-        key = (warning.code, tuple(warning.evidence_ids), warning.message)
+        key = (warning.code, tuple(warning.evidence_ids), warning.message, warning.severity)
         if key in seen:
             continue
         seen.add(key)
         deduped.append(warning)
     return deduped
+
+
+def _set_report_validation(
+    report: ApplicationReport,
+    warnings: list[ValidationWarning],
+) -> ValidationSeverity:
+    validation_status = validation_status_from_warnings(warnings)
+    report.validation_warnings = warnings
+    report.validation_status = validation_status
+    return validation_status
+
+
+def _validation_step_status(validation_status: ValidationSeverity) -> str:
+    return "completed" if validation_status == ValidationSeverity.pass_ else "degraded"
+
+
+def _validation_summary(
+    validation_status: ValidationSeverity,
+    warnings: list[ValidationWarning],
+) -> str:
+    if validation_status == ValidationSeverity.pass_:
+        return "Validation passed without warnings."
+    if validation_status == ValidationSeverity.block:
+        return (
+            f"Validation blocked unsafe live content and used deterministic fallback; "
+            f"recorded {len(warnings)} finding(s)."
+        )
+    return f"Validation returned {len(warnings)} warning(s)."
 
 
 def _human_list(values: list[str]) -> str:
@@ -678,6 +890,7 @@ def _runtime_metadata(
     token_usage: AgentTokenUsage | None,
     cost_estimate: ProviderCostEstimate | None = None,
     fallback_reason: str | None = None,
+    blocked_live_sections: frozenset[str] | None = None,
 ) -> dict[str, str | int | float | bool | None]:
     metadata: dict[str, str | int | float | bool | None] = {
         "workflow_runtime": "crewai",
@@ -692,6 +905,8 @@ def _runtime_metadata(
         metadata["cost_estimate_usd"] = cost_estimate.amount_usd
     if fallback_reason:
         metadata["fallback_reason"] = fallback_reason
+    if blocked_live_sections:
+        metadata["blocked_live_sections"] = ",".join(sorted(blocked_live_sections))
     return metadata
 
 

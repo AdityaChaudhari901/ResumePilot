@@ -27,6 +27,7 @@ interface JobEvidenceReviewCardProps {
   preview: JobPreviewResponse;
   onBack: () => void;
   onContinue: (profile: JobProfile) => Promise<void> | void;
+  onUsePastedText: () => void;
 }
 
 type SkillGroupName = "required" | "preferred";
@@ -34,6 +35,7 @@ type SkillGroupName = "required" | "preferred";
 export function JobEvidenceReviewCard({
   onBack,
   onContinue,
+  onUsePastedText,
   preview
 }: JobEvidenceReviewCardProps) {
   const [profile, setProfile] = useState<JobProfile>(preview.profile);
@@ -49,6 +51,8 @@ export function JobEvidenceReviewCard({
     reviewedProfile.required_skills.length > 0 || reviewedProfile.preferred_skills.length > 0;
   const statusTone = statusBadgeTone(preview.status);
   const statusLabel = statusBadgeLabel(preview.status);
+  const isHardBlocked = preview.status === "blocked_private" || preview.status === "too_short";
+  const recoveryMessage = preview.quality_checks.find((check) => check.status === "fail")?.message;
 
   return (
     <Panel
@@ -66,13 +70,26 @@ export function JobEvidenceReviewCard({
               />
               <div>
                 <p className="text-sm font-semibold text-foreground">
-                  Job evidence needs review
+                  {isHardBlocked ? "Job listing could not be reviewed" : "Job evidence needs review"}
                 </p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  ResumePilot fetched the page, but some job evidence is incomplete. Edit the
-                  fields below before continuing, or continue with a warning if the listing does
-                  not expose requirements.
+                  {isHardBlocked
+                    ? recoveryMessage ??
+                      "ResumePilot could not extract enough source text to support a reliable analysis."
+                    : "Some job evidence is incomplete. Edit the fields below before continuing, or continue with a warning if the listing does not expose requirements."}
                 </p>
+                {isHardBlocked ? (
+                  <Button
+                    className="mt-3"
+                    icon={<ClipboardList className="h-4 w-4" aria-hidden="true" />}
+                    onClick={preview.source_type === "url" ? onUsePastedText : onBack}
+                    variant="secondary"
+                  >
+                    {preview.source_type === "url"
+                      ? "Paste job description instead"
+                      : "Edit pasted description"}
+                  </Button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -181,13 +198,18 @@ export function JobEvidenceReviewCard({
             onClick={onBack}
             variant="secondary"
           >
-            Edit job URL
+            Edit job source
           </Button>
           <Button
+            disabled={isHardBlocked}
             icon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
             onClick={() => void onContinue(reviewedProfile)}
           >
-            {hasActionableSkills ? "Save and continue" : "Continue with warning"}
+            {isHardBlocked
+              ? "Source text required"
+              : hasActionableSkills
+                ? "Save and continue"
+                : "Continue with warning"}
           </Button>
         </div>
       </div>

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.main import create_app
 from app.schemas.agent import AgentWorkflowMode
+from tests.api_helpers import submit_analysis, successful_analysis
 
 USER_A_HEADERS = {
     "X-ResumePilot-User": "usage-user-a",
@@ -81,21 +82,21 @@ def test_analysis_usage_is_metered_and_limited(client, sample_resume_text, sampl
     resume_id = _upload_resume(client, sample_resume_text)
 
     for index in range(3):
-        response = client.post(
-            "/jobs/analyze",
-            json={
+        result = successful_analysis(
+            client,
+            {
                 "resume_id": resume_id,
                 "job_text": f"{sample_job_text}\nRun marker: {index}",
             },
         )
-        assert response.status_code == 200
+        assert result["status"] == "completed"
 
     summary = client.get("/usage/summary").json()
     assert _limit(summary, "analyses") == {"used": 3, "limit": 3, "remaining": 0}
 
-    blocked_response = client.post(
-        "/jobs/analyze",
-        json={"resume_id": resume_id, "job_text": f"{sample_job_text}\nRun marker: blocked"},
+    blocked_response, _operation = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": f"{sample_job_text}\nRun marker: blocked"},
     )
 
     assert blocked_response.status_code == 402
@@ -113,11 +114,27 @@ def test_export_usage_is_metered_and_limited(client, sample_resume_text, sample_
     summary = client.get("/usage/summary").json()
     assert _limit(summary, "exports") == {"used": 5, "limit": 5, "remaining": 0}
 
-    blocked_response = client.post(f"/reports/{body['report_id']}/resume/latex")
+    blocked_response = client.post(f"/reports/{body['report_id']}/markdown")
 
     assert blocked_response.status_code == 402
     assert blocked_response.json()["detail"]["code"] == "plan_limit_reached"
     assert blocked_response.json()["detail"]["metric"] == "exports"
+
+
+def test_failed_job_source_does_not_consume_analysis_quota(client, sample_resume_text):
+    resume_id = _upload_resume(client, sample_resume_text)
+
+    response, operation = submit_analysis(
+        client,
+        {"resume_id": resume_id, "job_url": "http://127.0.0.1/private-job"},
+    )
+
+    assert response.status_code == 202
+    assert operation is not None
+    assert operation["status"] == "failed"
+    assert operation["error"]["code"] == "http_422"
+    summary = client.get("/usage/summary").json()
+    assert _limit(summary, "analyses") == {"used": 0, "limit": 3, "remaining": 3}
 
 
 def test_usage_summary_is_tenant_scoped(client, sample_resume_text, sample_job_text):
@@ -165,13 +182,11 @@ def _upload_and_analyze(
     headers: dict[str, str] | None = None,
 ) -> dict:
     resume_id = _upload_resume(client, resume_text, headers=headers)
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={"resume_id": resume_id, "job_text": job_text},
+    body = successful_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": job_text},
         headers=headers,
     )
-    assert analyze_response.status_code == 200
-    body = analyze_response.json()
     body["resume_id"] = resume_id
     return body
 

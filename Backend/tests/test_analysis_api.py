@@ -1,6 +1,3 @@
-from io import BytesIO
-from zipfile import ZipFile
-
 import pytest
 from sqlalchemy import select
 
@@ -15,7 +12,7 @@ from app.schemas.agent import (
 )
 from app.schemas.report import InterviewQuestionGroup
 from app.services.crewai_workflow import CrewAIWorkflowSections, CrewAIWorkflowUnavailable
-from app.services.pdf_resume_compiler import PdfCompilerUnavailable
+from tests.api_helpers import successful_analysis
 
 
 @pytest.fixture(autouse=True)
@@ -144,52 +141,65 @@ def test_analyze_uses_reviewed_job_profile_without_refetching(
     )
     assert upload_response.status_code == 201
     resume_id = upload_response.json()["resume_id"]
+    reviewed_profile = {
+        "benefits": [],
+        "company": "Reviewed Labs",
+        "employment_type": None,
+        "experience_level": "0-2 years",
+        "job_id": 0,
+        "keywords": ["Python", "FastAPI"],
+        "location": None,
+        "preferred_skills": [],
+        "required_skills": [
+            {
+                "confidence": "high",
+                "evidence_text": "Required Python experience.",
+                "id": "job_required_001",
+                "importance": "required",
+                "name": "Python",
+            },
+            {
+                "confidence": "high",
+                "evidence_text": "Required FastAPI experience.",
+                "id": "job_required_002",
+                "importance": "required",
+                "name": "FastAPI",
+            },
+        ],
+        "responsibilities": ["Build REST APIs for reviewed workflows."],
+        "role_title": "Reviewed Backend Engineer",
+        "unclear_items": [],
+        "warnings": [],
+    }
+    reviewed_text = (
+        "Role: Reviewed Backend Engineer\nCompany: Reviewed Labs\n\n"
+        "Requirements:\n- Required Python experience.\n- Required FastAPI experience.\n\n"
+        "Responsibilities:\n- Build REST APIs for reviewed workflows."
+    )
+    application_response = client.post(
+        "/applications",
+        json={
+            "source_type": "url",
+            "job_url": "https://example.com/jobs/reviewed",
+            "reviewed_job_text": reviewed_text,
+            "reviewed_job_profile": reviewed_profile,
+            "resume_id": resume_id,
+        },
+    )
+    assert application_response.status_code == 201
 
     def fail_fetch(*args, **kwargs):
         raise AssertionError("analysis should use reviewed_job_profile instead of refetching")
 
     monkeypatch.setattr("app.services.analysis_service.fetch_job_text", fail_fetch)
 
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={
+    body = successful_analysis(
+        client,
+        {
             "resume_id": resume_id,
-            "job_url": "https://example.com/jobs/reviewed",
-            "reviewed_job_profile": {
-                "benefits": [],
-                "company": "Reviewed Labs",
-                "employment_type": None,
-                "experience_level": "0-2 years",
-                "job_id": 0,
-                "keywords": ["Python", "FastAPI"],
-                "location": None,
-                "preferred_skills": [],
-                "required_skills": [
-                    {
-                        "confidence": "high",
-                        "evidence_text": "Required Python experience.",
-                        "id": "job_required_001",
-                        "importance": "required",
-                        "name": "Python",
-                    },
-                    {
-                        "confidence": "high",
-                        "evidence_text": "Required FastAPI experience.",
-                        "id": "job_required_002",
-                        "importance": "required",
-                        "name": "FastAPI",
-                    },
-                ],
-                "responsibilities": ["Build REST APIs for reviewed workflows."],
-                "role_title": "Reviewed Backend Engineer",
-                "unclear_items": [],
-                "warnings": [],
-            },
+            "application_id": application_response.json()["id"],
         },
     )
-
-    assert analyze_response.status_code == 200
-    body = analyze_response.json()
 
     report_response = client.get(f"/reports/{body['report_id']}")
     assert report_response.status_code == 200
@@ -241,30 +251,9 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert markdown_response.status_code == 200
     assert "# Job Fit Report" in markdown_response.text
 
-    latex_response = client.post(f"/reports/{body['report_id']}/resume/latex")
-    assert latex_response.status_code == 200
-    assert latex_response.headers["content-type"].startswith("application/x-tex")
-    assert (
-        latex_response.headers["content-disposition"]
-        == f'attachment; filename="resumepilot-report-{body["report_id"]}.tex"'
-    )
-    assert r"\documentclass[letterpaper,10pt]{article}" in latex_response.text
-    assert r"\section{Evidence-Backed Tailored Highlights}" in latex_response.text
-    assert "Python" in latex_response.text
-    assert "Docker" not in latex_response.text
-
-    docx_response = client.post(f"/reports/{body['report_id']}/resume/docx")
-    assert docx_response.status_code == 200
-    assert docx_response.headers["content-type"].startswith(
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
-    assert (
-        docx_response.headers["content-disposition"]
-        == f'attachment; filename="resumepilot-report-{body["report_id"]}.docx"'
-    )
-    assert docx_response.content.startswith(b"PK")
-    with ZipFile(BytesIO(docx_response.content)) as archive:
-        assert "word/document.xml" in archive.namelist()
+    for export_format in ("latex", "docx", "pdf"):
+        response = client.post(f"/reports/{body['report_id']}/resume/{export_format}")
+        assert response.status_code == 404
 
     trace_response = client.get(f"/reports/{body['report_id']}/trace")
     assert trace_response.status_code == 200
@@ -287,62 +276,6 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert trace_body["trace"]["token_usage"] is None
     assert trace_body["trace"]["cost_estimate_usd"] is None
     assert trace_body["trace"]["runtime_metadata"] == {}
-
-
-def test_read_tailored_resume_pdf_download(
-    client, monkeypatch, sample_resume_text, sample_job_text, settings
-):
-    def fake_compile_latex_to_pdf(
-        latex_source: str,
-        *,
-        timeout_seconds: int,
-        max_output_bytes: int,
-    ) -> bytes:
-        assert r"\documentclass[letterpaper,10pt]{article}" in latex_source
-        assert timeout_seconds == settings.latex_compile_timeout_seconds
-        assert max_output_bytes == settings.latex_pdf_max_bytes
-        return b"%PDF-1.7\n% ResumePilot test PDF\n"
-
-    monkeypatch.setattr(
-        "app.services.analysis_service.compile_latex_to_pdf",
-        fake_compile_latex_to_pdf,
-    )
-    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
-
-    pdf_response = client.post(f"/reports/{body['report_id']}/resume/pdf")
-
-    assert pdf_response.status_code == 200
-    assert pdf_response.headers["content-type"].startswith("application/pdf")
-    assert (
-        pdf_response.headers["content-disposition"]
-        == f'attachment; filename="resumepilot-report-{body["report_id"]}.pdf"'
-    )
-    assert pdf_response.content.startswith(b"%PDF-1.7")
-
-
-def test_read_tailored_resume_pdf_reports_missing_compiler(
-    client, monkeypatch, sample_resume_text, sample_job_text
-):
-    def fake_compile_latex_to_pdf(
-        _latex_source: str,
-        *,
-        timeout_seconds: int,
-        max_output_bytes: int,
-    ) -> bytes:
-        raise PdfCompilerUnavailable("No compiler installed.")
-
-    monkeypatch.setattr(
-        "app.services.analysis_service.compile_latex_to_pdf",
-        fake_compile_latex_to_pdf,
-    )
-    body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
-
-    pdf_response = client.post(f"/reports/{body['report_id']}/resume/pdf")
-
-    assert pdf_response.status_code == 503
-    assert (
-        pdf_response.json()["detail"] == "PDF export requires tectonic or pdflatex on the server."
-    )
 
 
 def test_crewai_fallback_trace_is_persisted(
@@ -525,9 +458,9 @@ def _upload_and_analyze(
     if plan != "free":
         _set_dev_user_plan(client, plan)
 
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={
+    body = successful_analysis(
+        client,
+        {
             "resume_id": resume_id,
             "job_text": job_text,
             "allow_live_ai_processing": (
@@ -535,9 +468,6 @@ def _upload_and_analyze(
             ),
         },
     )
-
-    assert analyze_response.status_code == 200
-    body = analyze_response.json()
     body["resume_id"] = resume_id
     return body
 

@@ -11,6 +11,7 @@ from app.schemas.agent import (
     InterviewCoachAgentOutput,
     ResumeMatchAgentOutput,
 )
+from app.schemas.common import ValidationSeverity
 from app.schemas.report import InterviewQuestionGroup
 from app.services.agent_workflow import run_application_agent_workflow
 from app.services.crewai_workflow import (
@@ -20,6 +21,7 @@ from app.services.crewai_workflow import (
 )
 from app.services.job_parser import parse_job_profile
 from app.services.matcher import match_resume_to_job
+from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import parse_resume_profile
 
 
@@ -58,6 +60,8 @@ def test_agent_workflow_generates_validated_report_sections(sample_resume_text, 
     assert result.trace.token_usage is None
     assert result.trace.cost_estimate_usd is None
     assert result.trace.runtime_metadata == {}
+    assert result.report.cover_letter_evidence_ids
+    assert result.report.validation_status == result.trace.validation_status
 
 
 def test_crewai_prompt_excludes_candidate_contact_data_and_deterministic_letter(
@@ -115,6 +119,7 @@ def test_agent_workflow_trace_accepts_legacy_payload_without_timings():
     assert trace.token_usage is None
     assert trace.cost_estimate_usd is None
     assert trace.runtime_metadata == {}
+    assert trace.validation_status == ValidationSeverity.pass_
 
 
 def test_crewai_mode_falls_back_when_runtime_is_unavailable(
@@ -261,4 +266,98 @@ def test_crewai_mode_uses_live_sections_then_validates(
     assert result.trace.runtime_metadata["billable_output_tokens"] == 33
     assert result.report.executive_summary.startswith("CrewAI-reviewed fit")
     assert "validated resume evidence" in result.report.cover_letter
+    assert result.report.cover_letter_evidence_ids == evidence_ids
+    assert result.report.validation_status != ValidationSeverity.block
+    assert result.trace.validation_status == result.report.validation_status
     assert "crewai_unavailable" not in result.trace.validation_warning_codes
+
+
+def test_crewai_unsupported_claims_are_replaced_before_report_and_markdown(
+    monkeypatch,
+    sample_resume_text,
+    sample_job_text,
+    settings,
+):
+    resume = parse_resume_profile(sample_resume_text, resume_id=1)
+    job = parse_job_profile(sample_job_text, job_id=1)
+    match = match_resume_to_job(resume, job)
+    deterministic = run_application_agent_workflow(
+        analysis_id=1,
+        resume=resume,
+        job=job,
+        match=match,
+    )
+    evidence_ids = match.matched_skills[0].resume_evidence_ids
+    crewai_settings = settings.model_copy(update={"agent_workflow_mode": AgentWorkflowMode.crewai})
+
+    class UnsafeCrewAIRunner:
+        def run(self, **_kwargs):
+            return CrewAIWorkflowSections(
+                resume_match=ResumeMatchAgentOutput(
+                    summary=(
+                        "Senior executive at Invented Corp who served 1,000,000 users with "
+                        "99.99% uptime."
+                    ),
+                    strongest_matches=["Python"],
+                    weak_areas=[],
+                    recommended_positioning="Lead with this certified production record.",
+                    evidence_ids=evidence_ids,
+                    confidence=match.confidence,
+                ),
+                cover_letter=CoverLetterAgentOutput(
+                    draft=(
+                        "I worked at Imaginary Labs and drove 900% revenue growth through "
+                        "50 production deployments."
+                    ),
+                    confidence_note="Unverified live draft.",
+                    evidence_ids=evidence_ids,
+                ),
+                interview_coach=InterviewCoachAgentOutput(
+                    question_groups=[
+                        InterviewQuestionGroup(
+                            category="Behavioral",
+                            questions=["Describe the claimed executive record."],
+                            suggested_answer_evidence_ids=["invented_001"],
+                        )
+                    ]
+                ),
+            )
+
+    monkeypatch.setattr(
+        "app.services.agent_workflow.build_crewai_workflow_runner",
+        lambda _settings: UnsafeCrewAIRunner(),
+    )
+
+    result = run_application_agent_workflow(
+        analysis_id=1,
+        resume=resume,
+        job=job,
+        match=match,
+        settings=crewai_settings,
+    )
+    markdown = report_to_markdown(result.report)
+
+    assert result.report.executive_summary == deterministic.report.executive_summary
+    assert result.report.cover_letter == deterministic.report.cover_letter
+    assert result.report.cover_letter_evidence_ids == deterministic.report.cover_letter_evidence_ids
+    assert result.report.interview_questions == deterministic.report.interview_questions
+    assert result.report.validation_status == ValidationSeverity.block
+    assert result.trace.validation_status == ValidationSeverity.block
+    assert set(result.trace.runtime_metadata["blocked_live_sections"].split(",")) == {
+        AgentStepName.resume_match.value,
+        AgentStepName.cover_letter.value,
+        AgentStepName.interview_coach.value,
+    }
+    assert {warning.code for warning in result.report.validation_warnings} >= {
+        "live_resume_match_blocked",
+        "live_cover_letter_blocked",
+        "live_interview_coach_blocked",
+    }
+    assert all(
+        warning.severity == ValidationSeverity.block
+        for warning in result.report.validation_warnings
+        if warning.code.startswith("live_")
+    )
+    for unsafe_text in ("Invented Corp", "1,000,000", "Imaginary Labs", "900%"):
+        assert unsafe_text not in result.report.model_dump_json()
+        assert unsafe_text not in markdown

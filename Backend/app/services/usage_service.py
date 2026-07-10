@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_cached_settings
 from app.db.models import UsageEventRecord, UserRecord
 from app.repositories.usage_events import UsageEventRepository
 from app.schemas.auth import CurrentUser
 from app.schemas.usage import (
     PlanLimit,
+    UsageEventState,
     UsageEventType,
     UsageLimitMetric,
     UsageSummaryResponse,
@@ -98,14 +100,38 @@ def record_analysis_usage(
     )
 
 
-def reserve_analysis_usage(db: Session, current_user: CurrentUser) -> UsageEventRecord:
+def reserve_analysis_usage(
+    db: Session,
+    current_user: CurrentUser,
+    *,
+    reservation_key: str | None = None,
+) -> UsageEventRecord:
     """Reserve analysis quota before remote parsing or model work begins."""
+    record = add_analysis_usage_reservation(
+        db,
+        current_user,
+        reservation_key=reservation_key,
+    )
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def add_analysis_usage_reservation(
+    db: Session,
+    current_user: CurrentUser,
+    *,
+    reservation_key: str | None = None,
+) -> UsageEventRecord:
+    """Stage a reservation so callers can commit it atomically with durable work."""
     _lock_user_for_usage(db, current_user.id)
     enforce_analysis_limit(db, current_user)
-    return record_usage_event(
+    return add_usage_event(
         db,
         current_user=current_user,
         event_type=UsageEventType.analysis_created,
+        state=UsageEventState.reserved,
+        reservation_key=reservation_key,
         metadata={"status": "reserved"},
     )
 
@@ -119,6 +145,12 @@ def finalize_analysis_usage(
     workflow_mode: str,
     runtime_status: str = "completed",
 ) -> None:
+    record.state = (
+        UsageEventState.consumed.value
+        if runtime_status == "completed"
+        else UsageEventState.released.value
+    )
+    record.settled_at = datetime.now(UTC)
     record.metadata_json = {
         "status": runtime_status,
         "analysis_id": analysis_id,
@@ -165,8 +197,54 @@ def reserve_export_usage(
         db,
         current_user=current_user,
         event_type=_export_event_type(export_format),
+        state=UsageEventState.consumed,
         metadata={"report_id": report_id, "format": export_format},
     )
+
+
+def add_export_usage_reservation(
+    db: Session,
+    current_user: CurrentUser,
+    *,
+    report_id: int,
+    export_format: str,
+    reservation_key: str,
+) -> UsageEventRecord:
+    """Stage an export reservation atomically with a durable export job."""
+    _lock_user_for_usage(db, current_user.id)
+    enforce_export_limit(db, current_user)
+    return add_usage_event(
+        db,
+        current_user=current_user,
+        event_type=_export_event_type(export_format),
+        state=UsageEventState.reserved,
+        reservation_key=reservation_key,
+        metadata={
+            "status": "reserved",
+            "report_id": report_id,
+            "format": export_format,
+        },
+    )
+
+
+def finalize_export_usage(
+    db: Session,
+    record: UsageEventRecord,
+    *,
+    report_id: int,
+    export_format: str,
+    operation_id: str,
+) -> None:
+    record.state = UsageEventState.consumed.value
+    record.settled_at = datetime.now(UTC)
+    record.metadata_json = {
+        "status": "completed",
+        "report_id": report_id,
+        "format": export_format,
+        "operation_id": operation_id,
+    }
+    db.add(record)
+    db.commit()
 
 
 def record_crewai_usage(
@@ -193,6 +271,7 @@ def reserve_crewai_usage(db: Session, current_user: CurrentUser) -> UsageEventRe
         db,
         current_user=current_user,
         event_type=UsageEventType.crewai_run,
+        state=UsageEventState.reserved,
         metadata={"status": "reserved"},
     )
 
@@ -205,6 +284,12 @@ def finalize_crewai_usage(
     runtime_status: str,
     cost_estimate_usd: float | None,
 ) -> None:
+    record.state = (
+        UsageEventState.consumed.value
+        if runtime_status == "completed"
+        else UsageEventState.released.value
+    )
+    record.settled_at = datetime.now(UTC)
     record.metadata_json = {"status": runtime_status, "analysis_id": analysis_id}
     record.cost_estimate_usd = cost_estimate_usd
     db.add(record)
@@ -219,6 +304,8 @@ def record_usage_event(
     quantity: int = 1,
     cost_estimate_usd: float | None = None,
     metadata: dict[str, Any] | None = None,
+    state: UsageEventState = UsageEventState.consumed,
+    reservation_key: str | None = None,
 ) -> UsageEventRecord:
     record = add_usage_event(
         db,
@@ -227,6 +314,8 @@ def record_usage_event(
         quantity=quantity,
         cost_estimate_usd=cost_estimate_usd,
         metadata=metadata,
+        state=state,
+        reservation_key=reservation_key,
     )
     db.commit()
     db.refresh(record)
@@ -241,13 +330,20 @@ def add_usage_event(
     quantity: int = 1,
     cost_estimate_usd: float | None = None,
     metadata: dict[str, Any] | None = None,
+    state: UsageEventState = UsageEventState.consumed,
+    reservation_key: str | None = None,
 ) -> UsageEventRecord:
+    now = datetime.now(UTC)
     record = UsageEventRecord(
         user_id=current_user.id,
         event_type=event_type.value,
         quantity=quantity,
         cost_estimate_usd=cost_estimate_usd,
         metadata_json=metadata or {},
+        state=state.value,
+        reservation_key=reservation_key,
+        reserved_at=now if state == UsageEventState.reserved else None,
+        settled_at=now if state != UsageEventState.reserved else None,
     )
     repository = UsageEventRepository(db)
     repository.add(record)
@@ -263,18 +359,21 @@ def get_usage_summary(db: Session, current_user: CurrentUser) -> UsageSummaryRes
         event_types={UsageEventType.analysis_created.value},
         start_at=period_start,
         end_at=period_end,
+        states={UsageEventState.consumed.value},
     )
     export_count = repository.quantity_sum(
         user_id=current_user.id,
         event_types=EXPORT_EVENT_TYPES,
         start_at=period_start,
         end_at=period_end,
+        states={UsageEventState.consumed.value},
     )
     crewai_count = repository.quantity_sum(
         user_id=current_user.id,
         event_types={UsageEventType.crewai_run.value},
         start_at=period_start,
         end_at=period_end,
+        states={UsageEventState.consumed.value},
     )
 
     return UsageSummaryResponse(
@@ -320,25 +419,66 @@ def _enforce_metric_limit(
     current_user: CurrentUser,
     metric: UsageLimitMetric,
 ) -> None:
-    summary = get_usage_summary(db, current_user)
-    limit = next(item for item in summary.limits if item.metric == metric)
-    if limit.limit is None or limit.used < limit.limit:
+    period_start, period_end = _current_period()
+    plan = _plan_for_user(current_user)
+    event_types, maximum = _metric_limit_definition(metric, plan)
+    if maximum is None:
+        return
+    reserved_after = datetime.now(UTC) - timedelta(
+        seconds=get_cached_settings().usage_reservation_ttl_seconds
+    )
+    used_or_reserved = UsageEventRepository(db).quantity_sum(
+        user_id=current_user.id,
+        event_types=event_types,
+        start_at=period_start,
+        end_at=period_end,
+        states={UsageEventState.consumed.value, UsageEventState.reserved.value},
+        reserved_after=reserved_after,
+    )
+    if used_or_reserved < maximum:
         return
     raise HTTPException(
         status_code=status.HTTP_402_PAYMENT_REQUIRED,
         detail={
             "code": "plan_limit_reached",
             "metric": metric.value,
-            "plan": summary.plan,
-            "used": limit.used,
-            "limit": limit.limit,
-            "reset_at": limit.reset_at.isoformat(),
+            "plan": plan.name,
+            "used": used_or_reserved,
+            "limit": maximum,
+            "reset_at": period_end.isoformat(),
             "message": (
-                f"{summary.plan} plan {metric.value} limit reached. "
+                f"{plan.name} plan {metric.value} limit reached. "
                 "Upgrade or wait for the next billing period."
             ),
         },
     )
+
+
+def release_usage_reservation(
+    db: Session,
+    record: UsageEventRecord,
+    *,
+    runtime_status: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if record.state != UsageEventState.reserved.value:
+        return
+    record.state = UsageEventState.released.value
+    record.settled_at = datetime.now(UTC)
+    record.metadata_json = {"status": runtime_status, **(metadata or {})}
+    db.add(record)
+    db.commit()
+
+
+def _metric_limit_definition(
+    metric: UsageLimitMetric,
+    plan: PlanDefinition,
+) -> tuple[set[str], int | None]:
+    if metric == UsageLimitMetric.analyses:
+        return {UsageEventType.analysis_created.value}, plan.monthly_analyses
+    if metric == UsageLimitMetric.exports:
+        return EXPORT_EVENT_TYPES, plan.monthly_exports
+    return {UsageEventType.crewai_run.value}, plan.monthly_crewai_runs
 
 
 def _export_event_type(export_format: str) -> UsageEventType:

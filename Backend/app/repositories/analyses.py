@@ -15,6 +15,21 @@ class AnalysisRepository:
             .limit(1)
         )
 
+    def get_by_workflow_job_id(
+        self,
+        workflow_job_id: str,
+        *,
+        user_id: int,
+    ) -> AnalysisRecord | None:
+        return self.db.scalar(
+            select(AnalysisRecord)
+            .where(
+                AnalysisRecord.workflow_job_id == workflow_job_id,
+                AnalysisRecord.user_id == user_id,
+            )
+            .limit(1)
+        )
+
     def list_recent(self, *, user_id: int, limit: int = 20) -> list[AnalysisRecord]:
         return list(
             self.db.scalars(

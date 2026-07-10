@@ -54,21 +54,6 @@ test("dashboard demo flow renders report and validates exports", async ({ page }
     contentType: "text/plain",
     prefix: "# Job Fit Report"
   });
-  await expectReportExport(page, `/api/reports/${reportId}/resume/latex`, {
-    contentDisposition: `attachment; filename="resumepilot-report-${reportId}.tex"`,
-    contentType: "application/x-tex",
-    prefix: "%-------------------------"
-  });
-  await expectReportExport(page, `/api/reports/${reportId}/resume/docx`, {
-    contentDisposition: `attachment; filename="resumepilot-report-${reportId}.docx"`,
-    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    prefix: "PK"
-  });
-  await expectReportExport(page, `/api/reports/${reportId}/resume/pdf`, {
-    contentDisposition: `attachment; filename="resumepilot-report-${reportId}.pdf"`,
-    contentType: "application/pdf",
-    prefix: "%PDF-"
-  });
   await expectReportExport(page, `/api/applications/${applicationId}/tailored-resume/latex`, {
     contentDisposition: `attachment; filename="resumepilot-application-${applicationId}.tex"`,
     contentType: "application/x-tex",
@@ -79,7 +64,7 @@ test("dashboard demo flow renders report and validates exports", async ({ page }
     contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     prefix: "PK"
   });
-  await expectReportExport(page, `/api/applications/${applicationId}/tailored-resume/pdf`, {
+  await expectPdfExport(page, `/api/applications/${applicationId}/tailored-resume/pdf`, {
     contentDisposition: `attachment; filename="resumepilot-application-${applicationId}.pdf"`,
     contentType: "application/pdf",
     prefix: "%PDF-"
@@ -93,6 +78,11 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   await completeDashboardDemoFlow(page);
 
   await expect(page.getByRole("button", { name: "Download Markdown" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download DOCX" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download LaTeX" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Download PDF" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Open tailored resume draft" }).click();
   await expect(page.getByRole("button", { name: "Download DOCX" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download LaTeX" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
@@ -109,6 +99,10 @@ test("dashboard sends a job posting URL analysis request", async ({ page }) => {
     await route.fulfill({
       body: JSON.stringify({
         job_url: jobUrl,
+        reviewed_job_text:
+          "Backend Engineer at Example Co. Required Python experience. Build backend services and reliable APIs.",
+        source_content_hash: "url-preview-hash",
+        source_type: "url",
         profile: {
           benefits: [],
           company: "Example Co",
@@ -178,16 +172,165 @@ test("dashboard sends a job posting URL analysis request", async ({ page }) => {
   await page.getByRole("button", { name: "Run AI analysis" }).click();
 
   await expect(page.getByText("mocked URL analysis request")).toBeVisible();
-  await expect.poll(() => capturedPayloads[0]?.job_url).toBe(jobUrl);
-  expect(capturedPayloads[0]?.job_text).toBeNull();
-  expect(capturedPayloads[0]?.company).toBeNull();
-  expect(capturedPayloads[0]?.role).toBeNull();
   expect(capturedPayloads[0]?.application_id).toEqual(expect.any(Number));
-  expect(capturedPayloads[0]?.reviewed_job_profile).toMatchObject({
-    company: "Example Co",
-    required_skills: [{ name: "Python" }],
-    role_title: "Reviewed Backend Engineer"
+  expect(capturedPayloads[0]?.job_url).toBeUndefined();
+  expect(capturedPayloads[0]?.job_text).toBeUndefined();
+  expect(capturedPayloads[0]?.reviewed_job_profile).toBeUndefined();
+});
+
+test("pasted job evidence persists and reopens before analysis", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const jobText = [
+    "Pasted Recovery Engineer",
+    "Company: Restore Labs",
+    "Required Python and FastAPI experience.",
+    "Build reliable APIs and write automated tests for recovery workflows."
+  ].join("\n");
+  const previewPayloads: Record<string, unknown>[] = [];
+
+  await page.route("**/api/jobs/preview", async (route) => {
+    previewPayloads.push(
+      JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>
+    );
+    await route.fulfill({
+      body: JSON.stringify({
+        job_url: null,
+        parser: "pasted_text",
+        profile: {
+          benefits: [],
+          company: "Restore Labs",
+          employment_type: null,
+          experience_level: null,
+          job_id: 0,
+          keywords: ["Python", "FastAPI"],
+          location: null,
+          preferred_skills: [],
+          required_skills: [
+            {
+              confidence: "high",
+              evidence_text: "Required Python experience.",
+              id: "job_required_001",
+              importance: "required",
+              name: "Python"
+            },
+            {
+              confidence: "high",
+              evidence_text: "Required FastAPI experience.",
+              id: "job_required_002",
+              importance: "required",
+              name: "FastAPI"
+            }
+          ],
+          responsibilities: [
+            "Build reliable APIs and write automated tests for recovery workflows."
+          ],
+          role_title: "Pasted Recovery Engineer",
+          unclear_items: [],
+          warnings: []
+        },
+        quality_checks: [
+          {
+            code: "required_or_preferred_skills",
+            message: "Required skills were extracted from pasted text.",
+            status: "pass"
+          }
+        ],
+        raw_text_char_count: jobText.length,
+        reviewed_job_text: jobText,
+        source_content_hash: "pasted-recovery-hash",
+        source_type: "pasted_text",
+        status: "ready"
+      }),
+      contentType: "application/json",
+      status: 200
+    });
   });
+
+  await page.goto("/");
+  await page.getByRole("radio", { name: /Paste description/ }).check();
+  await page.getByRole("textbox", { name: "Job description" }).fill(jobText);
+  await expect(page.getByText(`${jobText.length.toLocaleString()} / 50,000`)).toBeVisible();
+  await page.getByRole("button", { name: "Review job evidence" }).click();
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  await expect(page.getByRole("heading", { name: "Resume upload" })).toBeVisible();
+  expect(previewPayloads[0]).toEqual({ job_text: jobText });
+
+  await page.reload();
+  const savedApplication = page
+    .getByRole("article")
+    .filter({ hasText: "Pasted Recovery Engineer" })
+    .first();
+  await expect(savedApplication).toBeVisible();
+  await savedApplication.getByRole("button", { name: "Open" }).click();
+  await expect(page.getByRole("heading", { name: "Resume upload" })).toBeVisible();
+  await expect(page.getByText("Text added", { exact: true })).toBeVisible();
+
+  await uploadResume(page);
+  const analysisPayloads: Record<string, unknown>[] = [];
+  await page.route("**/api/jobs/analyze", async (route) => {
+    analysisPayloads.push(
+      JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>
+    );
+    await route.fulfill({
+      body: JSON.stringify({ detail: "mocked pasted analysis request" }),
+      contentType: "application/json",
+      status: 400
+    });
+  });
+  await page.getByRole("button", { name: "Run AI analysis" }).click();
+  await expect(page.getByText("mocked pasted analysis request")).toBeVisible();
+  expect(analysisPayloads[0]?.application_id).toEqual(expect.any(Number));
+  expect(analysisPayloads[0]?.job_url).toBeUndefined();
+  expect(analysisPayloads[0]?.job_text).toBeUndefined();
+});
+
+test("blocked job URLs require pasted source text", async ({ page }) => {
+  const blockedUrl = "https://example.com/jobs/private-role";
+  await page.route("**/api/jobs/preview", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        job_url: blockedUrl,
+        parser: "generic_html",
+        profile: {
+          benefits: [],
+          company: null,
+          employment_type: null,
+          experience_level: null,
+          job_id: 0,
+          keywords: [],
+          location: null,
+          preferred_skills: [],
+          required_skills: [],
+          responsibilities: [],
+          role_title: null,
+          unclear_items: [],
+          warnings: []
+        },
+        quality_checks: [
+          {
+            code: "blocked_private",
+            message: "This listing is private or blocked. Paste the description instead.",
+            status: "fail"
+          }
+        ],
+        raw_text_char_count: 0,
+        reviewed_job_text: "",
+        source_content_hash: null,
+        source_type: "url",
+        status: "blocked_private"
+      }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Job listing URL" }).fill(blockedUrl);
+  await page.getByRole("button", { name: "Review job evidence" }).click();
+  await expect(page.getByText("Job listing could not be reviewed")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Source text required" })).toBeDisabled();
+  await page.getByRole("button", { name: "Paste job description instead" }).click();
+  await expect(page.getByRole("textbox", { name: "Job description" })).toBeVisible();
 });
 
 test("dashboard flags unclear job requirement extraction", async ({ page }) => {
@@ -204,7 +347,7 @@ test("dashboard flags unclear job requirement extraction", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Continue with warning" })).toBeVisible();
   await page.getByRole("button", { name: "Continue with warning" }).click();
   await uploadResume(page);
-  await runAiAnalysis(page);
+  await runAiAnalysis(page, { expectDraftComparison: false });
 
   await expect(page.getByText("Provisional score", { exact: true })).toBeVisible();
   await expect(page.getByText("Needs job details", { exact: true })).toBeVisible();
@@ -212,6 +355,57 @@ test("dashboard flags unclear job requirement extraction", async ({ page }) => {
   await expect(page.getByText("No evidence-backed matches yet", { exact: true })).toBeVisible();
   await expect(page.getByText("Gaps not available", { exact: true })).toBeVisible();
   await expect(page.getByText("No ATS keywords extracted", { exact: true })).toBeVisible();
+});
+
+test("tailored resume explains blocked unsupported edits inline", async ({ page }) => {
+  await mockFixtureJobPreviews(page);
+  await page.goto("/");
+  await enterJobListing(page, { url: jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH) });
+  await uploadResume(page);
+  await page.getByRole("button", { name: "Run AI analysis" }).click();
+  await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toBeVisible({
+    timeout: 30_000
+  });
+
+  const draftWorkspace = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Tailored resume workspace" })
+  });
+  const editor = draftWorkspace.getByRole("textbox", { name: /Edit tailored bullet/ }).first();
+  await editor.fill(`${await editor.inputValue()} Used Kubernetes with 99% reliability.`);
+  await page.route("**/api/applications/*/tailored-resume/items/*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        detail: {
+          message: "Accepted resume bullet must be supported by linked evidence.",
+          warnings: [
+            {
+              code: "draft_bullet_has_unsupported_skill",
+              evidence_ids: ["projects_001"],
+              message: "Kubernetes is not present in the linked resume evidence.",
+              severity: "block"
+            },
+            {
+              code: "draft_bullet_has_unsupported_claim",
+              evidence_ids: ["projects_001"],
+              message: "99% reliability is not present in the linked resume evidence.",
+              severity: "block"
+            }
+          ]
+        }
+      }),
+      contentType: "application/json",
+      status: 422
+    });
+  });
+
+  await draftWorkspace.getByRole("button", { name: "Accept" }).first().click();
+  await expect(draftWorkspace.getByText("Change blocked")).toBeVisible();
+  await expect(
+    draftWorkspace.getByText("Kubernetes is not present in the linked resume evidence.")
+  ).toBeVisible();
+  await expect(
+    draftWorkspace.getByText("99% reliability is not present in the linked resume evidence.")
+  ).toBeVisible();
 });
 
 test("report ledger reopens the selected saved report accurately", async ({ page }) => {
@@ -245,9 +439,9 @@ test("report ledger reopens the selected saved report accurately", async ({ page
   const exportResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
-      response.url().endsWith(`/api/reports/${firstReportId}/resume/latex`)
+      response.url().endsWith(`/api/reports/${firstReportId}/markdown`)
   );
-  await page.getByRole("button", { name: "Download LaTeX" }).click();
+  await page.getByRole("button", { name: "Download Markdown" }).click();
   expect((await exportResponsePromise).status()).toBe(200);
 });
 
@@ -312,6 +506,10 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
   await expect(page.getByRole("heading", { name: "Missing or weak" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "ATS keywords" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cover letter draft" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Interview preparation" })).toBeVisible();
+  await expect(page.getByText(/Validation: (Passed|Needs review|Blocked)/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download DOCX" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Workflow trace" })).toBeVisible();
   await expect(page.getByText(/Report \d+/).first()).toBeVisible();
   await expect(page.getByText("Deterministic fallback", { exact: true })).toBeVisible();
@@ -448,6 +646,15 @@ async function mockFixtureJobPreviews(page: Page): Promise<void> {
     await route.fulfill({
       body: JSON.stringify({
         job_url: payload.job_url,
+        reviewed_job_text: [
+          fixture.role ?? "Role not listed",
+          fixture.company ?? "Company not listed",
+          ...fixture.requiredSkills.map((skill) => `Required ${skill} experience.`),
+          ...fixture.preferredSkills.map((skill) => `Preferred ${skill} experience.`),
+          ...fixture.responsibilities
+        ].join("\n"),
+        source_content_hash: `fixture-${new URL(payload.job_url).pathname}`,
+        source_type: "url",
         parser: "playwright_fixture",
         profile: {
           benefits: [],
@@ -492,7 +699,7 @@ async function mockFixtureJobPreviews(page: Page): Promise<void> {
 
 async function runAiAnalysis(
   page: Page,
-  options: { acceptFirstDraft?: boolean } = {}
+  options: { acceptFirstDraft?: boolean; expectDraftComparison?: boolean } = {}
 ): Promise<RunAiAnalysisResult> {
   await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible();
   await page.getByRole("button", { name: "Run AI analysis" }).click();
@@ -504,6 +711,12 @@ async function runAiAnalysis(
     has: page.getByRole("heading", { name: "Tailored resume workspace" })
   });
   let applicationId: string | null = null;
+
+  if (options.expectDraftComparison ?? true) {
+    await expect(draftWorkspace.getByText("Original resume evidence").first()).toBeVisible();
+    await expect(draftWorkspace.getByText("Proposed / edited bullet").first()).toBeVisible();
+    await expect(draftWorkspace.getByText("Why this change").first()).toBeVisible();
+  }
 
   if (options.acceptFirstDraft) {
     await expect(draftWorkspace.getByText("Export locked")).toBeVisible();
@@ -564,6 +777,52 @@ async function expectReportExport(
 
   const body = await response.body();
   expect(body.subarray(0, expected.prefix.length).toString("latin1"), exportPath).toBe(
+    expected.prefix
+  );
+}
+
+async function expectPdfExport(
+  page: Page,
+  exportPath: string,
+  expected: ExpectedExport
+): Promise<void> {
+  const exportUrl = new URL(exportPath, page.url()).toString();
+  const response = await page.request.post(exportUrl, {
+    headers: { "idempotency-key": `playwright-pdf-${Date.now()}` }
+  });
+  expect(response.status(), exportPath).toBe(202);
+  let operation = (await response.json()) as {
+    id: string;
+    status: string;
+    error?: { message?: string } | null;
+  };
+  for (let attempt = 0; attempt < 30 && operation.status !== "succeeded"; attempt += 1) {
+    if (["failed", "dead_lettered", "canceled"].includes(operation.status)) {
+      throw new Error(operation.error?.message ?? `PDF export ${operation.status}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const pollResponse = await page.request.get(
+      new URL(`/api/operations/${operation.id}`, page.url()).toString()
+    );
+    expect(pollResponse.status()).toBe(200);
+    operation = await pollResponse.json();
+  }
+  expect(operation.status).toBe("succeeded");
+
+  const artifactPath = `/api/operations/${operation.id}/artifact`;
+  const artifactResponse = await page.request.get(new URL(artifactPath, page.url()).toString());
+  expect(artifactResponse.status(), artifactPath).toBe(200);
+  expect(artifactResponse.headers()["content-type"], artifactPath).toContain(
+    expected.contentType
+  );
+  expect(artifactResponse.headers()["content-disposition"], artifactPath).toBe(
+    expected.contentDisposition
+  );
+  expect(artifactResponse.headers()["cache-control"], artifactPath).toContain(
+    "private, no-store"
+  );
+  const body = await artifactResponse.body();
+  expect(body.subarray(0, expected.prefix.length).toString("latin1"), artifactPath).toBe(
     expected.prefix
   );
 }

@@ -16,13 +16,32 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  migrate:
+    build:
+      context: ./Backend
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      AUTO_CREATE_DB_SCHEMA: "false"
+      REQUIRE_DB_MIGRATIONS: "true"
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-resumepilot}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}@db:5432/${POSTGRES_DB:-resumepilot}
+      RESUMEPILOT_DATA_DIR: /tmp/resumepilot-migrate
+      AUTH_REQUIRED: "true"
+      AUTH_TRUSTED_PROXY_SECRET: ${AUTH_TRUSTED_PROXY_SECRET:?Set AUTH_TRUSTED_PROXY_SECRET in .env.production}
+      JOBCOPILOT_API_TOKEN: ${JOBCOPILOT_API_TOKEN:?Set JOBCOPILOT_API_TOKEN in .env.production}
+    command: ["alembic", "upgrade", "head"]
+
   backend:
     build:
       context: ./Backend
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
@@ -35,15 +54,20 @@ services:
       JOBCOPILOT_API_TOKEN: ${JOBCOPILOT_API_TOKEN:?Set JOBCOPILOT_API_TOKEN in .env.production}
       DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-30}
       ENABLE_JOB_BROWSER_FALLBACK: ${ENABLE_JOB_BROWSER_FALLBACK:-false}
+      LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-20}
+      LATEX_PDF_MAX_BYTES: ${LATEX_PDF_MAX_BYTES:-5242880}
       AGENT_WORKFLOW_MODE: ${AGENT_WORKFLOW_MODE:-deterministic_fallback}
       LLM_PROVIDER: ${LLM_PROVIDER:-vertex}
       VERTEX_PROJECT_ID: ${VERTEX_PROJECT_ID:-}
       VERTEX_REGION: ${VERTEX_REGION:-global}
       LLM_MODEL: ${LLM_MODEL:-gemini-3.5-flash}
       CREWAI_LLM_MODEL: ${CREWAI_LLM_MODEL:-}
-    command: >
-      sh -c "alembic upgrade head &&
-      uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
+      WORKFLOW_INLINE_EXECUTION: "false"
+      WORKFLOW_WORKER_POLL_SECONDS: ${WORKFLOW_WORKER_POLL_SECONDS:-1}
+      WORKFLOW_JOB_LEASE_SECONDS: ${WORKFLOW_JOB_LEASE_SECONDS:-180}
+      WORKFLOW_JOB_MAX_ATTEMPTS: ${WORKFLOW_JOB_MAX_ATTEMPTS:-3}
+      USAGE_RESERVATION_TTL_SECONDS: ${USAGE_RESERVATION_TTL_SECONDS:-900}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/ready >/dev/null"]
       interval: 10s
@@ -52,6 +76,44 @@ services:
       start_period: 20s
     ports:
       - "${BACKEND_BIND_HOST:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - resumepilot-data:/data
+
+  worker:
+    build:
+      context: ./Backend
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      AUTO_CREATE_DB_SCHEMA: "false"
+      REQUIRE_DB_MIGRATIONS: "true"
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-resumepilot}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}@db:5432/${POSTGRES_DB:-resumepilot}
+      RESUMEPILOT_DATA_DIR: /data
+      AUTH_REQUIRED: "true"
+      AUTH_TRUSTED_PROXY_SECRET: ${AUTH_TRUSTED_PROXY_SECRET:?Set AUTH_TRUSTED_PROXY_SECRET in .env.production}
+      JOBCOPILOT_API_TOKEN: ${JOBCOPILOT_API_TOKEN:?Set JOBCOPILOT_API_TOKEN in .env.production}
+      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-30}
+      ENABLE_JOB_BROWSER_FALLBACK: ${ENABLE_JOB_BROWSER_FALLBACK:-false}
+      LATEX_COMPILE_TIMEOUT_SECONDS: ${LATEX_COMPILE_TIMEOUT_SECONDS:-20}
+      LATEX_PDF_MAX_BYTES: ${LATEX_PDF_MAX_BYTES:-5242880}
+      AGENT_WORKFLOW_MODE: ${AGENT_WORKFLOW_MODE:-deterministic_fallback}
+      LLM_PROVIDER: ${LLM_PROVIDER:-vertex}
+      VERTEX_PROJECT_ID: ${VERTEX_PROJECT_ID:-}
+      VERTEX_REGION: ${VERTEX_REGION:-global}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.5-flash}
+      CREWAI_LLM_MODEL: ${CREWAI_LLM_MODEL:-}
+      WORKFLOW_INLINE_EXECUTION: "false"
+      WORKFLOW_WORKER_POLL_SECONDS: ${WORKFLOW_WORKER_POLL_SECONDS:-1}
+      WORKFLOW_JOB_LEASE_SECONDS: ${WORKFLOW_JOB_LEASE_SECONDS:-180}
+      WORKFLOW_JOB_MAX_ATTEMPTS: ${WORKFLOW_JOB_MAX_ATTEMPTS:-3}
+      USAGE_RESERVATION_TTL_SECONDS: ${USAGE_RESERVATION_TTL_SECONDS:-900}
+    command: ["resumepilot-worker"]
     volumes:
       - resumepilot-data:/data
 

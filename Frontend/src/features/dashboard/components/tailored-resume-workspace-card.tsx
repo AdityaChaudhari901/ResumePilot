@@ -24,6 +24,7 @@ import type {
   TailoredResumeItemStatus,
   TailoredResumeItemUpdate
 } from "@/features/dashboard/types";
+import type { ApiProblem } from "@/features/dashboard/utils/api-error";
 
 interface TailoredResumeWorkspaceCardProps {
   applicationId: number | null;
@@ -33,7 +34,7 @@ interface TailoredResumeWorkspaceCardProps {
   isUpdating: boolean;
   onExport: (format: TailoredResumeExportFormat) => Promise<void>;
   onRefresh: () => void;
-  onUpdateItem: (itemId: string, update: TailoredResumeItemUpdate) => Promise<void>;
+  onUpdateItem: (itemId: string, update: TailoredResumeItemUpdate) => Promise<ApiProblem | null>;
   onViewReport: () => void;
 }
 
@@ -216,9 +217,10 @@ function TailoredResumeItemRow({
 }: {
   isUpdating: boolean;
   item: TailoredResumeItem;
-  onUpdateItem: (itemId: string, update: TailoredResumeItemUpdate) => Promise<void>;
+  onUpdateItem: (itemId: string, update: TailoredResumeItemUpdate) => Promise<ApiProblem | null>;
 }) {
   const [draftText, setDraftText] = useState(item.edited_bullet ?? item.suggested_bullet);
+  const [problem, setProblem] = useState<ApiProblem | null>(null);
 
   const statusIcon = itemStatusIcon(item.status);
   const StatusIcon = statusIcon.icon;
@@ -226,10 +228,19 @@ function TailoredResumeItemRow({
   const hasChanged = draftText.trim() !== (item.edited_bullet ?? item.suggested_bullet);
 
   async function update(status?: TailoredResumeItemStatus) {
-    await onUpdateItem(item.id, {
+    const nextProblem = await onUpdateItem(item.id, {
       edited_bullet: draftText.trim(),
       ...(status ? { status } : {})
     });
+    setProblem(nextProblem);
+  }
+
+  async function reset() {
+    const nextProblem = await onUpdateItem(item.id, {
+      reset_edited_bullet: true,
+      status: "pending"
+    });
+    setProblem(nextProblem);
   }
 
   return (
@@ -242,9 +253,6 @@ function TailoredResumeItemRow({
             <Badge tone={itemStatusTone(item.status)}>{itemStatusLabel(item.status)}</Badge>
             {hasValidationWarnings ? <Badge tone="warning">needs review</Badge> : null}
           </div>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Source: {item.source_bullet}
-          </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button
@@ -279,12 +287,7 @@ function TailoredResumeItemRow({
               className="h-8 px-3 text-xs"
               disabled={isUpdating}
               icon={<Undo2 className="h-3.5 w-3.5" aria-hidden="true" />}
-              onClick={() =>
-                void onUpdateItem(item.id, {
-                  reset_edited_bullet: true,
-                  status: "pending"
-                })
-              }
+              onClick={() => void reset()}
               variant="ghost"
             >
               Reset edit
@@ -293,29 +296,53 @@ function TailoredResumeItemRow({
         </div>
       </div>
 
-      <label className="mt-4 block">
-        <span className="mb-2 block text-sm font-medium text-foreground">Draft bullet</span>
-        <textarea
-          aria-label={`Edit tailored bullet ${item.id}`}
-          className="min-h-28 w-full resize-y rounded-md border border-border bg-surface-inset px-3 py-2 text-sm leading-6 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
-          disabled={isUpdating}
-          onChange={(event) => setDraftText(event.target.value)}
-          value={draftText}
-        />
-      </label>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2" aria-label="Original and proposed bullet comparison">
+        <section className="rounded-md border border-border bg-background p-3">
+          <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+            Original resume evidence
+          </p>
+          <p className="mt-2 text-sm leading-6 text-foreground">{item.source_bullet}</p>
+        </section>
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        {item.evidence_labels.map((label, index) => (
-          <Badge key={`${item.id}-${label}-${index}`} tone="success">
-            {label}
-          </Badge>
-        ))}
-        {item.jd_keywords_used.map((keyword) => (
-          <Badge key={`${item.id}-${keyword}`} tone="primary">
-            {keyword}
-          </Badge>
-        ))}
+        <label className="block rounded-md border border-primary/20 bg-primary/5 p-3">
+          <span className="block text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+            Proposed / edited bullet
+          </span>
+          <textarea
+            aria-label={`Edit tailored bullet ${item.id}`}
+            className="mt-2 min-h-32 w-full resize-y rounded-md border border-border bg-surface-inset px-3 py-2 text-sm leading-6 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
+            disabled={isUpdating}
+            onChange={(event) => {
+              setDraftText(event.target.value);
+              setProblem(null);
+            }}
+            value={draftText}
+          />
+        </label>
       </div>
+
+      <section className="mt-3 rounded-md border border-border bg-background p-3" aria-label="Why this bullet changed">
+        <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+          Why this change
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {item.evidence_labels.map((label, index) => (
+            <Badge key={`${item.id}-${label}-${index}`} tone="success">
+              {label}
+            </Badge>
+          ))}
+          {item.jd_keywords_used.map((keyword) => (
+            <Badge key={`${item.id}-${keyword}`} tone="primary">
+              JD keyword: {keyword}
+            </Badge>
+          ))}
+          {item.evidence_labels.length === 0 && item.jd_keywords_used.length === 0 ? (
+            <span className="text-xs text-muted-foreground">
+              No additional keyword or evidence labels were attached.
+            </span>
+          ) : null}
+        </div>
+      </section>
 
       {item.evidence_texts.length > 0 ? (
         <details className="group mt-3 rounded-md border border-border bg-background">
@@ -341,14 +368,74 @@ function TailoredResumeItemRow({
             >
               <div className="flex items-center gap-2">
                 <CircleAlert className="h-4 w-4 text-warning" aria-hidden="true" />
-                <p className="text-xs font-semibold text-foreground">{warning.code}</p>
+                <Badge tone={warning.severity === "block" ? "danger" : "warning"}>
+                  {warning.severity === "block" ? "Blocked" : "Needs review"}
+                </Badge>
               </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">{warning.message}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{warning.code}</p>
             </div>
           ))}
         </div>
       ) : null}
+
+      {problem ? <InlineApiProblem itemId={item.id} problem={problem} /> : null}
     </article>
+  );
+}
+
+function InlineApiProblem({ itemId, problem }: { itemId: string; problem: ApiProblem }) {
+  return (
+    <div
+      aria-live="assertive"
+      className="mt-3 rounded-md border border-destructive/25 bg-destructive/10 p-3"
+      role="alert"
+    >
+      <div className="flex items-start gap-2">
+        <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">Change blocked</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{problem.message}</p>
+        </div>
+      </div>
+
+      {problem.warnings.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {problem.warnings.map((warning) => (
+            <li
+              className="rounded border border-destructive/20 bg-background p-2 text-xs leading-5 text-foreground"
+              key={`${itemId}-${warning.code}`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={warning.severity === "block" ? "danger" : "warning"}>
+                  {warning.severity === "block" ? "Blocked" : "Review"}
+                </Badge>
+                <span>{warning.message}</span>
+              </div>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">
+                {warning.code}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {problem.fieldErrors.length > 0 ? (
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          {problem.fieldErrors.map((error) => (
+            <li key={`${itemId}-${error.field}-${error.message}`}>
+              {error.field}: {error.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {problem.retryAfter !== undefined ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Retry after {problem.retryAfter} second{problem.retryAfter === 1 ? "" : "s"}.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

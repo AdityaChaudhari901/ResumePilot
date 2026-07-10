@@ -13,10 +13,20 @@ class JobRepository:
             select(JobRecord).where(JobRecord.id == job_id, JobRecord.user_id == user_id).limit(1)
         )
 
-    def get_by_content_hash(self, content_hash: str, *, user_id: int) -> JobRecord | None:
+    def get_by_source_snapshot(
+        self,
+        content_hash: str,
+        *,
+        user_id: int,
+        source_url: str | None,
+    ) -> JobRecord | None:
         return self.db.scalar(
             select(JobRecord)
-            .where(JobRecord.content_hash == content_hash, JobRecord.user_id == user_id)
+            .where(
+                JobRecord.content_hash == content_hash,
+                JobRecord.user_id == user_id,
+                JobRecord.source_url == source_url,
+            )
             .limit(1)
         )
 

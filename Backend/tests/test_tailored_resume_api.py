@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
 from app.db.models import TailoredResumeDraftRecord
+from tests.api_helpers import successful_analysis
 
 USER_A_HEADERS = {
     "X-ResumePilot-User": "tailored-resume-user-a",
@@ -62,6 +63,60 @@ def test_tailored_resume_draft_is_created_from_report_and_exported(client, sampl
 
     application = client.get("/applications", headers=USER_A_HEADERS).json()["items"][0]
     assert application["status"] == "exported"
+
+
+def test_tailored_resume_pdf_export_uses_only_the_accepted_application_draft(
+    client,
+    monkeypatch,
+    sample_resume_text,
+    settings,
+):
+    application_id, _report_id = _create_analyzed_application(
+        client, sample_resume_text, headers=USER_A_HEADERS
+    )
+    draft = client.get(
+        f"/applications/{application_id}/tailored-resume",
+        headers=USER_A_HEADERS,
+    ).json()
+    first_item = draft["items"][0]
+    accepted = client.patch(
+        f"/applications/{application_id}/tailored-resume/items/{first_item['id']}",
+        json={"status": "accepted"},
+        headers=USER_A_HEADERS,
+    )
+    assert accepted.status_code == 200
+
+    def fake_compile(
+        latex_source: str,
+        *,
+        timeout_seconds: int,
+        max_output_bytes: int,
+    ) -> bytes:
+        assert first_item["suggested_bullet"] in latex_source
+        assert timeout_seconds == settings.latex_compile_timeout_seconds
+        assert max_output_bytes == settings.latex_pdf_max_bytes
+        return b"%PDF-1.7\n% accepted application draft\n"
+
+    monkeypatch.setattr(
+        "app.services.tailored_resume_service.compile_latex_to_pdf",
+        fake_compile,
+    )
+
+    response = client.post(
+        f"/applications/{application_id}/tailored-resume/pdf",
+        headers={**USER_A_HEADERS, "Idempotency-Key": "pdf-export-accepted-draft"},
+    )
+
+    assert response.status_code == 202
+    operation = response.json()
+    assert operation["status"] == "succeeded"
+    artifact_response = client.get(
+        f"/operations/{operation['id']}/artifact",
+        headers=USER_A_HEADERS,
+    )
+    assert artifact_response.status_code == 200
+    assert artifact_response.headers["content-type"].startswith("application/pdf")
+    assert artifact_response.content.startswith(b"%PDF-1.7")
 
 
 def test_tailored_resume_rejects_accepted_unsupported_edits(client, sample_resume_text):
@@ -334,7 +389,9 @@ def _create_analyzed_application(
     draft_response = client.post(
         "/applications",
         json={
+            "source_type": "url",
             "job_url": "https://example.com/jobs/tailored-backend-engineer",
+            "reviewed_job_text": _reviewed_job_text(),
             "reviewed_job_profile": reviewed_profile,
             "resume_id": resume_id,
         },
@@ -348,7 +405,6 @@ def _create_analyzed_application(
         application_id=application_id,
         resume_id=resume_id,
         headers=headers,
-        reviewed_profile=reviewed_profile,
     )
     return application_id, report_id
 
@@ -359,20 +415,16 @@ def _analyze_application(
     application_id: int,
     resume_id: int,
     headers: dict[str, str],
-    reviewed_profile: dict | None = None,
 ) -> int:
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={
+    analysis = successful_analysis(
+        client,
+        {
             "application_id": application_id,
             "resume_id": resume_id,
-            "job_url": "https://example.com/jobs/tailored-backend-engineer",
-            "reviewed_job_profile": reviewed_profile or _reviewed_job_profile(),
         },
         headers=headers,
     )
-    assert analyze_response.status_code == 200
-    return analyze_response.json()["report_id"]
+    return analysis["report_id"]
 
 
 def _application(client, application_id: int, *, headers: dict[str, str]) -> dict:
@@ -435,3 +487,19 @@ def _reviewed_job_profile() -> dict:
         "unclear_items": [],
         "warnings": [],
     }
+
+
+def _reviewed_job_text() -> str:
+    return """Role: Backend Engineer
+Company: NovaHire AI
+
+Responsibilities:
+- Build REST APIs for hiring workflows.
+
+Requirements:
+- Required Python experience.
+- Required FastAPI experience.
+- Required SQL database experience.
+
+Experience: 0-2 years.
+"""

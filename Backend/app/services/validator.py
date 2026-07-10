@@ -1,4 +1,4 @@
-from app.schemas.common import ValidationWarning
+from app.schemas.common import ValidationSeverity, ValidationWarning
 from app.schemas.report import ApplicationReport
 from app.schemas.resume import ResumeProfile
 from app.services.skill_normalizer import find_skills
@@ -26,6 +26,7 @@ def validate_report_against_resume(
                     code="matched_skill_missing_evidence",
                     message=f"Matched skill {matched.skill} references unknown evidence IDs.",
                     evidence_ids=missing_ids,
+                    severity=ValidationSeverity.block,
                 )
             )
 
@@ -39,6 +40,7 @@ def validate_report_against_resume(
                     code="bullet_missing_evidence",
                     message="Tailored bullet references unknown evidence IDs.",
                     evidence_ids=missing_ids,
+                    severity=ValidationSeverity.block,
                 )
             )
         unsupported_skills = [
@@ -55,6 +57,7 @@ def validate_report_against_resume(
                         f"{', '.join(unsupported_skills)}."
                     ),
                     evidence_ids=bullet.evidence_ids,
+                    severity=ValidationSeverity.block,
                 )
             )
 
@@ -64,6 +67,7 @@ def validate_report_against_resume(
                 ValidationWarning(
                     code="supported_keyword_missing_evidence",
                     message=f"Supported keyword {keyword.keyword} has no evidence IDs.",
+                    severity=ValidationSeverity.block,
                 )
             )
 
@@ -80,6 +84,22 @@ def validate_report_against_resume(
                     "Cover letter contains unsupported skills: "
                     f"{', '.join(unsupported_cover_letter_skills)}."
                 ),
+                severity=ValidationSeverity.block,
+            )
+        )
+
+    missing_cover_letter_evidence_ids = [
+        evidence_id
+        for evidence_id in report.cover_letter_evidence_ids
+        if evidence_id not in facts_by_id
+    ]
+    if missing_cover_letter_evidence_ids:
+        warnings.append(
+            ValidationWarning(
+                code="cover_letter_missing_evidence",
+                message="Cover letter references unknown resume evidence IDs.",
+                evidence_ids=missing_cover_letter_evidence_ids,
+                severity=ValidationSeverity.block,
             )
         )
 
@@ -98,6 +118,7 @@ def validate_report_against_resume(
                         "answer evidence IDs."
                     ),
                     evidence_ids=missing_ids,
+                    severity=ValidationSeverity.block,
                 )
             )
 

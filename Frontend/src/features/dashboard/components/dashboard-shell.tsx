@@ -12,7 +12,11 @@ import { AiWorkflowCard } from "@/features/dashboard/components/ai-workflow-card
 import { ApplicationPipelineCard } from "@/features/dashboard/components/application-pipeline-card";
 import { HealthStrip } from "@/features/dashboard/components/health-strip";
 import { JobEvidenceReviewCard } from "@/features/dashboard/components/job-evidence-review-card";
-import { JobListingCard } from "@/features/dashboard/components/job-listing-card";
+import {
+  JobListingCard,
+  MAX_JOB_TEXT_CHARS,
+  MIN_JOB_TEXT_CHARS
+} from "@/features/dashboard/components/job-listing-card";
 import { OpenClawStatusCard } from "@/features/dashboard/components/openclaw-status-card";
 import { ReportHistoryCard } from "@/features/dashboard/components/report-history-card";
 import { ReportViewer } from "@/features/dashboard/components/report-viewer";
@@ -28,16 +32,20 @@ import {
 import { WorkflowSummaryCard } from "@/features/dashboard/components/workflow-summary-card";
 import type {
   AgentWorkflowTrace,
+  ApplicationDetail,
   ApplicationItem,
   ApplicationListResponse,
   ApplicationReport,
   ApplicationStatus,
   DashboardAuthSession,
+  DownloadExportFormat,
   HealthStatus,
   JobAnalysisResponse,
   JobPreviewResponse,
   JobProfile,
+  JobSourceType,
   OpenClawStatus,
+  PdfExportResult,
   ReportHistoryItem,
   ReportHistoryResponse,
   ReportExportFormat,
@@ -47,9 +55,14 @@ import type {
   TailoredResumeDraft,
   TailoredResumeExportFormat,
   TailoredResumeItemUpdate,
-  UsageSummaryResponse
+  UsageSummaryResponse,
+  WorkflowOperation
 } from "@/features/dashboard/types";
-import { readApiError } from "@/features/dashboard/utils/api-error";
+import {
+  type ApiProblem,
+  readApiError,
+  readApiProblem
+} from "@/features/dashboard/utils/api-error";
 
 interface DashboardStatusPayload {
   applications: ApplicationItem[];
@@ -88,6 +101,16 @@ async function fetchApplications(): Promise<ApplicationItem[]> {
   } catch {
     return [];
   }
+}
+
+async function fetchApplicationDetail(applicationId: number): Promise<ApplicationDetail> {
+  const response = await fetch(`/api/applications/${encodeURIComponent(String(applicationId))}`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return (await response.json()) as ApplicationDetail;
 }
 
 async function fetchReportHistory(): Promise<ReportHistoryItem[]> {
@@ -144,6 +167,7 @@ interface DashboardShellProps {
 
 export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [analysis, setAnalysis] = useState<JobAnalysisResponse | null>(null);
+  const [activeOperation, setActiveOperation] = useState<WorkflowOperation | null>(null);
   const [applications, setApplications] = useState<ApplicationItem[]>([]);
   const [authSession, setAuthSession] = useState<DashboardAuthSession | null>(
     initialAuthSession
@@ -163,6 +187,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [isUpdatingTailoredResume, setIsUpdatingTailoredResume] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [jobPreview, setJobPreview] = useState<JobPreviewResponse | null>(null);
+  const [jobSourceType, setJobSourceType] = useState<JobSourceType>("url");
+  const [jobText, setJobText] = useState("");
   const [jobUrl, setJobUrl] = useState("");
   const [openclaw, setOpenclaw] = useState<OpenClawStatus | null>(null);
   const [report, setReport] = useState<ApplicationReport | null>(null);
@@ -178,6 +204,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [tailoredResumeDraft, setTailoredResumeDraft] =
     useState<TailoredResumeDraft | null>(null);
   const workspaceRevisionRef = useRef(0);
+  const analysisCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const pdfExportCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   function startWorkspaceRequest(): number {
     workspaceRevisionRef.current += 1;
@@ -279,14 +307,14 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 
   function clearCurrentAnalysis() {
     setAnalysis(null);
+    setActiveOperation(null);
     setReport(null);
     setTailoredResumeDraft(null);
     setWorkflowTrace(null);
   }
 
-  function handleJobUrlChange(value: string) {
+  function resetJobReviewForInputChange() {
     startWorkspaceRequest();
-    setJobUrl(value);
     setJobPreview(null);
     setReviewedJobProfile(null);
     setActiveApplicationId(null);
@@ -298,13 +326,42 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     }
   }
 
+  function handleJobSourceTypeChange(value: JobSourceType) {
+    if (value === jobSourceType) {
+      return;
+    }
+    setErrorMessage(null);
+    setJobSourceType(value);
+    resetJobReviewForInputChange();
+  }
+
+  function handleJobUrlChange(value: string) {
+    setJobUrl(value);
+    resetJobReviewForInputChange();
+  }
+
+  function handleJobTextChange(value: string) {
+    setJobText(value);
+    resetJobReviewForInputChange();
+  }
+
   async function handleJobContinue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const requestRevision = startWorkspaceRequest();
     const trimmedJobUrl = jobUrl.trim();
+    const trimmedJobText = jobText.trim();
 
-    if (!isHttpUrl(trimmedJobUrl)) {
+    if (jobSourceType === "url" && !isHttpUrl(trimmedJobUrl)) {
       setErrorMessage("Enter a valid public http(s) job listing URL.");
+      return;
+    }
+    if (
+      jobSourceType === "pasted_text" &&
+      (trimmedJobText.length < MIN_JOB_TEXT_CHARS || trimmedJobText.length > MAX_JOB_TEXT_CHARS)
+    ) {
+      setErrorMessage(
+        `Paste a job description between ${MIN_JOB_TEXT_CHARS.toLocaleString()} and ${MAX_JOB_TEXT_CHARS.toLocaleString()} characters.`
+      );
       return;
     }
 
@@ -319,9 +376,11 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         headers: {
           "content-type": "application/json"
         },
-        body: JSON.stringify({
-          job_url: trimmedJobUrl
-        })
+        body: JSON.stringify(
+          jobSourceType === "url"
+            ? { job_url: trimmedJobUrl }
+            : { job_text: trimmedJobText }
+        )
       });
 
       if (!response.ok) {
@@ -403,14 +462,22 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 
     try {
       const trimmedJobUrl = jobUrl.trim();
+      const trimmedJobText = jobText.trim();
 
-      if (!isHttpUrl(trimmedJobUrl)) {
-        setErrorMessage("Enter a valid public http(s) job listing URL.");
+      if (!isJobInputValid(jobSourceType, trimmedJobUrl, trimmedJobText)) {
+        setErrorMessage(
+          jobSourceType === "url"
+            ? "Enter a valid public http(s) job listing URL."
+            : "Paste the complete job description before running analysis."
+        );
         setWorkflowStep("job");
         setIsAnalyzing(false);
         return;
       }
-      if (!isJobPreviewCurrent(jobPreview, trimmedJobUrl)) {
+      if (
+        !jobPreview ||
+        !isJobPreviewCurrent(jobPreview, jobSourceType, trimmedJobUrl, trimmedJobText)
+      ) {
         setErrorMessage("Review the extracted job evidence before running analysis.");
         setWorkflowStep(jobPreview ? "jobReview" : "job");
         setIsAnalyzing(false);
@@ -423,31 +490,62 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         return;
       }
 
+      const analysisRequest = activeApplicationId
+        ? {
+            resume_id: resume.resume_id,
+            application_id: activeApplicationId,
+            allow_live_ai_processing: allowLiveAiProcessing
+          }
+        : {
+            resume_id: resume.resume_id,
+            job_text:
+              jobSourceType === "pasted_text"
+                ? jobPreview.reviewed_job_text || trimmedJobText
+                : null,
+            job_url: jobSourceType === "url" ? jobPreview.job_url ?? trimmedJobUrl : null,
+            company: null,
+            role: null,
+            reviewed_job_profile: reviewedJobProfile,
+            allow_live_ai_processing: allowLiveAiProcessing
+          };
+      const requestFingerprint = JSON.stringify(analysisRequest);
+      if (analysisCommandRef.current?.fingerprint !== requestFingerprint) {
+        analysisCommandRef.current = {
+          fingerprint: requestFingerprint,
+          key: crypto.randomUUID()
+        };
+      }
+
       const response = await fetch("/api/jobs/analyze", {
         method: "POST",
         headers: {
-          "content-type": "application/json"
+          "content-type": "application/json",
+          "idempotency-key": analysisCommandRef.current.key
         },
-        body: JSON.stringify({
-          resume_id: resume.resume_id,
-          application_id: activeApplicationId,
-          job_text: null,
-          job_url: trimmedJobUrl,
-          company: null,
-          role: null,
-          reviewed_job_profile: reviewedJobProfile,
-          allow_live_ai_processing: allowLiveAiProcessing
-        })
+        body: requestFingerprint
       });
 
       if (!response.ok) {
         throw new Error(await readApiError(response));
       }
 
-      const nextAnalysis = (await response.json()) as JobAnalysisResponse;
+      const responsePayload = (await response.json()) as unknown;
+      const nextAnalysis = isJobAnalysisResponse(responsePayload)
+        ? responsePayload
+        : await waitForAnalysisOperation(
+            requireWorkflowOperation(responsePayload),
+            requestRevision,
+            isCurrentWorkspaceRequest,
+            setActiveOperation
+          );
+      if (!nextAnalysis) {
+        return;
+      }
       if (!isCurrentWorkspaceRequest(requestRevision)) {
         return;
       }
+      analysisCommandRef.current = null;
+      setActiveOperation(null);
       setAnalysis(nextAnalysis);
       const didLoadReport = await loadReport(nextAnalysis.report_id, requestRevision);
       if (!didLoadReport || !isCurrentWorkspaceRequest(requestRevision)) {
@@ -464,9 +562,30 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       setReportHistory(nextReportHistory);
       setWorkflowStep("draft");
     } catch (error) {
+      if (error instanceof TerminalOperationError) {
+        analysisCommandRef.current = null;
+      }
       setErrorMessage(error instanceof Error ? error.message : "Job analysis failed");
     } finally {
       setIsAnalyzing(false);
+    }
+  }
+
+  async function handleCancelAnalysis() {
+    if (!activeOperation?.cancelable) {
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/operations/${encodeURIComponent(activeOperation.id)}/cancel`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        throw new Error(await readApiError(response));
+      }
+      setActiveOperation((await response.json()) as WorkflowOperation);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Analysis cancellation failed");
     }
   }
 
@@ -546,9 +665,18 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     }
   }
 
-  const isJobUrlValid = isHttpUrl(jobUrl.trim());
+  const isJobSourceValid = isJobInputValid(
+    jobSourceType,
+    jobUrl.trim(),
+    jobText.trim()
+  );
   const isJobEvidenceReady =
-    isJobPreviewCurrent(jobPreview, jobUrl.trim()) && Boolean(reviewedJobProfile);
+    isJobPreviewCurrent(
+      jobPreview,
+      jobSourceType,
+      jobUrl.trim(),
+      jobText.trim()
+    ) && Boolean(reviewedJobProfile);
   const isResumeReady = Boolean(resume);
   const canAnalyze = isJobEvidenceReady && isResumeReady && !isAnalyzing;
   const workflowSteps = buildWorkflowSteps({
@@ -556,7 +684,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     currentStep: workflowStep,
     draftReady: Boolean(tailoredResumeDraft?.export_ready),
     jobEvidenceReady: isJobEvidenceReady,
-    jobReady: isJobUrlValid,
+    jobReady: isJobSourceValid,
     resumeReady: isResumeReady
   });
 
@@ -568,6 +696,27 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   async function handleConfirmJobEvidence(profile: JobProfile) {
     const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
+    if (!jobPreview) {
+      setErrorMessage("Preview the job description before saving its evidence.");
+      setWorkflowStep("job");
+      return;
+    }
+    if (!jobPreview.reviewed_job_text) {
+      setErrorMessage("Job source text is required before its evidence can be saved.");
+      setWorkflowStep("job");
+      return;
+    }
+
+    const isUnchangedSavedReview =
+      activeApplicationId !== null &&
+      jobPreview.parser === "saved_review" &&
+      jobProfilesEqual(profile, jobPreview.profile);
+    if (isUnchangedSavedReview) {
+      setReviewedJobProfile(profile);
+      setWorkflowStep(resume ? "ai" : "resume");
+      return;
+    }
+
     try {
       const response = await fetch("/api/applications", {
         method: "POST",
@@ -575,7 +724,11 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
           "content-type": "application/json"
         },
         body: JSON.stringify({
-          job_url: jobUrl.trim(),
+          source_type: jobPreview.source_type,
+          job_url: jobPreview.source_type === "url" ? jobPreview.job_url : null,
+          job_text:
+            jobPreview.source_type === "pasted_text" ? jobPreview.reviewed_job_text : null,
+          reviewed_job_text: jobPreview.reviewed_job_text,
           reviewed_job_profile: profile,
           resume_id: resume?.resume_id ?? null
         })
@@ -610,7 +763,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 
   function handleRunAiFromSummary() {
     setErrorMessage(null);
-    if (!isJobUrlValid) {
+    if (!isJobSourceValid) {
       setWorkflowStep("job");
       return;
     }
@@ -638,30 +791,53 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   }
 
   async function handleSelectApplication(application: ApplicationItem) {
-    if (!application.report_id || !application.analysis_id || !application.resume_id) {
-      return;
-    }
     const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
     setActiveApplicationId(application.id);
-    setAnalysis({
-      analysis_id: application.analysis_id,
-      match_score: application.match_score ?? 0,
-      report_id: application.report_id,
-      status: "completed"
-    });
-    setReport(null);
-    setWorkflowTrace(null);
-    setWorkflowStep("draft");
     try {
-      const [profile] = await Promise.all([
-        fetchResumeProfile(application.resume_id),
-        loadReport(application.report_id, requestRevision)
-      ]);
+      const detail = await fetchApplicationDetail(application.id);
       if (!isCurrentWorkspaceRequest(requestRevision)) {
         return;
       }
-      setResumeProfile(profile);
+
+      setJobSourceType(detail.source_type);
+      setJobUrl(detail.job_url ?? "");
+      setJobText(detail.source_type === "pasted_text" ? detail.reviewed_job_text : "");
+      setJobPreview(jobPreviewFromApplication(detail));
+      setReviewedJobProfile(detail.reviewed_job_profile);
+
+      if (detail.resume_id) {
+        const profile = await fetchResumeProfile(detail.resume_id);
+        if (!isCurrentWorkspaceRequest(requestRevision)) {
+          return;
+        }
+        setResume({
+          candidate_name: profile.candidate.name,
+          resume_id: profile.resume_id,
+          status: "parsed",
+          warnings: profile.warnings
+        });
+        setResumeProfile(profile);
+      } else {
+        setResume(null);
+        setResumeProfile(null);
+      }
+
+      if (detail.report_id && detail.analysis_id && detail.resume_id) {
+        setAnalysis({
+          analysis_id: detail.analysis_id,
+          match_score: detail.match_score ?? 0,
+          report_id: detail.report_id,
+          status: "completed"
+        });
+        setReport(null);
+        setWorkflowTrace(null);
+        setWorkflowStep("draft");
+        await loadReport(detail.report_id, requestRevision);
+      } else {
+        clearCurrentAnalysis();
+        setWorkflowStep(detail.resume_id ? "ai" : "resume");
+      }
     } catch (error) {
       if (isCurrentWorkspaceRequest(requestRevision)) {
         setErrorMessage(error instanceof Error ? error.message : "Application load failed");
@@ -729,9 +905,14 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   async function handleUpdateTailoredResumeItem(
     itemId: string,
     update: TailoredResumeItemUpdate
-  ) {
+  ): Promise<ApiProblem | null> {
     if (!activeApplicationId) {
-      return;
+      return {
+        fieldErrors: [],
+        message: "Select an application before reviewing tailored bullets.",
+        status: 400,
+        warnings: []
+      };
     }
     const applicationId = activeApplicationId;
     const requestRevision = workspaceRevisionRef.current;
@@ -751,7 +932,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         }
       );
       if (!response.ok) {
-        throw new Error(await readApiError(response));
+        return await readApiProblem(response);
       }
       const draft = (await response.json()) as TailoredResumeDraft;
       if (
@@ -761,10 +942,14 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       ) {
         setTailoredResumeDraft(draft);
       }
+      return null;
     } catch (error) {
-      if (isCurrentWorkspaceRequest(requestRevision)) {
-        setErrorMessage(error instanceof Error ? error.message : "Tailored resume update failed");
-      }
+      return {
+        fieldErrors: [],
+        message: error instanceof Error ? error.message : "Tailored resume update failed",
+        status: 0,
+        warnings: []
+      };
     } finally {
       if (isCurrentWorkspaceRequest(requestRevision)) {
         setIsUpdatingTailoredResume(false);
@@ -816,12 +1001,26 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     setErrorMessage(null);
     setIsExportingTailoredResume(format);
     try {
-      await downloadExport({
-        fallbackFilename: tailoredResumeExportFilename(applicationId, format),
-        path: `/api/applications/${encodeURIComponent(
-          String(applicationId)
-        )}/tailored-resume/${format}`
-      });
+      const exportPath = `/api/applications/${encodeURIComponent(
+        String(applicationId)
+      )}/tailored-resume/${format}`;
+      if (format === "pdf") {
+        const fingerprint = `${applicationId}:${tailoredResumeDraft.report_id}:${tailoredResumeDraft.updated_at}`;
+        if (pdfExportCommandRef.current?.fingerprint !== fingerprint) {
+          pdfExportCommandRef.current = { fingerprint, key: crypto.randomUUID() };
+        }
+        await downloadPdfExport({
+          fallbackFilename: tailoredResumeExportFilename(applicationId, format),
+          idempotencyKey: pdfExportCommandRef.current.key,
+          path: exportPath
+        });
+        pdfExportCommandRef.current = null;
+      } else {
+        await downloadExport({
+          fallbackFilename: tailoredResumeExportFilename(applicationId, format),
+          path: exportPath
+        });
+      }
       const [draft, nextApplications, nextUsage] = await Promise.all([
         fetchTailoredResumeDraft(applicationId),
         fetchApplications(),
@@ -838,6 +1037,9 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       setApplications(nextApplications);
       setUsage(nextUsage);
     } catch (error) {
+      if (error instanceof TerminalOperationError) {
+        pdfExportCommandRef.current = null;
+      }
       if (isCurrentWorkspaceRequest(requestRevision)) {
         setErrorMessage(error instanceof Error ? error.message : "Tailored resume export failed");
       }
@@ -863,7 +1065,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
                 Guided application workflow
               </h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-                Add a job listing URL, review the extracted job evidence, upload the resume,
+                Add a job URL or paste the description, review the extracted job evidence, upload the resume,
                 then run ResumePilot&apos;s evidence-first AI services and approve the tailored
                 resume draft before exporting.
               </p>
@@ -881,7 +1083,11 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         <WorkflowProgress steps={workflowSteps} />
 
         {errorMessage && (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          <div
+            aria-live="assertive"
+            className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
+            role="alert"
+          >
             {errorMessage}
           </div>
         )}
@@ -890,9 +1096,13 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
           <section aria-label="Active workflow step" className="space-y-4">
             {workflowStep === "job" ? (
               <JobListingCard
+                isJobInputValid={isJobSourceValid}
                 isPreviewing={isPreviewingJob}
-                isJobUrlValid={isJobUrlValid}
+                jobSourceType={jobSourceType}
+                jobText={jobText}
                 jobUrl={jobUrl}
+                onJobSourceTypeChange={handleJobSourceTypeChange}
+                onJobTextChange={handleJobTextChange}
                 onJobUrlChange={handleJobUrlChange}
                 onSubmit={handleJobContinue}
               />
@@ -907,6 +1117,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
                   setWorkflowStep("job");
                 }}
                 onContinue={handleConfirmJobEvidence}
+                onUsePastedText={() => handleJobSourceTypeChange("pasted_text")}
               />
             ) : null}
 
@@ -925,7 +1136,9 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
                 allowLiveAiProcessing={allowLiveAiProcessing}
                 canAnalyze={canAnalyze}
                 isAnalyzing={isAnalyzing}
+                operation={activeOperation}
                 onAllowLiveAiProcessingChange={setAllowLiveAiProcessing}
+                onCancel={() => void handleCancelAnalysis()}
                 onSubmit={handleAnalyze}
                 usage={usage}
               />
@@ -937,6 +1150,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
                 isExporting={isExportingReport}
                 onExport={handleReportExport}
                 report={report}
+                resumeProfile={resumeProfile}
                 workflowTrace={workflowTrace}
               />
             ) : null}
@@ -977,9 +1191,11 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             <WorkflowSummaryCard
               analysis={analysis}
               isJobEvidenceReady={isJobEvidenceReady}
-              isJobReady={isJobUrlValid}
+              isJobReady={isJobSourceValid}
               isResumeReady={isResumeReady}
               jobPreview={jobPreview}
+              jobSourceType={jobSourceType}
+              jobText={jobText}
               jobUrl={jobUrl}
               onEditJob={() => {
                 setErrorMessage(null);
@@ -1050,16 +1266,168 @@ interface BuildWorkflowStepsInput {
   resumeReady: boolean;
 }
 
-async function downloadExport({
+class TerminalOperationError extends Error {}
+
+async function waitForAnalysisOperation(
+  initial: WorkflowOperation,
+  requestRevision: number,
+  isCurrent: (revision: number) => boolean,
+  onUpdate: (operation: WorkflowOperation) => void
+): Promise<JobAnalysisResponse | null> {
+  let operation = initial;
+  for (let pollCount = 0; pollCount < 73; pollCount += 1) {
+    if (!isCurrent(requestRevision)) {
+      return null;
+    }
+    onUpdate(operation);
+    if (operation.status === "succeeded") {
+      if (!isJobAnalysisResponse(operation.result)) {
+        throw new TerminalOperationError("Analysis completed without a report result.");
+      }
+      return operation.result;
+    }
+    if (["canceled", "failed", "dead_lettered"].includes(operation.status)) {
+      throw new TerminalOperationError(
+        operation.error?.message ??
+          (operation.status === "canceled"
+            ? "Analysis was canceled."
+            : "Analysis failed safely. Review the job source and retry.")
+      );
+    }
+
+    await wait(operationPollDelay(pollCount));
+    if (!isCurrent(requestRevision)) {
+      return null;
+    }
+    const response = await fetch(
+      `/api/operations/${encodeURIComponent(operation.id)}`,
+      { cache: "no-store" }
+    );
+    if (!response.ok) {
+      throw new Error(await readApiError(response));
+    }
+    operation = requireWorkflowOperation((await response.json()) as unknown);
+  }
+  throw new Error(
+    "Analysis is still running after five minutes. It remains durable; reopen the application shortly."
+  );
+}
+
+function operationPollDelay(pollCount: number): number {
+  if (pollCount < 5) {
+    return 1_000;
+  }
+  if (pollCount < 20) {
+    return 2_000;
+  }
+  return 5_000;
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function isJobAnalysisResponse(value: unknown): value is JobAnalysisResponse {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<JobAnalysisResponse>;
+  return (
+    typeof candidate.analysis_id === "number" &&
+    typeof candidate.report_id === "number" &&
+    typeof candidate.match_score === "number" &&
+    typeof candidate.status === "string"
+  );
+}
+
+function requireWorkflowOperation(value: unknown): WorkflowOperation {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Backend returned an invalid analysis operation.");
+  }
+  const candidate = value as Partial<WorkflowOperation>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.status !== "string" ||
+    typeof candidate.stage !== "string" ||
+    typeof candidate.progress_percent !== "number"
+  ) {
+    throw new Error("Backend returned an invalid analysis operation.");
+  }
+  return candidate as WorkflowOperation;
+}
+
+async function downloadPdfExport({
   fallbackFilename,
+  idempotencyKey,
   path
 }: {
   fallbackFilename: string;
+  idempotencyKey: string;
+  path: string;
+}): Promise<void> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "idempotency-key": idempotencyKey }
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  let operation = requireWorkflowOperation((await response.json()) as unknown);
+  for (let pollCount = 0; pollCount < 90; pollCount += 1) {
+    if (operation.status === "succeeded") {
+      if (!isPdfExportResult(operation.result)) {
+        throw new TerminalOperationError("PDF export completed without an artifact.");
+      }
+      await downloadExport({
+        fallbackFilename,
+        method: "GET",
+        path: `/api/operations/${encodeURIComponent(operation.id)}/artifact`
+      });
+      return;
+    }
+    if (["canceled", "failed", "dead_lettered"].includes(operation.status)) {
+      throw new TerminalOperationError(
+        operation.error?.message ?? "PDF export failed safely. Review the draft and retry."
+      );
+    }
+    await wait(operationPollDelay(pollCount));
+    const pollResponse = await fetch(
+      `/api/operations/${encodeURIComponent(operation.id)}`,
+      { cache: "no-store" }
+    );
+    if (!pollResponse.ok) {
+      throw new Error(await readApiError(pollResponse));
+    }
+    operation = requireWorkflowOperation((await pollResponse.json()) as unknown);
+  }
+  throw new Error("PDF export is still running. Retry the download shortly.");
+}
+
+function isPdfExportResult(value: unknown): value is PdfExportResult {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<PdfExportResult>;
+  return (
+    typeof candidate.application_id === "number" &&
+    typeof candidate.report_id === "number" &&
+    typeof candidate.artifact?.download_url === "string" &&
+    typeof candidate.artifact?.sha256 === "string"
+  );
+}
+
+async function downloadExport({
+  fallbackFilename,
+  method = "POST",
+  path
+}: {
+  fallbackFilename: string;
+  method?: "GET" | "POST";
   path: string;
 }): Promise<void> {
   const response = await fetch(path, {
     cache: "no-store",
-    method: "POST"
+    method
   });
   if (!response.ok) {
     throw new Error(await readApiError(response));
@@ -1082,10 +1450,7 @@ async function downloadExport({
 
 function reportExportPath(reportId: number, format: ReportExportFormat): string {
   const encodedReportId = encodeURIComponent(String(reportId));
-  if (format === "markdown") {
-    return `/api/reports/${encodedReportId}/markdown`;
-  }
-  return `/api/reports/${encodedReportId}/resume/${format}`;
+  return `/api/reports/${encodedReportId}/${format}`;
 }
 
 function reportExportFilename(reportId: number, format: ReportExportFormat): string {
@@ -1099,8 +1464,8 @@ function tailoredResumeExportFilename(
   return `resumepilot-application-${applicationId}.${exportFileExtension(format)}`;
 }
 
-function exportFileExtension(format: ReportExportFormat): string {
-  const extensions: Record<ReportExportFormat, string> = {
+function exportFileExtension(format: DownloadExportFormat): string {
+  const extensions: Record<DownloadExportFormat, string> = {
     docx: "docx",
     latex: "tex",
     markdown: "md",
@@ -1127,7 +1492,7 @@ function buildWorkflowSteps({
 }: BuildWorkflowStepsInput): WorkflowProgressStep[] {
   return [
     {
-      detail: jobReady ? "Job listing URL captured" : "Add the public job URL",
+      detail: jobReady ? "Job source captured" : "Add a URL or paste the job description",
       id: "job",
       label: "Job listing",
       status: currentStep === "job" ? "active" : jobReady ? "complete" : "ready"
@@ -1202,14 +1567,26 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isJobInputValid(sourceType: JobSourceType, jobUrl: string, jobText: string): boolean {
+  if (sourceType === "url") {
+    return isHttpUrl(jobUrl);
+  }
+  return jobText.length >= MIN_JOB_TEXT_CHARS && jobText.length <= MAX_JOB_TEXT_CHARS;
+}
+
 function isJobPreviewCurrent(
   preview: JobPreviewResponse | null,
-  jobUrl: string
+  sourceType: JobSourceType,
+  jobUrl: string,
+  jobText: string
 ): boolean {
-  if (!preview || !isHttpUrl(jobUrl)) {
+  if (!preview || preview.source_type !== sourceType) {
     return false;
   }
-  return canonicalHttpUrl(preview.job_url) === canonicalHttpUrl(jobUrl);
+  if (sourceType === "url") {
+    return Boolean(preview.job_url) && canonicalHttpUrl(preview.job_url ?? "") === canonicalHttpUrl(jobUrl);
+  }
+  return isJobInputValid(sourceType, jobUrl, jobText);
 }
 
 function canonicalHttpUrl(value: string): string {
@@ -1219,4 +1596,25 @@ function canonicalHttpUrl(value: string): string {
   } catch {
     return value;
   }
+}
+
+function jobPreviewFromApplication(application: ApplicationDetail): JobPreviewResponse {
+  const hasSkills =
+    application.reviewed_job_profile.required_skills.length > 0 ||
+    application.reviewed_job_profile.preferred_skills.length > 0;
+  return {
+    job_url: application.job_url,
+    parser: "saved_review",
+    profile: application.reviewed_job_profile,
+    quality_checks: [],
+    raw_text_char_count: application.reviewed_job_text.length,
+    reviewed_job_text: application.reviewed_job_text,
+    source_content_hash: application.source_content_hash,
+    source_type: application.source_type,
+    status: hasSkills ? "ready" : "needs_review"
+  };
+}
+
+function jobProfilesEqual(left: JobProfile, right: JobProfile): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,6 +9,7 @@ from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.db.models import ApplicationRecord, TailoredResumeDraftRecord
 from app.schemas.application import (
+    ApplicationDetail,
     ApplicationDraftRequest,
     ApplicationItem,
     ApplicationListResponse,
@@ -16,6 +17,7 @@ from app.schemas.application import (
     ApplicationStatusUpdateRequest,
 )
 from app.schemas.auth import CurrentUser
+from app.schemas.operation import WorkflowJobResponse
 from app.schemas.tailored_resume import (
     TailoredResumeDraftResponse,
     TailoredResumeDraftStatus,
@@ -23,6 +25,7 @@ from app.schemas.tailored_resume import (
 )
 from app.services.application_service import (
     create_application_draft,
+    get_application,
     list_applications,
     update_application_status,
 )
@@ -31,10 +34,14 @@ from app.services.tailored_resume_service import (
     get_or_create_tailored_resume_draft,
     render_tailored_resume_docx_for_application,
     render_tailored_resume_latex_for_application,
-    render_tailored_resume_pdf_for_application,
     update_tailored_resume_item,
 )
 from app.services.usage_service import reserve_export_usage
+from app.services.workflow_job_service import (
+    enqueue_pdf_export_job,
+    execute_workflow_job,
+    workflow_job_response,
+)
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -56,6 +63,15 @@ def create_application(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> ApplicationItem:
     return create_application_draft(db, request, current_user)
+
+
+@router.get("/{application_id}", response_model=ApplicationDetail)
+def read_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ApplicationDetail:
+    return get_application(db, application_id, current_user)
 
 
 @router.patch("/{application_id}/status", response_model=ApplicationItem)
@@ -121,22 +137,38 @@ def read_reviewed_tailored_resume_docx(
     )
 
 
-@router.post("/{application_id}/tailored-resume/pdf")
+@router.post(
+    "/{application_id}/tailored-resume/pdf",
+    response_model=WorkflowJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def read_reviewed_tailored_resume_pdf(
     application_id: int,
+    request: Request,
+    response: Response,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
     current_user: CurrentUser = Depends(get_current_user),
-) -> Response:
-    rendered = render_tailored_resume_pdf_for_application(
-        db, application_id, settings, current_user
+) -> WorkflowJobResponse:
+    operation, created = enqueue_pdf_export_job(
+        db,
+        application_id,
+        current_user,
+        idempotency_key=idempotency_key,
+        request_id=getattr(request.state, "request_id", None),
+        max_attempts=min(settings.workflow_job_max_attempts, 2),
     )
-    _finalize_tailored_resume_export(db, current_user, application_id, rendered.report_id, "pdf")
-    return Response(
-        content=bytes(rendered.content),
-        media_type="application/pdf",
-        headers=_download_headers(f"resumepilot-application-{application_id}.pdf"),
-    )
+    if created and settings.execute_workflow_jobs_inline:
+        operation = execute_workflow_job(
+            db,
+            operation.id,
+            settings=settings,
+            worker_id=f"inline-{operation.id}",
+        )
+    response.headers["Location"] = f"/operations/{operation.id}"
+    response.headers["Retry-After"] = "1"
+    return workflow_job_response(operation)
 
 
 def _finalize_tailored_resume_export(

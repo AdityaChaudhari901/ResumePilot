@@ -8,6 +8,9 @@ export interface ResumeUploadResponse {
 }
 
 export type Confidence = "high" | "medium" | "low";
+export type JobSourceType = "url" | "pasted_text";
+export type ValidationSeverity = "pass" | "warn" | "block";
+export type ValidationStatus = ValidationSeverity;
 
 export interface CandidateProfile {
   name: string | null;
@@ -50,6 +53,45 @@ export interface JobAnalysisResponse {
   status: string;
 }
 
+export type WorkflowOperationStatus =
+  | "queued"
+  | "running"
+  | "retry_scheduled"
+  | "cancel_requested"
+  | "succeeded"
+  | "canceled"
+  | "failed"
+  | "dead_lettered";
+
+export interface WorkflowOperation {
+  id: string;
+  kind: "analysis" | "pdf_export";
+  status: WorkflowOperationStatus;
+  stage: string;
+  progress_percent: number;
+  attempt_count: number;
+  max_attempts: number;
+  cancelable: boolean;
+  result: JobAnalysisResponse | PdfExportResult | null;
+  error: { code: string; message: string } | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface PdfExportResult {
+  application_id: number;
+  report_id: number;
+  artifact: {
+    download_url: string;
+    filename: string;
+    media_type: "application/pdf";
+    size_bytes: number;
+    sha256: string;
+  };
+}
+
 export interface JobSkill {
   id: string;
   name: string;
@@ -88,7 +130,10 @@ export interface JobPreviewQualityCheck {
 }
 
 export interface JobPreviewResponse {
-  job_url: string;
+  source_type: JobSourceType;
+  job_url: string | null;
+  reviewed_job_text: string | null;
+  source_content_hash: string | null;
   profile: JobProfile;
   raw_text_char_count: number;
   status: JobPreviewStatus;
@@ -101,7 +146,9 @@ export type ApplicationStatus = "draft" | "reviewed" | "analyzed" | "exported" |
 export interface ApplicationItem {
   id: number;
   status: ApplicationStatus;
-  job_url: string;
+  source_type: JobSourceType;
+  job_url: string | null;
+  source_content_hash: string;
   company: string | null;
   role: string | null;
   resume_id: number | null;
@@ -113,6 +160,11 @@ export interface ApplicationItem {
   updated_at: string;
 }
 
+export interface ApplicationDetail extends ApplicationItem {
+  reviewed_job_text: string;
+  reviewed_job_profile: JobProfile;
+}
+
 export interface ApplicationListResponse {
   items: ApplicationItem[];
   count: number;
@@ -120,8 +172,9 @@ export interface ApplicationListResponse {
 
 export type TailoredResumeDraftStatus = "draft" | "reviewed" | "exported";
 export type TailoredResumeItemStatus = "pending" | "accepted" | "rejected";
-export type ReportExportFormat = "markdown" | "docx" | "latex" | "pdf";
-export type TailoredResumeExportFormat = Exclude<ReportExportFormat, "markdown">;
+export type ReportExportFormat = "markdown";
+export type TailoredResumeExportFormat = "docx" | "latex" | "pdf";
+export type DownloadExportFormat = ReportExportFormat | TailoredResumeExportFormat;
 
 export interface TailoredResumeItem {
   id: string;
@@ -191,6 +244,7 @@ export interface AgentWorkflowTrace {
   mode: AgentWorkflowMode;
   steps: AgentStepTrace[];
   validation_warning_codes: string[];
+  validation_status?: ValidationStatus;
   duration_ms?: number | null;
   provider?: string | null;
   model?: string | null;
@@ -251,6 +305,7 @@ export interface ValidationWarning {
   code: string;
   message: string;
   evidence_ids: string[];
+  severity?: ValidationSeverity;
 }
 
 export interface ApplicationReport {
@@ -265,8 +320,10 @@ export interface ApplicationReport {
   tailored_bullets: TailoredBullet[];
   ats_keywords: AtsKeywordSuggestion[];
   cover_letter: string;
+  cover_letter_evidence_ids?: string[];
   interview_questions: InterviewQuestionGroup[];
   validation_warnings: ValidationWarning[];
+  validation_status?: ValidationStatus;
   next_actions: string[];
 }
 

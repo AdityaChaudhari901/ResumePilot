@@ -99,6 +99,34 @@ class Settings(BaseSettings):
         le=50 * 1024 * 1024,
         alias="LATEX_PDF_MAX_BYTES",
     )
+    workflow_inline_execution: bool | None = Field(
+        default=None,
+        alias="WORKFLOW_INLINE_EXECUTION",
+    )
+    workflow_worker_poll_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=30,
+        alias="WORKFLOW_WORKER_POLL_SECONDS",
+    )
+    workflow_job_lease_seconds: int = Field(
+        default=180,
+        ge=30,
+        le=1800,
+        alias="WORKFLOW_JOB_LEASE_SECONDS",
+    )
+    workflow_job_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        alias="WORKFLOW_JOB_MAX_ATTEMPTS",
+    )
+    usage_reservation_ttl_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=86_400,
+        alias="USAGE_RESERVATION_TTL_SECONDS",
+    )
 
     allowed_resume_extensions: frozenset[str] = frozenset(
         {".pdf", ".docx", ".txt", ".md", ".markdown"}
@@ -116,7 +144,12 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("auto_create_db_schema", "require_db_migrations", mode="before")
+    @field_validator(
+        "auto_create_db_schema",
+        "require_db_migrations",
+        "workflow_inline_execution",
+        mode="before",
+    )
     @classmethod
     def normalize_optional_bool(cls, value: object) -> object:
         if value == "":
@@ -174,6 +207,10 @@ class Settings(BaseSettings):
         return self.data_dir / "uploads"
 
     @property
+    def export_dir(self) -> Path:
+        return self.data_dir / "exports"
+
+    @property
     def is_production(self) -> bool:
         return self.app_env == "production"
 
@@ -188,6 +225,12 @@ class Settings(BaseSettings):
         if self.require_db_migrations is not None:
             return self.require_db_migrations
         return self.is_production
+
+    @property
+    def execute_workflow_jobs_inline(self) -> bool:
+        if self.workflow_inline_execution is not None:
+            return self.workflow_inline_execution
+        return not self.is_production
 
     @property
     def openclaw_sender_allowlist(self) -> list[str]:

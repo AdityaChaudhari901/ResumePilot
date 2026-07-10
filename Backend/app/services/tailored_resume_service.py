@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -12,7 +13,7 @@ from app.repositories.analyses import AnalysisRepository
 from app.repositories.applications import ApplicationRepository
 from app.repositories.tailored_resumes import TailoredResumeRepository
 from app.schemas.auth import CurrentUser
-from app.schemas.common import ValidationWarning
+from app.schemas.common import ValidationSeverity, ValidationWarning
 from app.schemas.job import JobProfile
 from app.schemas.report import ApplicationReport, TailoredBullet
 from app.schemas.resume import ResumeFact, ResumeProfile
@@ -23,7 +24,9 @@ from app.schemas.tailored_resume import (
     TailoredResumeItemStatus,
     TailoredResumeItemUpdateRequest,
 )
+from app.services.claim_validation import unsupported_claim_markers
 from app.services.docx_resume_renderer import render_tailored_resume_docx
+from app.services.hashing import sha256_text
 from app.services.latex_resume_renderer import render_tailored_resume_latex
 from app.services.pdf_resume_compiler import (
     PdfCompilationFailed,
@@ -36,40 +39,18 @@ from app.services.pdf_resume_compiler import (
 from app.services.skill_normalizer import find_skills
 
 MAX_DRAFT_ITEMS = 8
-HIGH_RISK_CLAIM_TERMS = {
-    "achieved",
-    "award",
-    "awarded",
-    "certified",
-    "certification",
-    "enterprise",
-    "leadership",
-    "managed",
-    "patent",
-    "production",
-    "revenue",
-    "senior",
-    "sla",
-    "uptime",
-}
-METRIC_PATTERNS = (
-    re.compile(r"\b\d+(?:\.\d+)?\s*%"),
-    re.compile(r"\b\d+(?:\.\d+)?[xX]\b"),
-    re.compile(r"\b\d+\+(?!\w)"),
-    re.compile(r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b"),
-    re.compile(r"(?:[$€£]\s*)?\b\d+(?:,\d{3})*(?:\.\d+)?\s*[kKmMbB]\b"),
-    re.compile(
-        r"(?i)\b\d+(?:,\d{3})*(?:\.\d+)?\s+"
-        r"(?:customers?|clients?|users?|requests?|records?|transactions?|"
-        r"endpoints?|deployments?|teams?|engineers?|hours?|days?|weeks?|months?|years?)\b"
-    ),
-)
 
 
 @dataclass(frozen=True)
 class RenderedTailoredResume:
     content: str | bytes
     report_id: int
+
+
+@dataclass(frozen=True)
+class TailoredResumeExportRevision:
+    report_id: int
+    revision: str
 
 
 def get_or_create_tailored_resume_draft(
@@ -205,6 +186,22 @@ def render_tailored_resume_pdf_for_application(
     return RenderedTailoredResume(content=pdf, report_id=rendered_latex.report_id)
 
 
+def tailored_resume_export_revision(
+    db: Session,
+    application_id: int,
+    current_user: CurrentUser,
+) -> TailoredResumeExportRevision:
+    _report, _resume, _job, draft = _export_context(db, application_id, current_user)
+    return TailoredResumeExportRevision(
+        report_id=draft.report_id,
+        revision=_draft_export_revision(draft),
+    )
+
+
+def draft_export_revision(draft: TailoredResumeDraftRecord) -> str:
+    return _draft_export_revision(draft)
+
+
 def _get_ready_application(
     db: Session,
     application_id: int,
@@ -336,6 +333,20 @@ def _draft_items(draft: TailoredResumeDraftRecord) -> list[TailoredResumeItem]:
     return [TailoredResumeItem.model_validate(item) for item in draft.items_json]
 
 
+def _draft_export_revision(draft: TailoredResumeDraftRecord) -> str:
+    payload = json.dumps(
+        {
+            "application_id": draft.application_id,
+            "items": draft.items_json,
+            "report_id": draft.report_id,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return sha256_text(payload)
+
+
 def _draft_status(items: list[TailoredResumeItem]) -> TailoredResumeDraftStatus:
     if not items:
         return TailoredResumeDraftStatus.draft
@@ -411,6 +422,7 @@ def _validate_draft_item(
                 code="draft_bullet_missing_evidence",
                 message="Draft bullet references unknown resume evidence.",
                 evidence_ids=missing_ids,
+                severity=ValidationSeverity.block,
             )
         )
     if item.unsupported_claims:
@@ -419,6 +431,7 @@ def _validate_draft_item(
                 code="draft_bullet_has_report_unsupported_claims",
                 message="Report validation already marked this bullet as review-only.",
                 evidence_ids=item.evidence_ids,
+                severity=ValidationSeverity.block,
             )
         )
 
@@ -441,10 +454,11 @@ def _validate_draft_item(
                     f"{', '.join(unsupported_skills)}."
                 ),
                 evidence_ids=item.evidence_ids,
+                severity=ValidationSeverity.block,
             )
         )
 
-    unsupported_claims = _unsupported_claim_terms(edited_text, evidence_text)
+    unsupported_claims = unsupported_claim_markers(edited_text, evidence_text)
     if unsupported_claims:
         warnings.append(
             ValidationWarning(
@@ -454,6 +468,7 @@ def _validate_draft_item(
                     f"{', '.join(unsupported_claims)}."
                 ),
                 evidence_ids=item.evidence_ids,
+                severity=ValidationSeverity.block,
             )
         )
     return warnings
@@ -466,41 +481,6 @@ def _unsupported_skills(
 ) -> list[str]:
     allowed_skills = set(find_skills(evidence_text))
     return [skill for skill in find_skills(text) if skill not in allowed_skills]
-
-
-def _unsupported_claim_terms(text: str, evidence_text: str) -> list[str]:
-    text_normalized = text.casefold()
-    evidence_normalized = evidence_text.casefold()
-    unsupported_terms = [
-        term
-        for term in sorted(HIGH_RISK_CLAIM_TERMS)
-        if _contains_claim_term(text_normalized, term)
-        and not _contains_claim_term(evidence_normalized, term)
-    ]
-    unsupported_metrics = [
-        metric
-        for metric in _metric_claims(text)
-        if _normalize_claim_text(metric) not in _normalize_claim_text(evidence_text)
-    ]
-    return [*unsupported_terms, *unsupported_metrics]
-
-
-def _contains_claim_term(value: str, term: str) -> bool:
-    return bool(re.search(rf"(?<!\w){re.escape(term)}(?!\w)", value))
-
-
-def _metric_claims(value: str) -> list[str]:
-    claims: list[str] = []
-    for pattern in METRIC_PATTERNS:
-        for match in pattern.finditer(value):
-            claim = match.group(0).strip()
-            if claim and claim not in claims:
-                claims.append(claim)
-    return claims
-
-
-def _normalize_claim_text(value: str) -> str:
-    return re.sub(r"\s+", " ", value).casefold().strip()
 
 
 def _effective_bullet(item: TailoredResumeItem) -> str:

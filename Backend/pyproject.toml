@@ -41,6 +41,7 @@ dev = [
 
 [project.scripts]
 resumepilot-api = "app.main:run"
+resumepilot-worker = "app.workers.run:main"
 
 [tool.setuptools.packages.find]
 include = ["app*"]

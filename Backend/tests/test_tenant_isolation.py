@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from tests.api_helpers import submit_analysis, successful_analysis
 
 USER_A_HEADERS = {
     "X-ResumePilot-User": "user-a",
@@ -43,14 +44,15 @@ def test_reports_resumes_and_audit_events_are_tenant_scoped(
     assert (
         client.delete(f"/reports/{user_a['report_id']}", headers=USER_B_HEADERS).status_code == 404
     )
-    assert (
-        client.post(
-            "/jobs/analyze",
-            json={"resume_id": user_a["resume_id"], "job_text": sample_job_text},
-            headers=USER_B_HEADERS,
-        ).status_code
-        == 404
+    response, operation = submit_analysis(
+        client,
+        {"resume_id": user_a["resume_id"], "job_text": sample_job_text},
+        headers=USER_B_HEADERS,
     )
+    assert response.status_code == 202
+    assert operation is not None
+    assert operation["status"] == "failed"
+    assert operation["error"]["code"] == "http_404"
     assert client.get("/audit/events", headers=USER_B_HEADERS).json()["events"] == []
 
 
@@ -69,12 +71,12 @@ def test_same_resume_file_is_deduplicated_per_tenant_not_globally(
     assert delete_response.json()["deleted_upload_files"] == 1
     assert len(list(settings.upload_dir.glob("users/*/*"))) == 1
 
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={"resume_id": user_b_resume_id, "job_text": sample_job_text},
+    analysis = successful_analysis(
+        client,
+        {"resume_id": user_b_resume_id, "job_text": sample_job_text},
         headers=USER_B_HEADERS,
     )
-    assert analyze_response.status_code == 200
+    assert analysis["status"] == "completed"
 
 
 def test_auth_required_rejects_missing_user_context(settings, sample_resume_text):
@@ -99,13 +101,11 @@ def _upload_and_analyze(
     headers: dict[str, str],
 ) -> dict:
     resume_id = _upload_resume(client, resume_text, headers=headers)
-    analyze_response = client.post(
-        "/jobs/analyze",
-        json={"resume_id": resume_id, "job_text": job_text},
+    body = successful_analysis(
+        client,
+        {"resume_id": resume_id, "job_text": job_text},
         headers=headers,
     )
-    assert analyze_response.status_code == 200
-    body = analyze_response.json()
     body["resume_id"] = resume_id
     return body
 

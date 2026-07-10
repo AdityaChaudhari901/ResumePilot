@@ -1,3 +1,4 @@
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import UserRecord
@@ -17,15 +18,15 @@ def get_or_create_user(
     repository = UserRepository(db)
     record = repository.get_by_external_id(external_id)
     if record is None:
-        record = UserRecord(
+        record = _create_user_or_reselect(
+            db,
+            repository,
             external_id=external_id,
             email=email,
             display_name=display_name,
-            plan=initial_plan,
-            subscription_status=initial_subscription_status,
+            initial_plan=initial_plan,
+            initial_subscription_status=initial_subscription_status,
         )
-        repository.save(record)
-        return _current_user_from_record(record)
 
     changed = False
     if email and email != record.email:
@@ -37,6 +38,41 @@ def get_or_create_user(
     if changed:
         repository.save(record)
     return _current_user_from_record(record)
+
+
+def _create_user_or_reselect(
+    db: Session,
+    repository: UserRepository,
+    *,
+    external_id: str,
+    email: str | None,
+    display_name: str | None,
+    initial_plan: str,
+    initial_subscription_status: str,
+) -> UserRecord:
+    """Insert a user without invalidating the request transaction on an auth race."""
+
+    record = UserRecord(
+        external_id=external_id,
+        email=email,
+        display_name=display_name,
+        plan=initial_plan,
+        subscription_status=initial_subscription_status,
+    )
+    try:
+        with db.begin_nested():
+            repository.add(record)
+    except IntegrityError:
+        # Another request may have inserted the same external identity after our
+        # initial lookup. The savepoint rollback keeps the outer session usable.
+        concurrent_record = repository.get_by_external_id(external_id)
+        if concurrent_record is None:
+            raise
+        return concurrent_record
+
+    db.commit()
+    db.refresh(record)
+    return record
 
 
 def _current_user_from_record(record: UserRecord) -> CurrentUser:

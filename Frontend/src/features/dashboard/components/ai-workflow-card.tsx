@@ -13,13 +13,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import type { UsageSummaryResponse } from "@/features/dashboard/types";
+import type { WorkflowOperation } from "@/features/dashboard/types";
 
 interface AiWorkflowCardProps {
   allowLiveAiProcessing: boolean;
   canAnalyze: boolean;
   isAnalyzing: boolean;
+  operation: WorkflowOperation | null;
   usage: UsageSummaryResponse | null;
   onAllowLiveAiProcessingChange: (enabled: boolean) => void;
+  onCancel: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
@@ -50,8 +53,10 @@ export function AiWorkflowCard({
   allowLiveAiProcessing,
   canAnalyze,
   isAnalyzing,
+  onCancel,
   onAllowLiveAiProcessingChange,
   onSubmit,
+  operation,
   usage
 }: AiWorkflowCardProps) {
   const workflowMode = usage?.live_crewai_enabled ? "Live CrewAI eligible" : "Deterministic gate";
@@ -124,26 +129,75 @@ export function AiWorkflowCard({
           </label>
         ) : null}
 
+        {isAnalyzing && operation ? (
+          <div
+            aria-live="polite"
+            className="rounded-md border border-primary/20 bg-primary/5 p-3"
+          >
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="font-semibold text-foreground">
+                {operationStageLabel(operation.stage)}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {operation.progress_percent}%
+              </span>
+            </div>
+            <progress
+              aria-label="Analysis progress"
+              className="mt-2 h-2 w-full accent-primary"
+              max={100}
+              value={operation.progress_percent}
+            />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Attempt {operation.attempt_count} of {operation.max_attempts}. This work is durable;
+              refreshing the page will not duplicate the analysis.
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-5 text-muted-foreground">
             Live processing requires your consent for each analysis. Otherwise ResumePilot uses
             the deterministic evidence workflow.
           </p>
-          <Button
-            disabled={!canAnalyze}
-            icon={
-              isAnalyzing ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Play className="h-4 w-4" aria-hidden="true" />
-              )
-            }
-            type="submit"
-          >
-            Run AI analysis
-          </Button>
+          <div className="flex gap-2">
+            {isAnalyzing && operation?.cancelable ? (
+              <Button onClick={onCancel} type="button" variant="secondary">
+                Cancel
+              </Button>
+            ) : null}
+            <Button
+              disabled={!canAnalyze}
+              icon={
+                isAnalyzing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Play className="h-4 w-4" aria-hidden="true" />
+                )
+              }
+              type="submit"
+            >
+              Run AI analysis
+            </Button>
+          </div>
         </div>
       </form>
     </Panel>
   );
+}
+
+function operationStageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    cancel_requested: "Canceling analysis",
+    fetching_job: "Loading reviewed job evidence",
+    generating_report: "Generating application materials",
+    matching_evidence: "Matching résumé evidence",
+    parsing_job: "Parsing job requirements",
+    queued: "Analysis queued",
+    retry_scheduled: "Retry scheduled",
+    saving_application: "Saving application workspace",
+    starting: "Starting analysis",
+    validating_claims: "Validating every claim"
+  };
+  return labels[stage] ?? "Analysis in progress";
 }

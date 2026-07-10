@@ -5,10 +5,12 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 ## Current MVP Slice
 
 - FastAPI backend.
-- SQLite persistence.
+- SQLite persistence for local development and PostgreSQL for production.
 - Strict Pydantic contracts.
 - Resume upload for PDF, DOCX, TXT, and Markdown.
 - Pasted job description analysis and public URL fetch support.
+- Durable idempotent analysis and PDF operations with leased worker claims,
+  heartbeats, retries, cancellation, progress, and dead-letter visibility.
 - Optional Playwright Chromium fallback for JavaScript-rendered public job pages.
 - Deterministic skill matching and report generation.
 - CrewAI-ready agent workflow boundary with deterministic fallback.
@@ -18,9 +20,9 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Tenant-scoped tailored resume draft workspace for accepting/rejecting generated bullets before final export.
 - Deterministic backend quality gate for schema validity, evidence gaps, unsupported claims, required-skill routing, sensitive-output checks, and latency.
-- Evidence-backed LaTeX resume export using the uploaded resume facts and supported tailored bullets.
-- Editable DOCX resume export generated from the same validated report, resume, and job data.
-- Guarded PDF resume export compiled from the same evidence-backed LaTeX source.
+- Accepted-draft-only LaTeX and DOCX resume exports using validated uploaded facts.
+- Guarded asynchronous PDF resume export compiled by the worker from the same
+  accepted evidence-backed draft.
 - Sanitized audit event history for uploads, analyses, exports, deletes, and retention purges.
 - Delete and retention purge controls for local resume/report data.
 - API token protection for the OpenClaw endpoint.
@@ -97,8 +99,9 @@ through Alembic:
 alembic upgrade head
 ```
 
-The repository includes a root `docker-compose.yml` with PostgreSQL, migrated
-FastAPI, and Next.js services. See `../Docs/DEPLOYMENT.md`.
+The repository includes a root `docker-compose.yml` with PostgreSQL, one-shot
+migrations, separate FastAPI API and worker roles, and Next.js. See
+`../Docs/DEPLOYMENT.md`.
 
 ## Optional Live CrewAI Mode
 
@@ -167,10 +170,12 @@ provider credentials and networked model calls.
 
 The default production Docker image installs the hash-locked deterministic
 runtime from `requirements/py312-production.lock.txt`. It excludes the optional
-CrewAI dependency tree while ChromaDB's `CVE-2026-45829` has no patched release.
-`AGENT_WORKFLOW_MODE=crewai` therefore falls back to the deterministic workflow
-in that image. Keep live CrewAI in an isolated runtime and do not expose a
-ChromaDB server until the upstream advisory is resolved.
+CrewAI dependency tree because CrewAI 1.15.2 still constrains ChromaDB to the
+affected 1.1.x line for `CVE-2026-45829`; the fixed ChromaDB 1.5.9 release is
+outside that compatibility range. `AGENT_WORKFLOW_MODE=crewai` therefore falls
+back to the deterministic workflow in that image. Keep live CrewAI in an
+isolated runtime until CrewAI supports the patched ChromaDB line, and never
+expose the bundled ChromaDB server.
 
 ## API Surface
 
@@ -178,6 +183,7 @@ ChromaDB server until the upstream advisory is resolved.
 - `GET /ready`
 - `GET /applications`
 - `POST /applications`
+- `GET /applications/{application_id}`
 - `PATCH /applications/{application_id}/status`
 - `GET /applications/{application_id}/tailored-resume`
 - `PATCH /applications/{application_id}/tailored-resume/items/{item_id}`
@@ -188,22 +194,27 @@ ChromaDB server until the upstream advisory is resolved.
 - `DELETE /resumes/{resume_id}`
 - `POST /jobs/preview`
 - `POST /jobs/analyze`
+- `GET /operations`
+- `GET /operations/{operation_id}`
+- `POST /operations/{operation_id}/cancel`
+- `GET /operations/{operation_id}/artifact`
 - `GET /reports/{report_id}`
 - `POST /reports/{report_id}/markdown`
 - `GET /reports/{report_id}/trace`
-- `POST /reports/{report_id}/resume/latex`
-- `POST /reports/{report_id}/resume/docx`
-- `POST /reports/{report_id}/resume/pdf`
 - `DELETE /reports/{report_id}`
 - `GET /audit/events`
 - `POST /retention/purge`
+- `DELETE /account` with `X-Confirm-Account-Deletion: delete-my-account`
 - `POST /chat/openclaw`
 
 `POST /jobs/preview` fetches a public job listing URL, extracts structured job
 evidence, and returns parser/quality metadata without creating a job or report.
-`POST /jobs/analyze` accepts either the legacy job text/URL inputs or a
-`reviewed_job_profile`; dashboard analysis uses the reviewed profile so user
-corrections are the source of truth.
+`POST /jobs/analyze` requires an `Idempotency-Key`, accepts either job text/URL
+inputs or a persisted `application_id`, and returns `202 Accepted` with an
+operation resource. In production, a separate worker fetches/parses, matches,
+runs bounded optional AI, validates, and persists the report. Poll the operation
+or cancel it through `/operations`; replaying the same key and request returns
+the same operation without consuming quota twice.
 
 `POST /applications` saves reviewed job evidence as a tenant-scoped application
 draft. `POST /jobs/analyze` can receive `application_id` to complete that draft
@@ -215,8 +226,11 @@ supports the dashboard pipeline statuses `draft`, `reviewed`, `analyzed`,
 tailored resume review draft. Users can edit, accept, reject, or reset each
 evidence-backed bullet through the item patch route. Application-specific DOCX,
 LaTeX, and PDF exports use `POST` because each export reserves usage, records an
-audit event, and advances application status atomically. They include accepted
-bullets only and reject unsupported accepted edits before rendering.
+audit event, and advances application status atomically. PDF returns a durable
+operation and requires an `Idempotency-Key`; its artifact is downloaded from the
+authenticated operation route. All resume-document exports include accepted
+bullets only and reject unsupported accepted edits before rendering. Generic
+report resume-document routes do not exist; Markdown remains report-only.
 
 The `/chat/openclaw` endpoint requires:
 

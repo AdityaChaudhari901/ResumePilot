@@ -42,7 +42,7 @@ export function ApplicationPipelineCard({
 
         {!isLoading && applications.length === 0 ? (
           <div className="rounded-md border border-border bg-surface p-3 text-sm leading-6 text-muted-foreground">
-            No saved applications yet. Review a job listing and run analysis to create one.
+            No saved applications yet. Review a job description to create one.
           </div>
         ) : null}
 
@@ -114,7 +114,7 @@ function ApplicationPipelineRow({
       <div className="mt-3 flex flex-wrap justify-end gap-2">
         <Button
           className="h-8 px-3 text-xs"
-          disabled={!hasReport || isBusy}
+          disabled={isBusy}
           icon={<ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />}
           onClick={onSelect}
           variant="secondary"

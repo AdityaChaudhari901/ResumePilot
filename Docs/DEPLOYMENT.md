@@ -6,7 +6,10 @@ proxy in front of Next.js and keep the FastAPI port private to the host/network.
 ## Runtime Shape
 
 - `frontend`: Next.js dashboard and backend-for-frontend identity proxy.
-- `backend`: FastAPI API, report generation, exports, readiness checks, and migrations.
+- `migrate`: one-shot Alembic upgrade that must succeed before API/worker startup.
+- `backend`: FastAPI command/query API and readiness checks.
+- `worker`: PostgreSQL-leased analysis and PDF execution with retries,
+  cancellation, dead-letter state, and a shared artifact volume.
 - `db`: PostgreSQL.
 - `OpenClaw`: stays outside Compose as a local/private gateway. Do not deploy one shared OpenClaw gateway for mutually untrusted users.
 
@@ -58,13 +61,16 @@ to 300.
 ## Release Boundaries
 
 - The default backend image uses hash-locked deterministic dependencies and
-  excludes CrewAI/ChromaDB while `CVE-2026-45829` has no patched ChromaDB line.
+  excludes CrewAI/ChromaDB because CrewAI 1.15.2 constrains ChromaDB to the
+  affected 1.1.x line; patched ChromaDB 1.5.9 is not yet compatible.
 - Live AI requires a premium plan plus explicit consent for each analysis. The
   provider payload excludes candidate contact fields, links, name occurrences,
   and the deterministic cover letter.
 - The amd64 image installs checksum-pinned Tectonic. Arm64 deployments must
-  provide a verified compiler or leave PDF export unavailable. Move PDF
-  compilation to a network-disabled worker before running at sustained load.
+  provide a verified compiler or leave PDF export unavailable. PDF compilation
+  runs in the worker; apply network and resource isolation before sustained load.
+- The API and worker currently share generated artifacts through the Compose
+  data volume. Use encrypted object storage before scaling them across hosts.
 - Put request-rate and body-size controls at the HTTPS reverse proxy. Keep
   private/link-local/metadata egress blocked even though the application also
   validates job URL DNS, redirects, and connected peers.
@@ -81,11 +87,12 @@ The example env binds host ports `8050` and `3050` to `127.0.0.1`. A host-level
 HTTPS reverse proxy may forward public traffic to Next.js on `3050`; do not
 forward the FastAPI port publicly.
 
-The backend service runs:
+The migration, API, and worker services run:
 
 ```bash
 alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+resumepilot-worker
 ```
 
 Production startup fails if:
@@ -113,7 +120,7 @@ reachable and, in production, that the database revision matches Alembic head.
 Compose applies migrations before starting the API. For a manual migration:
 
 ```bash
-docker compose --env-file .env.production run --rm backend alembic upgrade head
+docker compose --env-file .env.production run --rm migrate
 ```
 
 Do not rely on SQLAlchemy `create_all` in production. The backend disables

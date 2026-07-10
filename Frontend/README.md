@@ -12,14 +12,20 @@ Next.js dashboard for the local ResumePilot MVP.
 
 ## Current dashboard capabilities
 
-- Guided six-step workflow: job listing URL, reviewed job evidence, resume upload, AI services, validated report, and tailored resume draft approval.
+- Guided workflow: job URL or pasted description, reviewed job evidence, resume
+  upload, durable AI analysis, validated report, and tailored resume approval.
 - Application pipeline workspace backed by `/api/applications`, with saved reviewed drafts and `reviewed`, `analyzed`, `exported`, and `applied` statuses.
 - Job preview through `/api/jobs/preview` so users can inspect and edit extracted role, company, skills, responsibilities, and extraction quality before upload.
 - Resume upload through the same-origin `/api/resumes/upload` proxy after the job evidence is reviewed.
-- Job analysis through `/api/jobs/analyze` using the saved reviewed job profile from the public listing URL, not a silent second parse.
+- Job analysis through `/api/jobs/analyze` using the saved reviewed source
+  snapshot, with operation progress, cancellation, safe failures, and retry-safe
+  idempotency.
 - Per-analysis live AI consent for eligible plans; deterministic processing remains the default and provider prompts exclude candidate contact details.
 - Tailored resume workspace through `/api/applications/[applicationId]/tailored-resume` where users edit, accept, or reject evidence-backed bullets before final DOCX, LaTeX, or PDF export.
-- Report viewing with JSON, Markdown, workflow trace timings/runtime metadata, provider token/cost estimates, DOCX, LaTeX `.tex`, and PDF downloads.
+- Report viewing with JSON, Markdown, workflow trace timings/runtime metadata,
+  provider token/cost estimates, claim-validation status, cover-letter and
+  interview-prep panels, and evidence comparisons. Resume DOCX/LaTeX/PDF
+  downloads are available only from the accepted application draft.
 - Collapsed workspace review for report history, parsed resume evidence, account/session state, usage limits, OpenClaw Gateway/provider readiness, and validation boundaries.
 
 ## Local setup
@@ -61,9 +67,9 @@ Playwright builds the frontend on every run, starts FastAPI on `127.0.0.1:8040`,
 starts a fresh production Next.js server on `127.0.0.1:3040`, captures the sample
 job listing URL, verifies the job evidence review gate, uploads the backend
 sample resume, runs the AI workflow, verifies the job URL request contract,
-checks the reviewed job profile and application-id analysis payload, workflow
-trace timing, Markdown/DOCX/LaTeX/PDF report exports, accepted-draft
-DOCX/LaTeX/PDF exports, application status transitions, security headers, and
+checks URL and pasted-description snapshots, application-id analysis operations,
+progress/cancellation behavior, workflow trace timing, Markdown report export,
+accepted-draft DOCX/LaTeX/PDF exports, application status transitions, security headers, and
 the automated WCAG A/AA baseline. It captures
 desktop/mobile screenshots under
 `Frontend/.local/playwright-results`.

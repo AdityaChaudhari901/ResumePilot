@@ -22,15 +22,23 @@ class UsageEventRepository:
         event_types: set[str],
         start_at: datetime,
         end_at: datetime,
+        states: set[str] | None = None,
+        reserved_after: datetime | None = None,
     ) -> int:
-        value = self.db.scalar(
-            select(func.coalesce(func.sum(UsageEventRecord.quantity), 0)).where(
-                UsageEventRecord.user_id == user_id,
-                UsageEventRecord.event_type.in_(event_types),
-                UsageEventRecord.created_at >= start_at,
-                UsageEventRecord.created_at < end_at,
-            )
+        query = select(func.coalesce(func.sum(UsageEventRecord.quantity), 0)).where(
+            UsageEventRecord.user_id == user_id,
+            UsageEventRecord.event_type.in_(event_types),
+            UsageEventRecord.created_at >= start_at,
+            UsageEventRecord.created_at < end_at,
         )
+        if states:
+            query = query.where(UsageEventRecord.state.in_(states))
+        if reserved_after is not None:
+            query = query.where(
+                (UsageEventRecord.state != "reserved")
+                | (UsageEventRecord.reserved_at >= reserved_after)
+            )
+        value = self.db.scalar(query)
         return int(value or 0)
 
     def cost_sum(
@@ -43,6 +51,7 @@ class UsageEventRepository:
         value = self.db.scalar(
             select(func.coalesce(func.sum(UsageEventRecord.cost_estimate_usd), 0.0)).where(
                 UsageEventRecord.user_id == user_id,
+                UsageEventRecord.state == "consumed",
                 UsageEventRecord.created_at >= start_at,
                 UsageEventRecord.created_at < end_at,
             )

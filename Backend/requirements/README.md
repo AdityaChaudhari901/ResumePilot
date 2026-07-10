@@ -20,10 +20,11 @@ ranges in `pyproject.toml` or upgrading the live CrewAI/Vertex runtime.
 The default production image uses `py312-build.lock.txt` and
 `py312-production.lock.txt` with `pip --require-hashes`. The production lock
 contains the deterministic FastAPI runtime only. It deliberately excludes the
-optional CrewAI/ChromaDB dependency tree until the unpatched ChromaDB
-`CVE-2026-45829` server vulnerability
-(`https://osv.dev/vulnerability/PYSEC-2026-311`) has a safe upstream release. ResumePilot
-does not run a ChromaDB server, but excluding unused vulnerable code keeps the
+optional CrewAI/ChromaDB dependency tree because CrewAI 1.15.2 constrains
+ChromaDB to the affected 1.1.x line for `CVE-2026-45829`
+(`https://osv.dev/vulnerability/PYSEC-2026-311`). ChromaDB 1.5.9 contains the
+upstream fix, but it is outside CrewAI's current compatible range. ResumePilot
+does not run a ChromaDB server, and excluding the unused package keeps the
 default image's attack surface smaller.
 
 Regenerate the production locks with the commands recorded in their generated
