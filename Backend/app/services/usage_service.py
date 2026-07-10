@@ -33,8 +33,8 @@ class PlanDefinition:
     name: str
     monthly_analyses: int | None
     monthly_exports: int | None
-    monthly_crewai_runs: int | None
-    live_crewai_enabled: bool
+    monthly_live_ai_runs: int | None
+    live_ai_enabled: bool
 
 
 PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
@@ -42,22 +42,22 @@ PLAN_DEFINITIONS: dict[str, PlanDefinition] = {
         name="free",
         monthly_analyses=3,
         monthly_exports=5,
-        monthly_crewai_runs=0,
-        live_crewai_enabled=False,
+        monthly_live_ai_runs=0,
+        live_ai_enabled=False,
     ),
     "pro": PlanDefinition(
         name="pro",
         monthly_analyses=100,
         monthly_exports=100,
-        monthly_crewai_runs=0,
-        live_crewai_enabled=False,
+        monthly_live_ai_runs=0,
+        live_ai_enabled=False,
     ),
     "premium": PlanDefinition(
         name="premium",
         monthly_analyses=500,
         monthly_exports=500,
-        monthly_crewai_runs=100,
-        live_crewai_enabled=True,
+        monthly_live_ai_runs=100,
+        live_ai_enabled=True,
     ),
 }
 DEFAULT_PLAN = PLAN_DEFINITIONS["free"]
@@ -71,12 +71,12 @@ def enforce_export_limit(db: Session, current_user: CurrentUser) -> None:
     _enforce_metric_limit(db, current_user, UsageLimitMetric.exports)
 
 
-def enforce_crewai_limit(db: Session, current_user: CurrentUser) -> None:
-    _enforce_metric_limit(db, current_user, UsageLimitMetric.crewai_runs)
+def enforce_live_ai_limit(db: Session, current_user: CurrentUser) -> None:
+    _enforce_metric_limit(db, current_user, UsageLimitMetric.live_ai_runs)
 
 
-def is_live_crewai_enabled(current_user: CurrentUser) -> bool:
-    return _plan_for_user(current_user).live_crewai_enabled
+def is_live_ai_enabled(current_user: CurrentUser) -> bool:
+    return _plan_for_user(current_user).live_ai_enabled
 
 
 def record_analysis_usage(
@@ -247,7 +247,7 @@ def finalize_export_usage(
     db.commit()
 
 
-def record_crewai_usage(
+def record_live_ai_usage(
     db: Session,
     current_user: CurrentUser,
     *,
@@ -257,26 +257,37 @@ def record_crewai_usage(
     return record_usage_event(
         db,
         current_user=current_user,
-        event_type=UsageEventType.crewai_run,
+        event_type=UsageEventType.live_ai_run,
         cost_estimate_usd=cost_estimate_usd,
         metadata={"analysis_id": analysis_id},
     )
 
 
-def reserve_crewai_usage(db: Session, current_user: CurrentUser) -> UsageEventRecord:
+def reserve_live_ai_usage(
+    db: Session,
+    current_user: CurrentUser,
+    *,
+    operation_id: str,
+) -> UsageEventRecord:
     """Reserve live-provider quota before a potentially billable call."""
     _lock_user_for_usage(db, current_user.id)
-    enforce_crewai_limit(db, current_user)
+    reservation_key = f"live-ai:{operation_id}"
+    repository = UsageEventRepository(db)
+    existing = repository.get_by_reservation_key(reservation_key)
+    if existing is not None:
+        return existing
+    enforce_live_ai_limit(db, current_user)
     return record_usage_event(
         db,
         current_user=current_user,
-        event_type=UsageEventType.crewai_run,
+        event_type=UsageEventType.live_ai_run,
         state=UsageEventState.reserved,
+        reservation_key=reservation_key,
         metadata={"status": "reserved"},
     )
 
 
-def finalize_crewai_usage(
+def finalize_live_ai_usage(
     db: Session,
     record: UsageEventRecord,
     *,
@@ -294,6 +305,47 @@ def finalize_crewai_usage(
     record.cost_estimate_usd = cost_estimate_usd
     db.add(record)
     db.commit()
+
+
+def scrub_live_ai_usage_for_privacy(
+    db: Session,
+    *,
+    user_id: int,
+    operation_id: str,
+    analysis_id: int | None = None,
+) -> None:
+    """Remove operation/report correlation while preserving aggregate accounting."""
+
+    reservation_key = f"live-ai:{operation_id}"
+    candidates = list(
+        db.scalars(
+            select(UsageEventRecord).where(
+                UsageEventRecord.user_id == user_id,
+                UsageEventRecord.event_type.in_(
+                    {
+                        UsageEventType.live_ai_run.value,
+                        UsageEventType.crewai_run.value,
+                    }
+                ),
+            )
+        )
+    )
+    for record in candidates:
+        metadata_analysis_id = (record.metadata_json or {}).get("analysis_id")
+        if record.reservation_key != reservation_key and (
+            analysis_id is None or metadata_analysis_id != analysis_id
+        ):
+            continue
+        previous_state = record.state
+        if record.state == UsageEventState.reserved.value:
+            record.state = UsageEventState.released.value
+            record.settled_at = datetime.now(UTC)
+        record.reservation_key = None
+        record.metadata_json = {
+            "status": "privacy_deleted",
+            "previous_state": previous_state,
+        }
+        db.add(record)
 
 
 def record_usage_event(
@@ -368,9 +420,9 @@ def get_usage_summary(db: Session, current_user: CurrentUser) -> UsageSummaryRes
         end_at=period_end,
         states={UsageEventState.consumed.value},
     )
-    crewai_count = repository.quantity_sum(
+    live_ai_count = repository.quantity_sum(
         user_id=current_user.id,
-        event_types={UsageEventType.crewai_run.value},
+        event_types={UsageEventType.live_ai_run.value, UsageEventType.crewai_run.value},
         start_at=period_start,
         end_at=period_end,
         states={UsageEventState.consumed.value},
@@ -396,9 +448,9 @@ def get_usage_summary(db: Session, current_user: CurrentUser) -> UsageSummaryRes
                 reset_at=period_end,
             ),
             _plan_limit(
-                metric=UsageLimitMetric.crewai_runs,
-                used=crewai_count,
-                limit=plan.monthly_crewai_runs,
+                metric=UsageLimitMetric.live_ai_runs,
+                used=live_ai_count,
+                limit=plan.monthly_live_ai_runs,
                 reset_at=period_end,
             ),
         ],
@@ -410,7 +462,7 @@ def get_usage_summary(db: Session, current_user: CurrentUser) -> UsageSummaryRes
             ),
             6,
         ),
-        live_crewai_enabled=plan.live_crewai_enabled,
+        live_ai_enabled=plan.live_ai_enabled,
     )
 
 
@@ -478,7 +530,10 @@ def _metric_limit_definition(
         return {UsageEventType.analysis_created.value}, plan.monthly_analyses
     if metric == UsageLimitMetric.exports:
         return EXPORT_EVENT_TYPES, plan.monthly_exports
-    return {UsageEventType.crewai_run.value}, plan.monthly_crewai_runs
+    return {
+        UsageEventType.live_ai_run.value,
+        UsageEventType.crewai_run.value,
+    }, plan.monthly_live_ai_runs
 
 
 def _export_event_type(export_format: str) -> UsageEventType:

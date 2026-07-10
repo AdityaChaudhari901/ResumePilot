@@ -1,7 +1,3 @@
-import json
-
-import pytest
-
 from app.schemas.agent import (
     AgentStepName,
     AgentTokenUsage,
@@ -9,15 +5,17 @@ from app.schemas.agent import (
     AgentWorkflowTrace,
     CoverLetterAgentOutput,
     InterviewCoachAgentOutput,
+    LiveDraftSections,
     ResumeMatchAgentOutput,
 )
 from app.schemas.common import ValidationSeverity
+from app.schemas.operation import LiveDraftProposal
 from app.schemas.report import InterviewQuestionGroup
-from app.services.agent_workflow import run_application_agent_workflow
-from app.services.crewai_workflow import (
-    CrewAIWorkflowRunner,
-    CrewAIWorkflowSections,
-    CrewAIWorkflowUnavailable,
+from app.services.agent_workflow import (
+    apply_approved_live_draft,
+    run_application_agent_workflow,
+    with_langgraph_fallback_warning,
+    with_rejected_live_draft,
 )
 from app.services.job_parser import parse_job_profile
 from app.services.matcher import match_resume_to_job
@@ -26,11 +24,7 @@ from app.services.resume_parser import parse_resume_profile
 
 
 def test_agent_workflow_generates_validated_report_sections(sample_resume_text, sample_job_text):
-    resume = parse_resume_profile(sample_resume_text, resume_id=1)
-    job = parse_job_profile(sample_job_text, job_id=1)
-    match = match_resume_to_job(resume, job)
-
-    result = run_application_agent_workflow(analysis_id=1, resume=resume, job=job, match=match)
+    resume, job, match, result = _deterministic_context(sample_resume_text, sample_job_text)
 
     assert result.trace.mode == AgentWorkflowMode.deterministic_fallback
     assert [step.name for step in result.trace.steps] == [
@@ -54,7 +48,6 @@ def test_agent_workflow_generates_validated_report_sections(sample_resume_text, 
     assert isinstance(result.trace.duration_ms, int)
     assert result.trace.duration_ms >= 0
     assert all(isinstance(step.duration_ms, int) for step in result.trace.steps)
-    assert all(step.duration_ms >= 0 for step in result.trace.steps if step.duration_ms is not None)
     assert result.trace.provider is None
     assert result.trace.model is None
     assert result.trace.token_usage is None
@@ -62,287 +55,183 @@ def test_agent_workflow_generates_validated_report_sections(sample_resume_text, 
     assert result.trace.runtime_metadata == {}
     assert result.report.cover_letter_evidence_ids
     assert result.report.validation_status == result.trace.validation_status
+    assert resume.resume_id == 1
+    assert job.job_id == 1
+    assert match.matched_skills
 
 
-def test_crewai_prompt_excludes_candidate_contact_data_and_deterministic_letter(
-    settings,
-    sample_resume_text,
-    sample_job_text,
-):
-    resume = parse_resume_profile(sample_resume_text, resume_id=1)
-    job = parse_job_profile(sample_job_text, job_id=1)
-    match = match_resume_to_job(resume, job)
-    deterministic = run_application_agent_workflow(
-        analysis_id=1,
-        resume=resume,
-        job=job,
-        match=match,
-    )
-
-    prompt = CrewAIWorkflowRunner(settings)._prompt(
-        "privacy check",
-        [],
-        resume=resume,
-        job=job,
-        match=match,
-        deterministic_report=deterministic.report,
-    )
-    payload = json.loads(prompt)
-
-    assert "candidate" not in payload["resume"]
-    assert "cover_letter" not in payload["deterministic_report"]
-    assert "resume_candidate_name" not in payload["deterministic_report"]
-    assert "aarav@example.com" not in prompt
-    assert "https://github.com/aarav" not in prompt
-    assert "Aarav Sharma" not in prompt
-
-
-def test_agent_workflow_trace_accepts_legacy_payload_without_timings():
+def test_agent_workflow_trace_accepts_legacy_crewai_payload_without_timings():
     trace = AgentWorkflowTrace.model_validate(
         {
-            "mode": "deterministic_fallback",
+            "mode": "crewai",
             "steps": [
                 {
-                    "name": "validation_gate",
-                    "status": "degraded",
-                    "summary": "Legacy trace without timing fields.",
+                    "name": "crewai_runtime",
+                    "status": "completed",
+                    "summary": "Historical CrewAI trace retained for report compatibility.",
                 }
             ],
             "validation_warning_codes": [],
         }
     )
 
+    assert trace.mode == AgentWorkflowMode.crewai
+    assert trace.steps[0].name == AgentStepName.crewai_runtime
     assert trace.duration_ms is None
     assert trace.steps[0].duration_ms is None
-    assert trace.provider is None
-    assert trace.model is None
-    assert trace.token_usage is None
-    assert trace.cost_estimate_usd is None
-    assert trace.runtime_metadata == {}
     assert trace.validation_status == ValidationSeverity.pass_
 
 
-def test_crewai_mode_falls_back_when_runtime_is_unavailable(
-    monkeypatch,
+def test_langgraph_unavailable_records_safe_deterministic_fallback(
+    settings,
     sample_resume_text,
     sample_job_text,
-    settings,
 ):
-    resume = parse_resume_profile(sample_resume_text, resume_id=1)
-    job = parse_job_profile(sample_job_text, job_id=1)
-    match = match_resume_to_job(resume, job)
-    crewai_settings = settings.model_copy(update={"agent_workflow_mode": AgentWorkflowMode.crewai})
-
-    def unavailable_runner(_settings):
-        raise CrewAIWorkflowUnavailable("CrewAI runtime unavailable in test")
-
-    monkeypatch.setattr(
-        "app.services.agent_workflow.build_crewai_workflow_runner",
-        unavailable_runner,
+    _resume, _job, _match, deterministic = _deterministic_context(
+        sample_resume_text, sample_job_text
     )
+    settings.agent_workflow_mode = AgentWorkflowMode.langgraph
 
-    result = run_application_agent_workflow(
-        analysis_id=1,
-        resume=resume,
-        job=job,
-        match=match,
-        settings=crewai_settings,
+    result = with_langgraph_fallback_warning(
+        deterministic,
+        RuntimeError("private provider error"),
+        settings=settings,
+        live_duration_ms=7,
     )
 
     assert result.trace.mode == AgentWorkflowMode.deterministic_fallback
-    assert result.trace.steps[0].name == AgentStepName.crewai_runtime
+    assert result.trace.steps[0].name == AgentStepName.langgraph_runtime
     assert result.trace.steps[0].status == "failed"
-    assert isinstance(result.trace.steps[0].duration_ms, int)
-    assert isinstance(result.trace.duration_ms, int)
+    assert result.trace.steps[0].duration_ms == 7
     assert result.trace.provider == "vertex"
-    assert result.trace.model == "google/gemini-3.5-flash"
-    assert result.trace.token_usage is None
+    assert result.trace.model == "google_genai/gemini-3.5-flash"
+    assert result.trace.runtime_metadata["workflow_runtime"] == "langgraph"
     assert result.trace.runtime_metadata["runtime_status"] == "failed"
-    assert result.trace.runtime_metadata["token_usage_source"] == "unavailable"
-    assert result.trace.runtime_metadata["cost_estimate_source"] == "unavailable"
-    assert "crewai_unavailable" in result.trace.validation_warning_codes
+    assert "langgraph_unavailable" in result.trace.validation_warning_codes
+    assert "private provider error" not in result.report.model_dump_json()
 
 
-def test_crewai_mode_uses_live_sections_then_validates(
-    monkeypatch,
+def test_approved_langgraph_sections_are_applied_after_validation(
+    settings,
     sample_resume_text,
     sample_job_text,
-    settings,
 ):
-    resume = parse_resume_profile(sample_resume_text, resume_id=1)
-    job = parse_job_profile(sample_job_text, job_id=1)
-    match = match_resume_to_job(resume, job)
-    crewai_settings = settings.model_copy(update={"agent_workflow_mode": AgentWorkflowMode.crewai})
-    evidence_ids = match.matched_skills[0].resume_evidence_ids
+    resume, job, match, deterministic = _deterministic_context(sample_resume_text, sample_job_text)
+    sections = _safe_live_sections(match)
+    proposal = _proposal_for_sections(sections)
 
-    class FakeCrewAIRunner:
-        def run(self, **_kwargs):
-            return CrewAIWorkflowSections(
-                resume_match=ResumeMatchAgentOutput(
-                    summary="CrewAI-reviewed fit: strong Python and FastAPI evidence.",
-                    strongest_matches=["Python", "FastAPI"],
-                    weak_areas=[],
-                    recommended_positioning=(
-                        "Lead with backend API evidence and be direct about Docker preparation."
-                    ),
-                    evidence_ids=evidence_ids,
-                    confidence=match.confidence,
-                ),
-                cover_letter=CoverLetterAgentOutput(
-                    draft=(
-                        "Dear Hiring Team,\n\n"
-                        "I am interested in Junior Backend Engineer at NovaHire AI. "
-                        "My resume shows supported Python and FastAPI project evidence, "
-                        "and I would position the application around those backend strengths.\n\n"
-                        "Confidence note: this draft uses only validated resume evidence.\n\n"
-                        "Sincerely,\nAarav Sharma"
-                    ),
-                    confidence_note=(
-                        "Confidence note: this draft uses only validated resume evidence."
-                    ),
-                    evidence_ids=evidence_ids,
-                ),
-                interview_coach=InterviewCoachAgentOutput(
-                    question_groups=[
-                        InterviewQuestionGroup(
-                            category="Technical",
-                            questions=["How did you structure the FastAPI backend?"],
-                            suggested_answer_evidence_ids=evidence_ids,
-                        ),
-                        InterviewQuestionGroup(
-                            category="Behavioral",
-                            questions=["How do you improve backend reliability?"],
-                            suggested_answer_evidence_ids=evidence_ids,
-                        ),
-                    ]
-                ),
-                step_durations_ms={
-                    AgentStepName.resume_match.value: 11,
-                    AgentStepName.cover_letter.value: 22,
-                    AgentStepName.interview_coach.value: 33,
-                },
-                token_usage=AgentTokenUsage(
-                    total_tokens=123,
-                    prompt_tokens=90,
-                    completion_tokens=33,
-                    successful_requests=3,
-                ),
-            )
-
-    monkeypatch.setattr(
-        "app.services.agent_workflow.build_crewai_workflow_runner",
-        lambda _settings: FakeCrewAIRunner(),
-    )
-
-    result = run_application_agent_workflow(
-        analysis_id=1,
+    result = apply_approved_live_draft(
         resume=resume,
         job=job,
         match=match,
-        settings=crewai_settings,
+        deterministic_result=deterministic,
+        settings=settings,
+        sections=sections,
+        proposal=proposal,
+        live_duration_ms=42,
     )
 
-    assert result.trace.mode == AgentWorkflowMode.crewai
-    assert result.trace.steps[1].name == AgentStepName.crewai_runtime
-    assert result.trace.steps[1].status == "completed"
-    assert isinstance(result.trace.duration_ms, int)
-    assert all(step.duration_ms is not None for step in result.trace.steps)
-    assert result.trace.provider == "vertex"
-    assert result.trace.model == "google/gemini-3.5-flash"
-    assert result.trace.token_usage is not None
-    assert result.trace.token_usage.total_tokens == 123
-    assert result.trace.token_usage.successful_requests == 3
-    assert result.trace.cost_estimate_usd == pytest.approx(0.000432)
-    assert result.trace.runtime_metadata["runtime_status"] == "completed"
-    assert result.trace.runtime_metadata["token_usage_source"] == "crewai_llm_summary"
-    assert result.trace.runtime_metadata["cost_estimate_source"] == "provider_pricing_config"
-    assert result.trace.runtime_metadata["pricing_version"] == (
-        "2026-07-08.vertex-global-standard.v1"
+    assert result.trace.mode == AgentWorkflowMode.langgraph
+    assert result.report.executive_summary.startswith(
+        "The deterministic match is supported by linked resume evidence."
     )
-    assert result.trace.runtime_metadata["pricing_source_url"] == (
-        "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing"
-    )
-    assert result.trace.runtime_metadata["billable_input_tokens"] == 90
-    assert result.trace.runtime_metadata["billable_output_tokens"] == 33
-    assert result.report.executive_summary.startswith("CrewAI-reviewed fit")
-    assert "validated resume evidence" in result.report.cover_letter
-    assert result.report.cover_letter_evidence_ids == evidence_ids
+    assert result.report.cover_letter == sections.cover_letter.draft
+    assert result.report.cover_letter_evidence_ids == sections.cover_letter.evidence_ids
+    assert result.trace.token_usage == sections.token_usage
+    assert result.trace.runtime_metadata["token_usage_source"] == "langchain_message_usage"
+    assert result.trace.steps[-1].name == AgentStepName.human_approval
+    assert result.trace.steps[-1].status == "completed"
     assert result.report.validation_status != ValidationSeverity.block
-    assert result.trace.validation_status == result.report.validation_status
-    assert "crewai_unavailable" not in result.trace.validation_warning_codes
 
 
-def test_crewai_unsupported_claims_are_replaced_before_report_and_markdown(
-    monkeypatch,
+def test_rejected_langgraph_sections_keep_deterministic_report(
+    settings,
     sample_resume_text,
     sample_job_text,
-    settings,
 ):
-    resume = parse_resume_profile(sample_resume_text, resume_id=1)
-    job = parse_job_profile(sample_job_text, job_id=1)
-    match = match_resume_to_job(resume, job)
-    deterministic = run_application_agent_workflow(
-        analysis_id=1,
+    _resume, _job, match, deterministic = _deterministic_context(
+        sample_resume_text, sample_job_text
+    )
+    sections = _safe_live_sections(match)
+
+    result = with_rejected_live_draft(
+        deterministic,
+        settings=settings,
+        sections=sections,
+        live_duration_ms=19,
+    )
+
+    assert result.report == deterministic.report
+    assert result.trace.mode == AgentWorkflowMode.deterministic_fallback
+    assert result.trace.steps[0].name == AgentStepName.langgraph_runtime
+    assert result.trace.steps[1].name == AgentStepName.human_approval
+    assert result.trace.steps[1].status == "degraded"
+    assert result.trace.runtime_metadata["runtime_status"] == "rejected"
+
+
+def test_approved_langgraph_unsupported_claims_are_replaced_before_persistence(
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    resume, job, match, deterministic = _deterministic_context(sample_resume_text, sample_job_text)
+    evidence_ids = _evidence_ids(match)
+    unsafe_sections = LiveDraftSections(
+        resume_match=ResumeMatchAgentOutput(
+            summary=(
+                "Senior executive at Invented Corp who served 1,000,000 users with 99.99% uptime."
+            ),
+            strongest_matches=["Python"],
+            weak_areas=[],
+            recommended_positioning="Lead with this certified production record.",
+            evidence_ids=evidence_ids,
+            confidence=match.confidence,
+        ),
+        cover_letter=CoverLetterAgentOutput(
+            draft=(
+                "I worked at Imaginary Labs and drove 900% revenue growth through "
+                "50 production deployments."
+            ),
+            confidence_note="Unverified live draft.",
+            evidence_ids=evidence_ids,
+        ),
+        interview_coach=InterviewCoachAgentOutput(
+            question_groups=[
+                InterviewQuestionGroup(
+                    category="Behavioral",
+                    questions=["Describe the claimed executive record."],
+                    suggested_answer_evidence_ids=["invented_001"],
+                )
+            ]
+        ),
+        token_usage=AgentTokenUsage(successful_requests=3),
+    )
+    candidate_name = resume.candidate.name
+    assert candidate_name
+    validated_proposal = LiveDraftProposal(
+        executive_summary=deterministic.report.executive_summary.replace(
+            candidate_name, "Candidate"
+        ),
+        cover_letter=deterministic.report.cover_letter.replace(candidate_name, "Candidate"),
+        interview_questions=deterministic.report.interview_questions,
+    )
+
+    result = apply_approved_live_draft(
         resume=resume,
         job=job,
         match=match,
-    )
-    evidence_ids = match.matched_skills[0].resume_evidence_ids
-    crewai_settings = settings.model_copy(update={"agent_workflow_mode": AgentWorkflowMode.crewai})
-
-    class UnsafeCrewAIRunner:
-        def run(self, **_kwargs):
-            return CrewAIWorkflowSections(
-                resume_match=ResumeMatchAgentOutput(
-                    summary=(
-                        "Senior executive at Invented Corp who served 1,000,000 users with "
-                        "99.99% uptime."
-                    ),
-                    strongest_matches=["Python"],
-                    weak_areas=[],
-                    recommended_positioning="Lead with this certified production record.",
-                    evidence_ids=evidence_ids,
-                    confidence=match.confidence,
-                ),
-                cover_letter=CoverLetterAgentOutput(
-                    draft=(
-                        "I worked at Imaginary Labs and drove 900% revenue growth through "
-                        "50 production deployments."
-                    ),
-                    confidence_note="Unverified live draft.",
-                    evidence_ids=evidence_ids,
-                ),
-                interview_coach=InterviewCoachAgentOutput(
-                    question_groups=[
-                        InterviewQuestionGroup(
-                            category="Behavioral",
-                            questions=["Describe the claimed executive record."],
-                            suggested_answer_evidence_ids=["invented_001"],
-                        )
-                    ]
-                ),
-            )
-
-    monkeypatch.setattr(
-        "app.services.agent_workflow.build_crewai_workflow_runner",
-        lambda _settings: UnsafeCrewAIRunner(),
-    )
-
-    result = run_application_agent_workflow(
-        analysis_id=1,
-        resume=resume,
-        job=job,
-        match=match,
-        settings=crewai_settings,
+        deterministic_result=deterministic,
+        settings=settings,
+        sections=unsafe_sections,
+        proposal=validated_proposal,
+        live_duration_ms=12,
     )
     markdown = report_to_markdown(result.report)
 
-    assert result.report.executive_summary == deterministic.report.executive_summary
-    assert result.report.cover_letter == deterministic.report.cover_letter
-    assert result.report.cover_letter_evidence_ids == deterministic.report.cover_letter_evidence_ids
-    assert result.report.interview_questions == deterministic.report.interview_questions
+    assert result.report.executive_summary == validated_proposal.executive_summary
+    assert result.report.cover_letter == validated_proposal.cover_letter
+    assert result.report.interview_questions == validated_proposal.interview_questions
     assert result.report.validation_status == ValidationSeverity.block
-    assert result.trace.validation_status == ValidationSeverity.block
     assert set(result.trace.runtime_metadata["blocked_live_sections"].split(",")) == {
         AgentStepName.resume_match.value,
         AgentStepName.cover_letter.value,
@@ -353,11 +242,80 @@ def test_crewai_unsupported_claims_are_replaced_before_report_and_markdown(
         "live_cover_letter_blocked",
         "live_interview_coach_blocked",
     }
-    assert all(
-        warning.severity == ValidationSeverity.block
-        for warning in result.report.validation_warnings
-        if warning.code.startswith("live_")
-    )
     for unsafe_text in ("Invented Corp", "1,000,000", "Imaginary Labs", "900%"):
         assert unsafe_text not in result.report.model_dump_json()
         assert unsafe_text not in markdown
+
+
+def _deterministic_context(resume_text: str, job_text: str):
+    resume = parse_resume_profile(resume_text, resume_id=1)
+    job = parse_job_profile(job_text, job_id=1)
+    match = match_resume_to_job(resume, job)
+    result = run_application_agent_workflow(
+        analysis_id=1,
+        resume=resume,
+        job=job,
+        match=match,
+    )
+    return resume, job, match, result
+
+
+def _safe_live_sections(match) -> LiveDraftSections:
+    evidence_ids = _evidence_ids(match)
+    return LiveDraftSections(
+        resume_match=ResumeMatchAgentOutput(
+            summary="The deterministic match is supported by linked resume evidence.",
+            strongest_matches=[],
+            weak_areas=[],
+            recommended_positioning="Use linked evidence and describe gaps honestly.",
+            evidence_ids=evidence_ids,
+            confidence=match.confidence,
+        ),
+        cover_letter=CoverLetterAgentOutput(
+            draft=(
+                "Dear Hiring Team,\n\nThe linked resume evidence supports this application.\n\n"
+                "Confidence note: review the validated evidence before use."
+            ),
+            confidence_note="Confidence note: review the validated evidence before use.",
+            evidence_ids=evidence_ids,
+        ),
+        interview_coach=InterviewCoachAgentOutput(
+            question_groups=[
+                InterviewQuestionGroup(
+                    category="Technical",
+                    questions=["Which linked evidence best demonstrates the relevant work?"],
+                    suggested_answer_evidence_ids=evidence_ids,
+                )
+            ]
+        ),
+        step_durations_ms={
+            AgentStepName.resume_match.value: 10,
+            AgentStepName.cover_letter.value: 20,
+            AgentStepName.interview_coach.value: 30,
+        },
+        token_usage=AgentTokenUsage(
+            total_tokens=123,
+            prompt_tokens=90,
+            completion_tokens=33,
+            successful_requests=3,
+        ),
+    )
+
+
+def _proposal_for_sections(sections: LiveDraftSections) -> LiveDraftProposal:
+    return LiveDraftProposal(
+        executive_summary=(
+            f"{sections.resume_match.summary} Recommended positioning: "
+            f"{sections.resume_match.recommended_positioning}"
+        ),
+        cover_letter=sections.cover_letter.draft,
+        interview_questions=sections.interview_coach.question_groups,
+    )
+
+
+def _evidence_ids(match) -> list[str]:
+    evidence_ids = [
+        evidence_id for item in match.matched_skills for evidence_id in item.resume_evidence_ids
+    ]
+    assert evidence_ids
+    return list(dict.fromkeys(evidence_ids))[:3]

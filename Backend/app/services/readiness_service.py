@@ -27,6 +27,7 @@ def check_application_readiness(engine: Engine, settings: Settings) -> Readiness
     checks = [
         _check_database_connection(engine),
         _check_migration_state(engine, settings),
+        _check_langgraph_checkpointer(engine),
     ]
     status = "ok" if all(check.status in {"ok", "skipped"} for check in checks) else "failed"
     return ReadinessResult(status=status, checks=checks)
@@ -79,6 +80,51 @@ def _check_migration_state(engine: Engine, settings: Settings) -> ReadinessCheck
         name="migrations",
         status="failed",
         detail=f"Database revision {current} does not match Alembic head {expected}.",
+    )
+
+
+def _check_langgraph_checkpointer(engine: Engine) -> ReadinessCheck:
+    if engine.dialect.name != "postgresql":
+        return ReadinessCheck(
+            name="langgraph_checkpointer",
+            status="skipped",
+            detail="PostgreSQL LangGraph checkpoints are not used by this environment.",
+        )
+    required_tables = {
+        "checkpoint_migrations",
+        "checkpoints",
+        "checkpoint_blobs",
+        "checkpoint_writes",
+    }
+    try:
+        with engine.connect() as connection:
+            present = {
+                str(row[0])
+                for row in connection.execute(
+                    text(
+                        "SELECT tablename FROM pg_catalog.pg_tables "
+                        "WHERE schemaname = current_schema() AND tablename = ANY(:tables)"
+                    ),
+                    {"tables": sorted(required_tables)},
+                )
+            }
+    except Exception:
+        return ReadinessCheck(
+            name="langgraph_checkpointer",
+            status="failed",
+            detail="LangGraph checkpoint schema could not be verified.",
+        )
+    missing = sorted(required_tables - present)
+    if missing:
+        return ReadinessCheck(
+            name="langgraph_checkpointer",
+            status="failed",
+            detail=f"LangGraph checkpoint tables are missing: {', '.join(missing)}.",
+        )
+    return ReadinessCheck(
+        name="langgraph_checkpointer",
+        status="ok",
+        detail="LangGraph PostgreSQL checkpoint schema is ready.",
     )
 
 

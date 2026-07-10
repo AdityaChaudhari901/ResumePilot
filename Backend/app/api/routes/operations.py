@@ -1,18 +1,24 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db, get_settings
 from app.core.config import Settings
 from app.schemas.auth import CurrentUser
-from app.schemas.operation import WorkflowJobListResponse, WorkflowJobResponse
+from app.schemas.operation import (
+    WorkflowApprovalDecisionRequest,
+    WorkflowJobListResponse,
+    WorkflowJobResponse,
+)
 from app.services.workflow_job_service import (
     cancel_workflow_job,
     get_workflow_job,
     get_workflow_job_artifact,
     list_workflow_jobs,
+    submit_workflow_approval,
+    workflow_job_response,
 )
 
 router = APIRouter(prefix="/operations", tags=["operations"])
@@ -40,9 +46,37 @@ def read_operation(
 def cancel_operation(
     operation_id: str,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> WorkflowJobResponse:
-    return cancel_workflow_job(db, operation_id, current_user)
+    return cancel_workflow_job(db, operation_id, current_user, settings=settings)
+
+
+@router.post(
+    "/{operation_id}/approval",
+    response_model=WorkflowJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def approve_operation(
+    operation_id: str,
+    request: WorkflowApprovalDecisionRequest,
+    response: Response,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> WorkflowJobResponse:
+    operation = submit_workflow_approval(
+        db,
+        operation_id,
+        request,
+        current_user,
+        idempotency_key=idempotency_key,
+        settings=settings,
+    )
+    response.headers["Location"] = f"/operations/{operation.id}"
+    response.headers["Retry-After"] = "1"
+    return workflow_job_response(operation)
 
 
 @router.get("/{operation_id}/artifact")

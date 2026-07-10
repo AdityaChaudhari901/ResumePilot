@@ -10,17 +10,27 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Barrier
+from typing import TypedDict
 from uuid import uuid4
 
 import sqlalchemy as sa
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 from sqlalchemy.engine import URL, Engine, make_url
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import Settings
 from app.db.models import UsageEventRecord, UserRecord, WorkflowJobRecord
 from app.repositories.workflow_jobs import WorkflowJobRepository
+from app.services.langgraph_checkpointer import (
+    close_workflow_checkpointers,
+    open_workflow_checkpointer,
+    reconcile_terminal_workflow_checkpoints,
+    setup_postgres_checkpointer,
+)
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 BASELINE_REVISION = "20260709_0007"
@@ -71,6 +81,12 @@ SEEDED_IDS = {
 }
 
 
+class _CheckpointGateState(TypedDict, total=False):
+    generation_count: int
+    proposal_revision: str
+    approval_decision: str
+
+
 def main() -> None:
     admin_url = _postgres_url(os.environ.get("POSTGRES_ADMIN_URL", ""))
     fresh_url = _database_url(admin_url, FRESH_DATABASE_NAME)
@@ -78,26 +94,31 @@ def main() -> None:
 
     _recreate_database(admin_url, FRESH_DATABASE_NAME)
     _run_alembic(fresh_url, "upgrade", "head")
+    _setup_langgraph(fresh_url)
     _run_alembic(fresh_url, "check")
     _verify_head_schema(fresh_url, expect_seed=False)
     _verify_postgres_job_claiming(fresh_url)
+    _verify_langgraph_interrupt_resume(fresh_url)
 
     _recreate_database(admin_url, UPGRADE_DATABASE_NAME)
     _run_alembic(upgrade_url, "upgrade", BASELINE_REVISION)
     _seed_prior_release(upgrade_url)
     _run_alembic(upgrade_url, "upgrade", "head")
+    _setup_langgraph(upgrade_url)
     _run_alembic(upgrade_url, "check")
     _verify_head_schema(upgrade_url, expect_seed=True)
 
     _run_alembic(upgrade_url, "downgrade", BASELINE_REVISION)
     _verify_baseline_round_trip(upgrade_url)
     _run_alembic(upgrade_url, "upgrade", "head")
+    _setup_langgraph(upgrade_url)
     _run_alembic(upgrade_url, "check")
     _verify_head_schema(upgrade_url, expect_seed=True)
 
     print(
         "PostgreSQL migration gate passed: fresh upgrade, prior-release upgrade, "
-        "schema drift check, seed preservation, sequence advancement, and downgrade round trip."
+        "schema drift check, durable LangGraph interrupt/resume, seed preservation, "
+        "sequence advancement, and downgrade round trip."
     )
 
 
@@ -138,6 +159,101 @@ def _run_alembic(database_url: str, command: str, revision: str | None = None) -
         }
     )
     subprocess.run(arguments, cwd=BACKEND_ROOT, env=environment, check=True)
+
+
+def _setup_langgraph(database_url: str) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_URL=database_url)
+    setup_postgres_checkpointer(settings)
+    setup_postgres_checkpointer(settings)
+    engine = sa.create_engine(database_url)
+    try:
+        tables = set(sa.inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
+    required = {
+        "checkpoint_migrations",
+        "checkpoints",
+        "checkpoint_blobs",
+        "checkpoint_writes",
+    }
+    missing = required - tables
+    if missing:
+        raise AssertionError(f"LangGraph checkpoint tables missing: {sorted(missing)}")
+
+
+def _verify_langgraph_interrupt_resume(database_url: str) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_URL=database_url)
+    thread_id = str(uuid4())
+
+    with open_workflow_checkpointer(settings) as checkpointer:
+        graph = _checkpoint_gate_graph(checkpointer)
+        paused = graph.invoke(
+            {"generation_count": 0},
+            config={"configurable": {"thread_id": thread_id}},
+        )
+    if not paused.get("__interrupt__") or paused.get("generation_count") != 1:
+        raise AssertionError("LangGraph did not persist the expected approval interrupt")
+
+    close_workflow_checkpointers()
+    with open_workflow_checkpointer(settings) as checkpointer:
+        graph = _checkpoint_gate_graph(checkpointer)
+        resumed = graph.invoke(
+            Command(
+                resume={
+                    "decision": "approve",
+                    "proposal_revision": paused["proposal_revision"],
+                }
+            ),
+            config={"configurable": {"thread_id": thread_id}},
+        )
+    if resumed.get("approval_decision") != "approve":
+        raise AssertionError("LangGraph approval did not resume after reopening PostgreSQL")
+    if resumed.get("generation_count") != 1:
+        raise AssertionError("LangGraph reran a completed generation node during resume")
+
+    reconciled = reconcile_terminal_workflow_checkpoints(settings)
+    if reconciled < 1:
+        raise AssertionError("LangGraph orphan checkpoint reconciliation found no test thread")
+    close_workflow_checkpointers()
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+                count = connection.scalar(
+                    sa.text(f"SELECT COUNT(*) FROM {table} WHERE thread_id = :thread_id"),
+                    {"thread_id": thread_id},
+                )
+                if count:
+                    raise AssertionError(f"LangGraph checkpoint cleanup left rows in {table}")
+    finally:
+        engine.dispose()
+
+
+def _checkpoint_gate_graph(checkpointer):
+    def generate(state: _CheckpointGateState) -> _CheckpointGateState:
+        return {
+            "generation_count": state.get("generation_count", 0) + 1,
+            "proposal_revision": "gate-proposal-v1",
+        }
+
+    def await_approval(state: _CheckpointGateState) -> _CheckpointGateState:
+        response = interrupt(
+            {
+                "proposal_revision": state["proposal_revision"],
+                "kind": "migration_gate_approval",
+            }
+        )
+        if response.get("proposal_revision") != state["proposal_revision"]:
+            raise ValueError("Approval revision mismatch in PostgreSQL migration gate")
+        return {"approval_decision": str(response["decision"])}
+
+    builder = StateGraph(_CheckpointGateState)
+    builder.add_node("generate", generate)
+    builder.add_node("await_approval", await_approval)
+    builder.add_edge(START, "generate")
+    builder.add_edge("generate", "await_approval")
+    builder.add_edge("await_approval", END)
+    return builder.compile(checkpointer=checkpointer)
 
 
 def _seed_prior_release(database_url: str) -> None:

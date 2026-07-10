@@ -15,7 +15,7 @@ interface UsageStatusCardProps {
 const metricLabels: Record<UsageLimitMetric, string> = {
   analyses: "Analysis runs",
   exports: "Exports",
-  crewai_runs: "Live CrewAI runs"
+  live_ai_runs: "Live AI runs"
 };
 
 export function UsageStatusCard({ usage }: UsageStatusCardProps) {
@@ -32,8 +32,8 @@ export function UsageStatusCard({ usage }: UsageStatusCardProps) {
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Badge tone="primary">{planLabel}</Badge>
-              <Badge tone={usage?.live_crewai_enabled ? "success" : "neutral"}>
-                {usage?.live_crewai_enabled ? "live CrewAI allowed" : "fallback mode"}
+              <Badge tone={usage?.live_ai_enabled ? "success" : "neutral"}>
+                {usage?.live_ai_enabled ? "live AI allowed" : "fallback mode"}
               </Badge>
             </div>
           </div>

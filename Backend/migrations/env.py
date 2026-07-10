@@ -16,6 +16,15 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+LANGGRAPH_CHECKPOINT_TABLES = frozenset(
+    {
+        "checkpoint_migrations",
+        "checkpoints",
+        "checkpoint_blobs",
+        "checkpoint_writes",
+    }
+)
+
 
 def get_url() -> str:
     return get_cached_settings().database_url
@@ -27,10 +36,29 @@ def ensure_sqlite_parent_dir(database_url: str) -> None:
         Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
 
+def include_application_object(
+    object_,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to,
+) -> bool:
+    """Keep package-owned LangGraph tables outside Alembic's ownership boundary."""
+
+    del compare_to
+    if not reflected:
+        return True
+    if type_ == "table" and name in LANGGRAPH_CHECKPOINT_TABLES:
+        return False
+    table = getattr(object_, "table", None)
+    return getattr(table, "name", None) not in LANGGRAPH_CHECKPOINT_TABLES
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=get_url(),
         target_metadata=target_metadata,
+        include_object=include_application_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -50,7 +78,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_application_object,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

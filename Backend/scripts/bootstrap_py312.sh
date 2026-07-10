@@ -4,8 +4,8 @@ set -euo pipefail
 BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3.12}"
 VENV_DIR="${VENV_DIR:-.venv}"
-INSTALL_EXTRAS="${INSTALL_EXTRAS:-dev,ai}"
-CONSTRAINTS_FILE="${CONSTRAINTS_FILE:-requirements/py312-dev-ai.constraints.txt}"
+INSTALL_EXTRAS="${INSTALL_EXTRAS:-dev}"
+CONSTRAINTS_FILE="${CONSTRAINTS_FILE:-requirements/py312-dev.constraints.txt}"
 RECREATE=0
 
 usage() {
@@ -18,8 +18,8 @@ pinned ResumePilot dependency constraints.
 Environment overrides:
   PYTHON_BIN        Python executable to use. Default: python3.12
   VENV_DIR          Virtualenv path relative to Backend/. Default: .venv
-  INSTALL_EXTRAS    Editable install extras. Default: dev,ai
-  CONSTRAINTS_FILE  Constraints file. Default: requirements/py312-dev-ai.constraints.txt
+  INSTALL_EXTRAS    Editable install extras. Default: dev
+  CONSTRAINTS_FILE  Constraints file. Default: requirements/py312-dev.constraints.txt
 
 Examples:
   scripts/bootstrap_py312.sh

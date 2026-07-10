@@ -1,6 +1,6 @@
 # ResumePilot
 
-ResumePilot is an evidence-backed job application copilot built from the CrewAI Job Application Copilot MVP docs. The backend keeps deterministic resume parsing, job parsing, skill matching, and validation as the source of truth. The agent workflow supports the default deterministic fallback plus an optional live CrewAI mode for bounded, schema-driven explanation and drafting.
+ResumePilot is an evidence-backed job application copilot built from the original Job Application Copilot MVP docs. Deterministic resume parsing, job parsing, matching, and claim validation remain the source of truth. Eligible users can request live drafting through a LangGraph workflow that runs LangChain model calls inside graph nodes and pauses for approval before applying generated text.
 
 ## Current MVP Slice
 
@@ -13,9 +13,10 @@ ResumePilot is an evidence-backed job application copilot built from the CrewAI 
   heartbeats, retries, cancellation, progress, and dead-letter visibility.
 - Optional Playwright Chromium fallback for JavaScript-rendered public job pages.
 - Deterministic skill matching and report generation.
-- CrewAI-ready agent workflow boundary with deterministic fallback.
-- Optional live CrewAI structured-output agents for fit explanation, cover letter drafting, and interview coaching.
-- Persisted workflow trace metadata for deterministic fallback versus live CrewAI execution, including latency, provider/model, token usage when exposed by CrewAI, and cost estimates when configured provider pricing matches the trace.
+- LangGraph live-draft workflow with PostgreSQL checkpoints and deterministic fallback.
+- LangChain structured-output calls inside bounded fit, cover-letter, and interview nodes.
+- Durable `waiting_for_approval` operations that resume after an idempotent tenant-owned decision.
+- Persisted workflow traces with step latency, provider/model, token usage, approval outcome, and configured provider cost estimates.
 - Evidence-backed ATS, cover letter, and interview-prep sections.
 - Validation gate for bullets, matched skills, cover letters, supported keywords, and interview evidence IDs.
 - Tenant-scoped tailored resume draft workspace for accepting/rejecting generated bullets before final export.
@@ -42,7 +43,7 @@ Open Swagger UI at `http://127.0.0.1:8000/docs`.
 optionally verifies that the database revision matches Alembic head.
 
 The backend runtime is pinned to Python `>=3.12,<3.14`. The bootstrap script uses
-`requirements/py312-dev-ai.constraints.txt` so the local dev and live CrewAI
+`requirements/py312-dev.constraints.txt` so the local and production-compatible
 dependency graph stays reproducible.
 
 PDF export requires a local LaTeX compiler. `tectonic` is preferred because the
@@ -96,39 +97,47 @@ mode, or disabled migration readiness checks. Production schema changes must go
 through Alembic:
 
 ```bash
-alembic upgrade head
+python scripts/migrate_runtime.py
 ```
 
 The repository includes a root `docker-compose.yml` with PostgreSQL, one-shot
 migrations, separate FastAPI API and worker roles, and Next.js. See
 `../Docs/DEPLOYMENT.md`.
 
-## Optional Live CrewAI Mode
+## Optional Live LangGraph Mode
 
-The default bootstrap installs the `dev` and `ai` extras. To run the install
+The default bootstrap installs the backend and `dev` extra. To run the install
 manually, use Python 3.12 with the pinned constraints:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev,ai]" -c requirements/py312-dev-ai.constraints.txt
+python -m pip install -e ".[dev]" -c requirements/py312-dev.constraints.txt
 ```
-
-The `ai` extra installs CrewAI with the native Google Gen AI provider used by the
-`google/` model prefix.
 
 Then set:
 
 ```env
-AGENT_WORKFLOW_MODE=crewai
+AGENT_WORKFLOW_MODE=langgraph
 LLM_PROVIDER=vertex
-VERTEX_PROJECT_ID=alien-slice-499511-f8
+VERTEX_PROJECT_ID=your-google-cloud-project
 VERTEX_REGION=global
 LLM_MODEL=gemini-3.5-flash
-CREWAI_LLM_MODEL=google/gemini-3.5-flash
+LLM_TIMEOUT_SECONDS=60
+LLM_TEMPERATURE=0.2
+LLM_MAX_RETRIES=2
+LANGGRAPH_STRICT_MSGPACK=true
+LANGSMITH_TRACING=false
+WORKFLOW_CHECKPOINT_RECONCILE_SECONDS=60
 ```
 
-If CrewAI or the provider runtime is unavailable, the API returns the deterministic fallback report and adds a `crewai_unavailable` validation warning instead of failing the analysis request.
+Live drafting also requires a premium-plan user and per-analysis consent. The worker creates a validated proposal, changes the operation to `waiting_for_approval`, and releases its lease. `POST /operations/{operation_id}/approval` resumes the same checkpoint. Approval applies the proposal; rejection keeps the deterministic report. Provider or graph failures return the deterministic report with a `langgraph_unavailable` warning.
+
+Provider calls are at-least-once across the narrow crash window between a Vertex
+response and the node checkpoint commit. Completed checkpointed nodes are not
+replayed. Normal terminal paths delete checkpoints directly; the worker also
+removes orphan and terminal threads at startup and on the configured reconciliation
+interval.
 
 ## Useful Commands
 
@@ -155,7 +164,7 @@ file with the `dev` extra only. It intentionally stays deterministic and
 secret-free:
 
 ```bash
-python -m pip install -e ".[dev]" -c requirements/py312-dev-ai.constraints.txt
+python -m pip install -e ".[dev]" -c requirements/py312-dev.constraints.txt
 ruff format app tests scripts migrations --check
 ruff check .
 pytest
@@ -165,17 +174,14 @@ python scripts/run_backend_quality_gate.py
 ```
 
 The job uploads `evals/outputs/backend_quality_gate.json` as a short-retention
-artifact. Live CrewAI/Vertex checks remain local/manual because they require
+artifact. Live LangGraph/Vertex checks remain local/manual because they require
 provider credentials and networked model calls.
 
-The default production Docker image installs the hash-locked deterministic
-runtime from `requirements/py312-production.lock.txt`. It excludes the optional
-CrewAI dependency tree because CrewAI 1.15.2 still constrains ChromaDB to the
-affected 1.1.x line for `CVE-2026-45829`; the fixed ChromaDB 1.5.9 release is
-outside that compatibility range. `AGENT_WORKFLOW_MODE=crewai` therefore falls
-back to the deterministic workflow in that image. Keep live CrewAI in an
-isolated runtime until CrewAI supports the patched ChromaDB line, and never
-expose the bundled ChromaDB server.
+The production image installs the hash-locked LangGraph/LangChain runtime from
+`requirements/py312-production.lock.txt`. The one-shot migration service runs
+Alembic and `PostgresSaver.setup()` before the API and worker start. Attach a
+least-privilege Google service account or Workload Identity for live Vertex
+calls; do not bake credential JSON into the image.
 
 ## API Surface
 
@@ -197,6 +203,7 @@ expose the bundled ChromaDB server.
 - `GET /operations`
 - `GET /operations/{operation_id}`
 - `POST /operations/{operation_id}/cancel`
+- `POST /operations/{operation_id}/approval`
 - `GET /operations/{operation_id}/artifact`
 - `GET /reports/{report_id}`
 - `POST /reports/{report_id}/markdown`
@@ -240,8 +247,8 @@ Authorization: Bearer <JOBCOPILOT_API_TOKEN>
 
 `GET /reports/{report_id}/trace` returns the workflow mode, step statuses,
 step summaries, validation warning codes, and optional `duration_ms` timings for
-the full workflow and each step. Live CrewAI traces also include provider/model
-metadata, optional token usage from CrewAI's LLM summary, `cost_estimate_usd`
+the full workflow and each step. Live LangGraph traces also include the human
+approval outcome, provider/model metadata, LangChain message token usage, `cost_estimate_usd`
 when a matching rate exists in `app/data/provider_pricing.json`, and runtime
 metadata describing the pricing source. Older persisted traces without these
 optional fields remain valid.
@@ -259,7 +266,7 @@ The deterministic matcher and validator are the source of truth. Generated outpu
 ## Project Boundaries
 
 - `app/api` contains HTTP routes and dependencies only.
-- `app/services` contains deterministic parsing, matching, optional CrewAI execution, report generation, and validation.
+- `app/services` contains deterministic parsing and matching, LangGraph orchestration, LangChain model nodes, report generation, and validation.
 - `app/schemas/agent.py` defines structured agent workflow output contracts.
 - `app/repositories` owns persistence operations.
 - `app/data/skill_dictionary.json` owns the deterministic skill dictionary.

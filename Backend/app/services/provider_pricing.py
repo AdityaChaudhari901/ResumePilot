@@ -47,7 +47,7 @@ def estimate_provider_cost(
     """Estimate provider cost from configured pricing and reported token usage.
 
     The function returns no estimate unless provider/model/region match a configured
-    rate and CrewAI exposed enough token detail to separate input from output tokens.
+    rate and the LangChain provider message exposes input/output token details.
     """
 
     if token_usage is None:

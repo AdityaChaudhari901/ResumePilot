@@ -65,10 +65,8 @@ GitHub Actions runs `.github/workflows/ci.yml` on pushes and pull requests to
   security-header assertions, WCAG A/AA checks, and retained failure evidence.
 - Deployment job: Compose validation plus backend/frontend container builds.
 
-Live Vertex/CrewAI smokes remain local/manual because CI has no provider secret.
-The default production image excludes the CrewAI/ChromaDB dependency tree because
-CrewAI 1.15.2 constrains ChromaDB to the affected 1.1.x line; patched ChromaDB
-1.5.9 is outside that compatibility range.
+Live Vertex approval smokes remain local because CI has no provider credentials.
+The production image includes the hash-locked LangGraph, LangChain, Google GenAI,
+and PostgreSQL checkpointer runtime. CrewAI and ChromaDB are absent.
 
-The backend runtime is standardized on Python 3.12 because live CrewAI execution
-does not currently support Python 3.14.
+The backend runtime uses Python 3.12 across local, CI, and production environments.

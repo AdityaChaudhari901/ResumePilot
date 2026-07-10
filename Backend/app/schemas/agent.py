@@ -14,11 +14,16 @@ from app.schemas.report import (
 
 class AgentWorkflowMode(StrEnum):
     deterministic_fallback = "deterministic_fallback"
+    langgraph = "langgraph"
+    # Historical reports may still contain this value. It is not an active runtime mode.
     crewai = "crewai"
 
 
 class AgentStepName(StrEnum):
     jd_parser = "jd_parser"
+    langgraph_runtime = "langgraph_runtime"
+    human_approval = "human_approval"
+    # Historical traces may still contain this value.
     crewai_runtime = "crewai_runtime"
     resume_match = "resume_match"
     ats_optimizer = "ats_optimizer"
@@ -67,6 +72,14 @@ class CoverLetterAgentOutput(StrictBaseModel):
 
 class InterviewCoachAgentOutput(StrictBaseModel):
     question_groups: list[InterviewQuestionGroup] = Field(min_length=1)
+
+
+class LiveDraftSections(StrictBaseModel):
+    resume_match: ResumeMatchAgentOutput
+    cover_letter: CoverLetterAgentOutput
+    interview_coach: InterviewCoachAgentOutput
+    step_durations_ms: dict[str, int] = Field(default_factory=dict)
+    token_usage: AgentTokenUsage | None = None
 
 
 class AgentWorkflowTrace(StrictBaseModel):

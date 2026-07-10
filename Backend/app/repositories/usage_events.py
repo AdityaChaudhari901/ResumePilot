@@ -15,6 +15,13 @@ class UsageEventRepository:
         self.db.flush()
         return record
 
+    def get_by_reservation_key(self, reservation_key: str) -> UsageEventRecord | None:
+        return self.db.scalar(
+            select(UsageEventRecord)
+            .where(UsageEventRecord.reservation_key == reservation_key)
+            .limit(1)
+        )
+
     def quantity_sum(
         self,
         *,

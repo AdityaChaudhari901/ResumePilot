@@ -57,11 +57,32 @@ export type WorkflowOperationStatus =
   | "queued"
   | "running"
   | "retry_scheduled"
+  | "waiting_for_approval"
   | "cancel_requested"
   | "succeeded"
   | "canceled"
   | "failed"
   | "dead_lettered";
+
+export type WorkflowApprovalStatus = "pending" | "submitted" | "approved" | "rejected";
+export type WorkflowApprovalDecision = "approve" | "reject";
+
+export interface WorkflowApproval {
+  id: string;
+  kind: "live_ai_draft";
+  status: WorkflowApprovalStatus;
+  title: string;
+  message: string;
+  warning_codes: string[];
+  requested_at: string;
+  decision: WorkflowApprovalDecision | null;
+  decided_at: string | null;
+  proposal: {
+    executive_summary: string;
+    cover_letter: string;
+    interview_questions: InterviewQuestionGroup[];
+  };
+}
 
 export interface WorkflowOperation {
   id: string;
@@ -73,11 +94,17 @@ export interface WorkflowOperation {
   max_attempts: number;
   cancelable: boolean;
   result: JobAnalysisResponse | PdfExportResult | null;
+  approval: WorkflowApproval | null;
   error: { code: string; message: string } | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface WorkflowOperationListResponse {
+  items: WorkflowOperation[];
+  count: number;
 }
 
 export interface PdfExportResult {
@@ -210,11 +237,13 @@ export interface TailoredResumeItemUpdate {
   reset_edited_bullet?: boolean;
 }
 
-export type AgentWorkflowMode = "deterministic_fallback" | "crewai";
+export type AgentWorkflowMode = "deterministic_fallback" | "crewai" | "langgraph";
 
 export type AgentStepName =
   | "jd_parser"
   | "crewai_runtime"
+  | "langgraph_runtime"
+  | "human_approval"
   | "resume_match"
   | "ats_optimizer"
   | "cover_letter"
@@ -399,7 +428,7 @@ export interface OpenClawStatus {
   };
 }
 
-export type UsageLimitMetric = "analyses" | "exports" | "crewai_runs";
+export type UsageLimitMetric = "analyses" | "exports" | "live_ai_runs";
 
 export interface PlanLimit {
   metric: UsageLimitMetric;
@@ -417,7 +446,7 @@ export interface UsageSummaryResponse {
   current_period_end: string;
   limits: PlanLimit[];
   total_cost_estimate_usd: number;
-  live_crewai_enabled: boolean;
+  live_ai_enabled: boolean;
 }
 
 export type { AuthProvider };

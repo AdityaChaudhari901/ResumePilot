@@ -504,7 +504,9 @@ interface WorkflowTracePanelProps {
 
 const STEP_LABELS: Record<AgentStepName, string> = {
   jd_parser: "JD parser",
-  crewai_runtime: "CrewAI runtime",
+  crewai_runtime: "Live AI runtime",
+  langgraph_runtime: "LangGraph runtime",
+  human_approval: "Human approval",
   resume_match: "Resume match",
   ats_optimizer: "ATS optimizer",
   cover_letter: "Cover letter",
@@ -533,7 +535,7 @@ function WorkflowTracePanel({ trace }: WorkflowTracePanelProps) {
     >
       <summary className="flex cursor-pointer list-none flex-col gap-3 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-2">
-          {trace.mode === "crewai" ? (
+          {trace.mode !== "deterministic_fallback" ? (
             <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
           ) : (
             <GitBranch
@@ -652,11 +654,11 @@ function StepStatusIcon({ status }: { status: AgentStepStatus }) {
 }
 
 function workflowModeLabel(mode: AgentWorkflowMode): string {
-  return mode === "crewai" ? "Live CrewAI" : "Deterministic fallback";
+  return mode === "deterministic_fallback" ? "Deterministic fallback" : "Live AI workflow";
 }
 
 function workflowModeTone(mode: AgentWorkflowMode): "neutral" | "primary" {
-  return mode === "crewai" ? "primary" : "neutral";
+  return mode === "deterministic_fallback" ? "neutral" : "primary";
 }
 
 function stepStatusLabel(status: AgentStepStatus): string {

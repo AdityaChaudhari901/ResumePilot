@@ -13,6 +13,10 @@ from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.core.production import validate_production_settings
 from app.db.session import create_database_engine, create_session_factory
+from app.services.langgraph_checkpointer import (
+    close_workflow_checkpointers,
+    reconcile_terminal_workflow_checkpoints,
+)
 from app.services.workflow_job_service import execute_next_workflow_job
 
 LOGGER = logging.getLogger("resumepilot.worker")
@@ -37,24 +41,53 @@ def run_worker(*, once: bool = False) -> int:
     signal.signal(signal.SIGTERM, shutdown.request)
     signal.signal(signal.SIGINT, shutdown.request)
     LOGGER.info("workflow worker started", extra={"worker_id": worker_id})
+    reconciled = reconcile_terminal_workflow_checkpoints(settings)
+    LOGGER.info(
+        "workflow checkpoints reconciled",
+        extra={"worker_id": worker_id, "checkpoint_threads_deleted": reconciled},
+    )
+    last_checkpoint_reconcile = time.monotonic()
 
-    while not shutdown.requested:
-        with session_factory() as db:
-            record = execute_next_workflow_job(db, settings=settings, worker_id=worker_id)
-        if record is not None:
-            LOGGER.info(
-                "workflow job settled",
-                extra={
-                    "worker_id": worker_id,
-                    "workflow_job_id": record.id,
-                    "workflow_job_status": record.status,
-                    "workflow_job_kind": record.kind,
-                },
-            )
-        if once:
-            return 0
-        if record is None:
-            time.sleep(settings.workflow_worker_poll_seconds)
+    try:
+        while not shutdown.requested:
+            if (
+                time.monotonic() - last_checkpoint_reconcile
+                >= settings.workflow_checkpoint_reconcile_seconds
+            ):
+                try:
+                    reconciled = reconcile_terminal_workflow_checkpoints(settings)
+                    LOGGER.info(
+                        "workflow checkpoints reconciled",
+                        extra={
+                            "worker_id": worker_id,
+                            "checkpoint_threads_deleted": reconciled,
+                        },
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "workflow checkpoint reconciliation failed",
+                        extra={"worker_id": worker_id},
+                    )
+                last_checkpoint_reconcile = time.monotonic()
+            with session_factory() as db:
+                record = execute_next_workflow_job(db, settings=settings, worker_id=worker_id)
+            if record is not None:
+                LOGGER.info(
+                    "workflow job settled",
+                    extra={
+                        "worker_id": worker_id,
+                        "workflow_job_id": record.id,
+                        "workflow_job_status": record.status,
+                        "workflow_job_kind": record.kind,
+                    },
+                )
+            if once:
+                return 0
+            if record is None:
+                time.sleep(settings.workflow_worker_poll_seconds)
+    finally:
+        close_workflow_checkpointers()
+        engine.dispose()
 
     LOGGER.info("workflow worker stopped", extra={"worker_id": worker_id})
     return 0

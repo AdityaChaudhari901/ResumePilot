@@ -18,9 +18,25 @@ class WorkflowJobRepository:
             .limit(1)
         )
 
+    def get_for_update(self, job_id: str, *, user_id: int) -> WorkflowJobRecord | None:
+        return self.db.scalar(
+            select(WorkflowJobRecord)
+            .where(WorkflowJobRecord.id == job_id, WorkflowJobRecord.user_id == user_id)
+            .with_for_update()
+            .limit(1)
+        )
+
     def get_any(self, job_id: str) -> WorkflowJobRecord | None:
         return self.db.scalar(
             select(WorkflowJobRecord).where(WorkflowJobRecord.id == job_id).limit(1)
+        )
+
+    def get_any_for_update(self, job_id: str) -> WorkflowJobRecord | None:
+        return self.db.scalar(
+            select(WorkflowJobRecord)
+            .where(WorkflowJobRecord.id == job_id)
+            .with_for_update()
+            .limit(1)
         )
 
     def get_by_idempotency_key(

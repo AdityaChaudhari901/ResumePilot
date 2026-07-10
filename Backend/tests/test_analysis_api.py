@@ -2,16 +2,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db.models import UserRecord
-from app.schemas.agent import (
-    AgentStepName,
-    AgentTokenUsage,
-    AgentWorkflowMode,
-    CoverLetterAgentOutput,
-    InterviewCoachAgentOutput,
-    ResumeMatchAgentOutput,
-)
-from app.schemas.report import InterviewQuestionGroup
-from app.services.crewai_workflow import CrewAIWorkflowSections, CrewAIWorkflowUnavailable
+from app.schemas.agent import AgentStepName, AgentWorkflowMode
 from tests.api_helpers import successful_analysis
 
 
@@ -278,17 +269,21 @@ def test_upload_analyze_and_read_report(client, sample_resume_text, sample_job_t
     assert trace_body["trace"]["runtime_metadata"] == {}
 
 
-def test_crewai_fallback_trace_is_persisted(
+def test_langgraph_fallback_trace_is_persisted(
     client, monkeypatch, sample_resume_text, sample_job_text, settings
 ):
-    settings.agent_workflow_mode = AgentWorkflowMode.crewai
+    settings.agent_workflow_mode = AgentWorkflowMode.langgraph
 
-    def unavailable_runner(_settings):
-        raise CrewAIWorkflowUnavailable("CrewAI runtime unavailable in API test")
+    class UnavailableRunner:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self, **_kwargs):
+            raise RuntimeError("Private provider failure")
 
     monkeypatch.setattr(
-        "app.services.agent_workflow.build_crewai_workflow_runner",
-        unavailable_runner,
+        "app.services.workflow_job_service.LiveDraftGraphRunner",
+        UnavailableRunner,
     )
 
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text, plan="premium")
@@ -296,22 +291,23 @@ def test_crewai_fallback_trace_is_persisted(
     report_response = client.get(f"/reports/{body['report_id']}")
     assert report_response.status_code == 200
     warning_codes = [warning["code"] for warning in report_response.json()["validation_warnings"]]
-    assert "crewai_unavailable" in warning_codes
+    assert "langgraph_unavailable" in warning_codes
 
     trace_response = client.get(f"/reports/{body['report_id']}/trace")
     assert trace_response.status_code == 200
     trace = trace_response.json()["trace"]
     assert trace["mode"] == AgentWorkflowMode.deterministic_fallback
-    assert trace["steps"][0]["name"] == AgentStepName.crewai_runtime
+    assert trace["steps"][0]["name"] == AgentStepName.langgraph_runtime
     assert trace["steps"][0]["status"] == "failed"
-    assert isinstance(trace["steps"][0]["duration_ms"], int)
+    assert trace["steps"][0]["duration_ms"] is None
     assert isinstance(trace["duration_ms"], int)
     assert trace["provider"] == "vertex"
-    assert trace["model"] == "google/gemini-3.5-flash"
+    assert trace["model"] == "google_genai/gemini-3.5-flash"
     assert trace["token_usage"] is None
     assert trace["cost_estimate_usd"] is None
     assert trace["runtime_metadata"]["runtime_status"] == "failed"
-    assert "crewai_unavailable" in trace["validation_warning_codes"]
+    assert trace["runtime_metadata"]["workflow_runtime"] == "langgraph"
+    assert "langgraph_unavailable" in trace["validation_warning_codes"]
 
 
 def test_premium_plan_does_not_run_live_ai_without_per_analysis_consent(
@@ -321,14 +317,15 @@ def test_premium_plan_does_not_run_live_ai_without_per_analysis_consent(
     sample_job_text,
     settings,
 ):
-    settings.agent_workflow_mode = AgentWorkflowMode.crewai
+    settings.agent_workflow_mode = AgentWorkflowMode.langgraph
 
-    def unexpected_runner(_settings):
-        raise AssertionError("Live AI must not run without explicit analysis consent")
+    class UnexpectedRunner:
+        def __init__(self, **_kwargs):
+            raise AssertionError("Live AI must not run without explicit analysis consent")
 
     monkeypatch.setattr(
-        "app.services.agent_workflow.build_crewai_workflow_runner",
-        unexpected_runner,
+        "app.services.workflow_job_service.LiveDraftGraphRunner",
+        UnexpectedRunner,
     )
 
     body = _upload_and_analyze(
@@ -341,103 +338,9 @@ def test_premium_plan_does_not_run_live_ai_without_per_analysis_consent(
 
     trace = client.get(f"/reports/{body['report_id']}/trace").json()["trace"]
     usage = client.get("/usage/summary").json()
-    crewai_limit = next(item for item in usage["limits"] if item["metric"] == "crewai_runs")
+    live_ai_limit = next(item for item in usage["limits"] if item["metric"] == "live_ai_runs")
     assert trace["mode"] == AgentWorkflowMode.deterministic_fallback
-    assert crewai_limit["used"] == 0
-
-
-def test_crewai_success_trace_is_persisted(
-    client, monkeypatch, sample_resume_text, sample_job_text, settings
-):
-    settings.agent_workflow_mode = AgentWorkflowMode.crewai
-
-    class FakeCrewAIRunner:
-        def run(self, **kwargs):
-            match = kwargs["match"]
-            evidence_ids = match.matched_skills[0].resume_evidence_ids
-            return CrewAIWorkflowSections(
-                resume_match=ResumeMatchAgentOutput(
-                    summary="CrewAI-reviewed fit persisted through the API.",
-                    strongest_matches=["Python", "FastAPI"],
-                    weak_areas=[],
-                    recommended_positioning="Lead with backend API evidence.",
-                    evidence_ids=evidence_ids,
-                    confidence=match.confidence,
-                ),
-                cover_letter=CoverLetterAgentOutput(
-                    draft=(
-                        "Dear Hiring Team,\n\n"
-                        "I am interested in this backend role and would lead with validated "
-                        "Python and FastAPI evidence.\n\n"
-                        "Confidence note: this draft uses only validated resume evidence.\n\n"
-                        "Sincerely,\nAarav Sharma"
-                    ),
-                    confidence_note=(
-                        "Confidence note: this draft uses only validated resume evidence."
-                    ),
-                    evidence_ids=evidence_ids,
-                ),
-                interview_coach=InterviewCoachAgentOutput(
-                    question_groups=[
-                        InterviewQuestionGroup(
-                            category="Technical",
-                            questions=["How did you structure the FastAPI backend?"],
-                            suggested_answer_evidence_ids=evidence_ids,
-                        )
-                    ]
-                ),
-                token_usage=AgentTokenUsage(
-                    total_tokens=321,
-                    prompt_tokens=250,
-                    completion_tokens=71,
-                    successful_requests=3,
-                ),
-            )
-
-    monkeypatch.setattr(
-        "app.services.agent_workflow.build_crewai_workflow_runner",
-        lambda _settings: FakeCrewAIRunner(),
-    )
-
-    body = _upload_and_analyze(client, sample_resume_text, sample_job_text, plan="premium")
-
-    report_response = client.get(f"/reports/{body['report_id']}")
-    assert report_response.status_code == 200
-    assert report_response.json()["executive_summary"].startswith("CrewAI-reviewed fit")
-
-    trace_response = client.get(f"/reports/{body['report_id']}/trace")
-    assert trace_response.status_code == 200
-    trace = trace_response.json()["trace"]
-    assert trace["mode"] == AgentWorkflowMode.crewai
-    runtime_step = next(
-        step for step in trace["steps"] if step["name"] == AgentStepName.crewai_runtime
-    )
-    assert runtime_step["status"] == "completed"
-    assert isinstance(runtime_step["duration_ms"], int)
-    assert isinstance(trace["duration_ms"], int)
-    assert trace["provider"] == "vertex"
-    assert trace["model"] == "google/gemini-3.5-flash"
-    assert trace["token_usage"]["total_tokens"] == 321
-    assert trace["token_usage"]["prompt_tokens"] == 250
-    assert trace["token_usage"]["completion_tokens"] == 71
-    assert trace["token_usage"]["successful_requests"] == 3
-    assert trace["cost_estimate_usd"] == pytest.approx(0.001014)
-    assert trace["runtime_metadata"]["runtime_status"] == "completed"
-    assert trace["runtime_metadata"]["cost_estimate_source"] == "provider_pricing_config"
-    assert trace["runtime_metadata"]["pricing_version"] == "2026-07-08.vertex-global-standard.v1"
-    assert trace["runtime_metadata"]["billable_input_tokens"] == 250
-    assert trace["runtime_metadata"]["billable_output_tokens"] == 71
-    assert "crewai_unavailable" not in trace["validation_warning_codes"]
-
-    usage_response = client.get("/usage/summary")
-    assert usage_response.status_code == 200
-    usage = usage_response.json()
-    assert usage["plan"] == "premium"
-    assert usage["live_crewai_enabled"] is True
-    crewai_limit = next(item for item in usage["limits"] if item["metric"] == "crewai_runs")
-    assert crewai_limit["used"] == 1
-    assert crewai_limit["limit"] == 100
-    assert usage["total_cost_estimate_usd"] == pytest.approx(0.001014)
+    assert live_ai_limit["used"] == 0
 
 
 def _upload_and_analyze(

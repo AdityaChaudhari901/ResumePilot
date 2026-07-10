@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
@@ -20,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.db.models import (
+    AnalysisRecord,
     ApplicationRecord,
     TailoredResumeDraftRecord,
     UsageEventRecord,
@@ -27,21 +29,46 @@ from app.db.models import (
     WorkflowJobRecord,
 )
 from app.repositories.workflow_jobs import WorkflowJobRepository
+from app.schemas.agent import (
+    AgentWorkflowMode,
+    AgentWorkflowResult,
+    AgentWorkflowTrace,
+)
 from app.schemas.application import ApplicationStatus
 from app.schemas.auth import CurrentUser
-from app.schemas.job import JobAnalysisRequest
+from app.schemas.job import JobAnalysisRequest, JobProfile
+from app.schemas.match import MatchResult
 from app.schemas.operation import (
     TERMINAL_WORKFLOW_JOB_STATUSES,
+    WorkflowApproval,
+    WorkflowApprovalDecision,
+    WorkflowApprovalDecisionRequest,
+    WorkflowApprovalStatus,
     WorkflowJobError,
     WorkflowJobKind,
     WorkflowJobListResponse,
     WorkflowJobResponse,
     WorkflowJobStatus,
 )
+from app.schemas.report import ApplicationReport
+from app.schemas.resume import ResumeProfile
 from app.schemas.tailored_resume import TailoredResumeDraftStatus
 from app.schemas.usage import UsageEventState
+from app.services.agent_workflow import (
+    apply_approved_live_draft,
+    with_langgraph_fallback_warning,
+    with_live_ai_limit_warning,
+    with_rejected_live_draft,
+)
 from app.services.analysis_service import analyze_job
 from app.services.audit_service import add_audit_event
+from app.services.langgraph_checkpointer import (
+    delete_workflow_checkpoint,
+    open_workflow_checkpointer,
+)
+from app.services.langgraph_workflow import LiveDraftGraphRunner
+from app.services.provider_pricing import estimate_provider_cost
+from app.services.report_generator import report_to_markdown
 from app.services.tailored_resume_service import (
     draft_export_revision,
     render_tailored_resume_pdf_for_application,
@@ -50,6 +77,11 @@ from app.services.tailored_resume_service import (
 from app.services.usage_service import (
     add_analysis_usage_reservation,
     add_export_usage_reservation,
+    finalize_live_ai_usage,
+    is_live_ai_enabled,
+    release_usage_reservation,
+    reserve_live_ai_usage,
+    scrub_live_ai_usage_for_privacy,
 )
 
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[\x21-\x7E]{8,255}$")
@@ -59,6 +91,7 @@ ACTIVE_WORKFLOW_JOB_STATUSES = frozenset(
         WorkflowJobStatus.running,
         WorkflowJobStatus.retry_scheduled,
         WorkflowJobStatus.cancel_requested,
+        WorkflowJobStatus.waiting_for_approval,
     }
 )
 LOGGER = logging.getLogger("resumepilot.workflow_jobs")
@@ -66,6 +99,13 @@ LOGGER = logging.getLogger("resumepilot.workflow_jobs")
 
 class _CooperativeCancellation(Exception):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class _JobExecutionResult:
+    result: dict[str, Any]
+    analysis_id: int | None
+    waiting_for_approval: bool = False
 
 
 def enqueue_analysis_job(
@@ -288,9 +328,11 @@ def cancel_workflow_job(
     db: Session,
     job_id: str,
     current_user: CurrentUser,
+    *,
+    settings: Settings | None = None,
 ) -> WorkflowJobResponse:
     repository = WorkflowJobRepository(db)
-    record = repository.get(job_id, user_id=current_user.id)
+    record = repository.get_for_update(job_id, user_id=current_user.id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Operation not found")
     current_status = WorkflowJobStatus(record.status)
@@ -299,7 +341,11 @@ def cancel_workflow_job(
 
     now = datetime.now(UTC)
     record.cancel_requested_at = now
-    if current_status in {WorkflowJobStatus.queued, WorkflowJobStatus.retry_scheduled}:
+    if current_status in {
+        WorkflowJobStatus.queued,
+        WorkflowJobStatus.retry_scheduled,
+        WorkflowJobStatus.waiting_for_approval,
+    }:
         record.status = WorkflowJobStatus.canceled.value
         record.stage = "canceled"
         record.progress_percent = 100
@@ -310,7 +356,105 @@ def cancel_workflow_job(
         record.stage = "cancel_requested"
     record.updated_at = now
     saved = repository.save(record)
+    if (
+        saved.status == WorkflowJobStatus.canceled.value
+        and saved.kind == WorkflowJobKind.analysis.value
+        and settings is not None
+    ):
+        _delete_checkpoint_safely(settings, saved.id)
     return workflow_job_response(saved)
+
+
+def submit_workflow_approval(
+    db: Session,
+    job_id: str,
+    request: WorkflowApprovalDecisionRequest,
+    current_user: CurrentUser,
+    *,
+    idempotency_key: str,
+    settings: Settings,
+) -> WorkflowJobRecord:
+    """Persist an idempotent tenant-owned decision and requeue the paused graph."""
+
+    _validate_idempotency_key(idempotency_key)
+    repository = WorkflowJobRepository(db)
+    record = repository.get_for_update(job_id, user_id=current_user.id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Operation not found")
+    if record.kind != WorkflowJobKind.analysis.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This operation does not support human approval.",
+        )
+
+    approval = _approval_payload(record)
+    if approval is None or approval.get("id") != request.approval_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "stale_approval",
+                "message": "This approval no longer matches the pending live draft.",
+            },
+        )
+    existing_decision = approval.get("decision")
+    if existing_decision is not None:
+        if existing_decision != request.decision.value:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "approval_already_decided",
+                    "message": "This live draft already has a different decision.",
+                },
+            )
+        db.rollback()
+        existing = repository.get(job_id, user_id=current_user.id)
+        if existing is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Operation not found")
+        return existing
+    if record.status != WorkflowJobStatus.waiting_for_approval.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The operation is not waiting for approval.",
+        )
+
+    now = datetime.now(UTC)
+    approval["status"] = WorkflowApprovalStatus.submitted.value
+    approval["decision"] = request.decision.value
+    approval["decided_at"] = now.isoformat()
+    approval["decision_key_hash"] = _sha256(idempotency_key)
+    record.result_json = {**(record.result_json or {}), "_approval": approval}
+    record.status = WorkflowJobStatus.queued.value
+    record.stage = "approval_submitted"
+    record.progress_percent = max(record.progress_percent, 90)
+    record.attempt_count = 0
+    record.available_at = now
+    record.lease_owner = None
+    record.lease_expires_at = None
+    record.heartbeat_at = None
+    record.error_code = None
+    record.error_message = None
+    record.updated_at = now
+    add_audit_event(
+        db,
+        event_type="workflow.approval_submitted",
+        user_id=current_user.id,
+        request_id=record.request_id,
+        payload={
+            "operation_id": record.id,
+            "analysis_id": record.analysis_id,
+            "decision": request.decision.value,
+            "approval_id": request.approval_id,
+        },
+    )
+    saved = repository.save(record)
+    if settings.execute_workflow_jobs_inline:
+        return execute_workflow_job(
+            db,
+            saved.id,
+            settings=settings,
+            worker_id=f"inline-approval-{saved.id}",
+        )
+    return saved
 
 
 def execute_workflow_job(
@@ -351,6 +495,9 @@ def execute_next_workflow_job(
 
 def workflow_job_response(record: WorkflowJobRecord) -> WorkflowJobResponse:
     job_status = WorkflowJobStatus(record.status)
+    result = dict(record.result_json or {})
+    approval_payload = result.pop("_approval", None)
+    approval = _public_approval(approval_payload)
     error = None
     if record.error_code and record.error_message:
         error = WorkflowJobError(code=record.error_code, message=record.error_message)
@@ -363,7 +510,8 @@ def workflow_job_response(record: WorkflowJobRecord) -> WorkflowJobResponse:
         attempt_count=record.attempt_count,
         max_attempts=record.max_attempts,
         cancelable=job_status in ACTIVE_WORKFLOW_JOB_STATUSES,
-        result=record.result_json or None,
+        result=result or None,
+        approval=approval,
         error=error,
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -381,7 +529,7 @@ def _execute_claimed_job(
     repository = WorkflowJobRepository(db)
     try:
         if record.cancel_requested_at is not None:
-            return _mark_canceled(db, record)
+            return _mark_canceled(db, record, settings=settings)
         if record.attempt_count > record.max_attempts:
             return _mark_failed(
                 db,
@@ -389,64 +537,89 @@ def _execute_claimed_job(
                 record,
                 RuntimeError("The workflow lease expired after the maximum attempts."),
                 dead_lettered=True,
+                settings=settings,
             )
         current_user = _current_user_for_job(db, record.user_id)
         with _maintain_workflow_lease(db, record, settings=settings):
             if record.kind == WorkflowJobKind.analysis.value:
-                result, analysis_id = _execute_analysis_job(
+                execution = _execute_analysis_job(
                     db,
                     record,
                     current_user=current_user,
                     settings=settings,
                 )
             elif record.kind == WorkflowJobKind.pdf_export.value:
-                result = _execute_pdf_export_job(
-                    db,
-                    record,
-                    current_user=current_user,
-                    settings=settings,
+                execution = _JobExecutionResult(
+                    result=_execute_pdf_export_job(
+                        db,
+                        record,
+                        current_user=current_user,
+                        settings=settings,
+                    ),
+                    analysis_id=None,
                 )
-                analysis_id = None
             else:
                 raise RuntimeError("Unsupported workflow job kind")
         db.expire_all()
-        persisted = repository.get_any(record.id)
+        persisted = repository.get_any_for_update(record.id)
         if persisted is None:
+            _delete_checkpoint_safely(settings, record.id)
             return record
         record = persisted
         if record.cancel_requested_at is not None:
-            return _mark_canceled(db, record)
+            db.rollback()
+            record = repository.get_any(record.id) or record
+            return _mark_canceled(db, record, settings=settings)
+        if execution.waiting_for_approval:
+            return _mark_waiting_for_approval(
+                repository,
+                record,
+                result=execution.result,
+                analysis_id=execution.analysis_id,
+            )
         now = datetime.now(UTC)
         record.status = WorkflowJobStatus.succeeded.value
         record.stage = "completed"
         record.progress_percent = 100
-        record.analysis_id = analysis_id
-        record.result_json = result
+        record.analysis_id = execution.analysis_id
+        record.result_json = execution.result
         record.error_code = None
         record.error_message = None
         record.lease_owner = None
         record.lease_expires_at = None
         record.finished_at = now
         record.updated_at = now
-        return repository.save(record)
+        saved = repository.save(record)
+        if saved.kind == WorkflowJobKind.analysis.value:
+            _delete_checkpoint_safely(settings, saved.id)
+        return saved
     except _CooperativeCancellation:
         db.rollback()
         persisted = repository.get_any(record.id)
         if persisted is None:
+            _delete_checkpoint_safely(settings, record.id)
             return record
-        return _mark_canceled(db, persisted)
+        return _mark_canceled(db, persisted, settings=settings)
     except Exception as exc:
         db.rollback()
         persisted = repository.get_any(record.id)
         if persisted is None:
+            _delete_checkpoint_safely(settings, record.id)
             return record
         record = persisted
         if record.cancel_requested_at is not None:
-            return _mark_canceled(db, record)
+            return _mark_canceled(db, record, settings=settings)
         retryable = _is_retryable(exc)
         if retryable and record.attempt_count < record.max_attempts:
             return _schedule_retry(repository, record, exc)
-        return _mark_failed(db, repository, record, exc, dead_lettered=retryable)
+        return _mark_failed(
+            db,
+            repository,
+            record,
+            exc,
+            dead_lettered=retryable,
+            settings=settings,
+        )
 
 
 def _execute_analysis_job(
@@ -455,8 +628,21 @@ def _execute_analysis_job(
     *,
     current_user: CurrentUser,
     settings: Settings,
-) -> tuple[dict[str, Any], int]:
+) -> _JobExecutionResult:
     request = JobAnalysisRequest.model_validate(record.payload_json)
+    approval_payload = _approval_payload(record)
+    if (
+        approval_payload
+        and approval_payload.get("status") == WorkflowApprovalStatus.submitted.value
+    ):
+        return _resume_live_draft_workflow(
+            db,
+            record,
+            current_user=current_user,
+            settings=settings,
+            approval_payload=approval_payload,
+        )
+
     usage = _usage_reservation(db, record)
     response = analyze_job(
         db,
@@ -473,7 +659,257 @@ def _execute_analysis_job(
             progress=progress,
         ),
     )
-    return response.model_dump(mode="json"), response.analysis_id
+    baseline_result = response.model_dump(mode="json")
+    if not _live_draft_requested(request, current_user=current_user, settings=settings):
+        return _JobExecutionResult(result=baseline_result, analysis_id=response.analysis_id)
+
+    analysis, deterministic_result, resume, job, match = _live_draft_context(
+        db,
+        response.analysis_id,
+        user_id=current_user.id,
+    )
+    try:
+        live_usage = reserve_live_ai_usage(db, current_user, operation_id=record.id)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_402_PAYMENT_REQUIRED:
+            raise
+        limited = with_live_ai_limit_warning(deterministic_result, settings=settings)
+        add_audit_event(
+            db,
+            event_type="workflow.live_ai_skipped_limit",
+            user_id=current_user.id,
+            request_id=record.request_id,
+            payload={"operation_id": record.id, "analysis_id": analysis.id},
+        )
+        _persist_agent_result(db, analysis, limited)
+        return _JobExecutionResult(result=baseline_result, analysis_id=analysis.id)
+    runner = LiveDraftGraphRunner(
+        settings=settings,
+        resume=resume,
+        job=job,
+        match=match,
+        deterministic_report=deterministic_result.report,
+    )
+    try:
+        with open_workflow_checkpointer(settings) as checkpointer:
+            graph_result = runner.start(
+                operation_id=record.id,
+                analysis_id=analysis.id,
+                checkpointer=checkpointer,
+            )
+    except Exception as exc:
+        fallback = with_langgraph_fallback_warning(
+            deterministic_result,
+            exc,
+            settings=settings,
+        )
+        _persist_agent_result(db, analysis, fallback)
+        release_usage_reservation(
+            db,
+            live_usage,
+            runtime_status="fallback",
+            metadata={"analysis_id": analysis.id, "operation_id": record.id},
+        )
+        _delete_checkpoint_safely(settings, record.id)
+        return _JobExecutionResult(result=baseline_result, analysis_id=analysis.id)
+
+    if not graph_result.paused:
+        raise RuntimeError("The live-draft graph completed without requesting approval")
+    cost_estimate = estimate_provider_cost(
+        provider=settings.llm_provider,
+        model=settings.llm_model,
+        region=settings.vertex_region,
+        token_usage=graph_result.sections.token_usage,
+    )
+    finalize_live_ai_usage(
+        db,
+        live_usage,
+        analysis_id=analysis.id,
+        runtime_status="completed",
+        cost_estimate_usd=cost_estimate.amount_usd if cost_estimate else None,
+    )
+    approval = _new_approval_payload(graph_result)
+    return _JobExecutionResult(
+        result={**baseline_result, "_approval": approval},
+        analysis_id=analysis.id,
+        waiting_for_approval=True,
+    )
+
+
+def _resume_live_draft_workflow(
+    db: Session,
+    record: WorkflowJobRecord,
+    *,
+    current_user: CurrentUser,
+    settings: Settings,
+    approval_payload: dict[str, Any],
+) -> _JobExecutionResult:
+    if record.analysis_id is None:
+        raise RuntimeError("The approval operation is missing its analysis")
+    analysis, deterministic_result, resume, job, match = _live_draft_context(
+        db,
+        record.analysis_id,
+        user_id=current_user.id,
+    )
+    decision = WorkflowApprovalDecision(str(approval_payload.get("decision")))
+    proposal_revision = str(approval_payload.get("id", ""))
+    runner = LiveDraftGraphRunner(
+        settings=settings,
+        resume=resume,
+        job=job,
+        match=match,
+        deterministic_report=deterministic_result.report,
+    )
+    with open_workflow_checkpointer(settings) as checkpointer:
+        graph_result = runner.resume(
+            operation_id=record.id,
+            decision=decision,
+            proposal_revision=proposal_revision,
+            checkpointer=checkpointer,
+        )
+    if graph_result.paused or graph_result.approval_decision != decision:
+        raise RuntimeError("The live-draft graph did not apply the submitted decision")
+    if graph_result.proposal_revision != proposal_revision:
+        raise RuntimeError("The resumed proposal revision does not match the approved draft")
+
+    if decision == WorkflowApprovalDecision.approve:
+        final_result = apply_approved_live_draft(
+            resume=resume,
+            job=job,
+            match=match,
+            deterministic_result=deterministic_result,
+            settings=settings,
+            sections=graph_result.sections,
+            proposal=graph_result.proposal,
+            live_duration_ms=graph_result.duration_ms,
+        )
+        final_status = WorkflowApprovalStatus.approved
+    else:
+        final_result = with_rejected_live_draft(
+            deterministic_result,
+            settings=settings,
+            sections=graph_result.sections,
+            live_duration_ms=graph_result.duration_ms,
+        )
+        final_status = WorkflowApprovalStatus.rejected
+
+    _persist_agent_result(db, analysis, final_result, commit=False)
+    approval_payload["status"] = final_status.value
+    approval_payload["decision"] = decision.value
+    approval_payload.pop("decision_key_hash", None)
+    approval_payload.pop("_sections", None)
+    add_audit_event(
+        db,
+        event_type=f"workflow.live_draft_{final_status.value}",
+        user_id=current_user.id,
+        request_id=record.request_id,
+        payload={
+            "operation_id": record.id,
+            "analysis_id": analysis.id,
+            "approval_id": proposal_revision,
+        },
+    )
+    return _JobExecutionResult(
+        result={**_analysis_result_payload(analysis), "_approval": approval_payload},
+        analysis_id=analysis.id,
+    )
+
+
+def _live_draft_requested(
+    request: JobAnalysisRequest,
+    *,
+    current_user: CurrentUser,
+    settings: Settings,
+) -> bool:
+    return (
+        settings.agent_workflow_mode == AgentWorkflowMode.langgraph
+        and request.allow_live_ai_processing
+        and is_live_ai_enabled(current_user)
+    )
+
+
+def _live_draft_context(
+    db: Session,
+    analysis_id: int,
+    *,
+    user_id: int,
+) -> tuple[AnalysisRecord, AgentWorkflowResult, ResumeProfile, JobProfile, MatchResult]:
+    analysis = db.scalar(
+        select(AnalysisRecord)
+        .where(AnalysisRecord.id == analysis_id, AnalysisRecord.user_id == user_id)
+        .limit(1)
+    )
+    if analysis is None:
+        raise RuntimeError("The analysis for this workflow no longer exists")
+    resume = ResumeProfile.model_validate(analysis.resume.profile_json)
+    job = JobProfile.model_validate(analysis.job.profile_json)
+    match = MatchResult.model_validate(analysis.match_result_json)
+    deterministic_result = AgentWorkflowResult(
+        report=ApplicationReport.model_validate(analysis.report_json),
+        trace=AgentWorkflowTrace.model_validate(analysis.workflow_trace_json),
+    )
+    return analysis, deterministic_result, resume, job, match
+
+
+def _persist_agent_result(
+    db: Session,
+    analysis: AnalysisRecord,
+    result: AgentWorkflowResult,
+    *,
+    commit: bool = True,
+) -> None:
+    analysis.status = "completed"
+    analysis.report_json = result.report.model_dump(mode="json")
+    analysis.report_markdown = report_to_markdown(result.report)
+    analysis.validation_warnings_json = [
+        warning.model_dump(mode="json") for warning in result.report.validation_warnings
+    ]
+    analysis.workflow_mode = result.trace.mode.value
+    analysis.workflow_trace_json = result.trace.model_dump(mode="json")
+    db.add(analysis)
+    if commit:
+        db.commit()
+        db.refresh(analysis)
+
+
+def _analysis_result_payload(analysis: AnalysisRecord) -> dict[str, Any]:
+    return {
+        "analysis_id": analysis.id,
+        "report_id": analysis.id,
+        "match_score": analysis.match_score,
+        "status": analysis.status,
+    }
+
+
+def _new_approval_payload(graph_result: Any) -> dict[str, Any]:
+    return {
+        "id": graph_result.proposal_revision,
+        "kind": "live_ai_draft",
+        "status": WorkflowApprovalStatus.pending.value,
+        "title": "Review the validated live draft",
+        "message": (
+            "Approve only the safe live wording shown here, or keep the deterministic report. "
+            "This decision does not accept tailored resume bullets or unlock exports."
+        ),
+        "warning_codes": graph_result.validation_warning_codes,
+        "requested_at": graph_result.requested_at.isoformat(),
+        "decision": None,
+        "decided_at": None,
+        "proposal": graph_result.proposal.model_dump(mode="json"),
+        "_sections": graph_result.sections.model_dump(mode="json"),
+    }
+
+
+def _approval_payload(record: WorkflowJobRecord) -> dict[str, Any] | None:
+    value = (record.result_json or {}).get("_approval")
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _public_approval(value: Any) -> WorkflowApproval | None:
+    if not isinstance(value, dict):
+        return None
+    public_keys = WorkflowApproval.model_fields.keys()
+    return WorkflowApproval.model_validate({key: value.get(key) for key in public_keys})
 
 
 def _execute_pdf_export_job(
@@ -724,6 +1160,29 @@ def _renew_workflow_lease(
     return renewed.rowcount == 1
 
 
+def _mark_waiting_for_approval(
+    repository: WorkflowJobRepository,
+    record: WorkflowJobRecord,
+    *,
+    result: dict[str, Any],
+    analysis_id: int | None,
+) -> WorkflowJobRecord:
+    now = datetime.now(UTC)
+    record.status = WorkflowJobStatus.waiting_for_approval.value
+    record.stage = "approval_required"
+    record.progress_percent = 90
+    record.analysis_id = analysis_id
+    record.result_json = result
+    record.error_code = None
+    record.error_message = None
+    record.lease_owner = None
+    record.lease_expires_at = None
+    record.heartbeat_at = None
+    record.finished_at = None
+    record.updated_at = now
+    return repository.save(record)
+
+
 def _schedule_retry(
     repository: WorkflowJobRepository,
     record: WorkflowJobRecord,
@@ -748,6 +1207,7 @@ def _mark_failed(
     exc: Exception,
     *,
     dead_lettered: bool,
+    settings: Settings,
 ) -> WorkflowJobRecord:
     now = datetime.now(UTC)
     record.status = (
@@ -761,11 +1221,20 @@ def _mark_failed(
     record.finished_at = now
     record.updated_at = now
     _release_usage_without_commit(db, record, runtime_status=record.status)
-    return repository.save(record)
+    saved = repository.save(record)
+    if saved.kind == WorkflowJobKind.analysis.value:
+        _delete_checkpoint_safely(settings, saved.id)
+    return saved
 
 
-def _mark_canceled(db: Session, record: WorkflowJobRecord) -> WorkflowJobRecord:
+def _mark_canceled(
+    db: Session,
+    record: WorkflowJobRecord,
+    *,
+    settings: Settings,
+) -> WorkflowJobRecord:
     now = datetime.now(UTC)
+    privacy_deletion_requested = record.stage == "privacy_deletion_requested"
     record.status = WorkflowJobStatus.canceled.value
     record.stage = "canceled"
     record.progress_percent = 100
@@ -774,7 +1243,28 @@ def _mark_canceled(db: Session, record: WorkflowJobRecord) -> WorkflowJobRecord:
     record.finished_at = now
     record.updated_at = now
     _release_usage_without_commit(db, record, runtime_status="canceled")
-    return WorkflowJobRepository(db).save(record)
+    if privacy_deletion_requested:
+        scrub_live_ai_usage_for_privacy(
+            db,
+            user_id=record.user_id,
+            operation_id=record.id,
+        )
+    saved = WorkflowJobRepository(db).save(record)
+    if saved.kind == WorkflowJobKind.analysis.value:
+        _delete_checkpoint_safely(settings, saved.id)
+    return saved
+
+
+def _delete_checkpoint_safely(settings: Settings | None, thread_id: str) -> None:
+    if settings is None:
+        return
+    try:
+        delete_workflow_checkpoint(settings, thread_id)
+    except Exception:
+        LOGGER.exception(
+            "Failed to delete terminal LangGraph checkpoint",
+            extra={"workflow_job_id": thread_id},
+        )
 
 
 def _release_usage_without_commit(

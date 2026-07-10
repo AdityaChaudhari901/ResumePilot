@@ -56,7 +56,9 @@ import type {
   TailoredResumeExportFormat,
   TailoredResumeItemUpdate,
   UsageSummaryResponse,
-  WorkflowOperation
+  WorkflowApprovalDecision,
+  WorkflowOperation,
+  WorkflowOperationListResponse
 } from "@/features/dashboard/types";
 import {
   type ApiProblem,
@@ -65,6 +67,7 @@ import {
 } from "@/features/dashboard/utils/api-error";
 
 interface DashboardStatusPayload {
+  activeOperation: WorkflowOperation | null;
   applications: ApplicationItem[];
   auth: DashboardAuthSession | null;
   health: HealthStatus;
@@ -74,19 +77,32 @@ interface DashboardStatusPayload {
 }
 
 async function fetchDashboardStatus(): Promise<DashboardStatusPayload> {
-  const [authResponse, healthResponse, openclawResponse] = await Promise.all([
+  const [
+    authResponse,
+    healthResponse,
+    openclawResponse,
+    applications,
+    reports,
+    usage,
+    activeOperation
+  ] = await Promise.all([
     fetch("/api/auth/session", { cache: "no-store" }),
     fetch("/api/health", { cache: "no-store" }),
-    fetch("/api/openclaw/status", { cache: "no-store" })
+    fetch("/api/openclaw/status", { cache: "no-store" }),
+    fetchApplications(),
+    fetchReportHistory(),
+    fetchUsageSummary(),
+    fetchActiveAnalysisOperation()
   ]);
 
   return {
+    activeOperation,
     auth: authResponse.ok ? ((await authResponse.json()) as DashboardAuthSession) : null,
     health: (await healthResponse.json()) as HealthStatus,
     openclaw: (await openclawResponse.json()) as OpenClawStatus,
-    applications: await fetchApplications(),
-    reports: await fetchReportHistory(),
-    usage: await fetchUsageSummary()
+    applications,
+    reports,
+    usage
   };
 }
 
@@ -100,6 +116,25 @@ async function fetchApplications(): Promise<ApplicationItem[]> {
     return payload.items;
   } catch {
     return [];
+  }
+}
+
+async function fetchActiveAnalysisOperation(): Promise<WorkflowOperation | null> {
+  try {
+    const response = await fetch("/api/operations?limit=20", { cache: "no-store" });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = (await response.json()) as WorkflowOperationListResponse;
+    for (const candidate of payload.items) {
+      const operation = requireWorkflowOperation(candidate);
+      if (isActiveAnalysisOperation(operation)) {
+        return operation;
+      }
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -176,6 +211,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [file, setFile] = useState<File | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isSubmittingApproval, setIsSubmittingApproval] = useState(false);
   const [isExportingReport, setIsExportingReport] = useState<ReportExportFormat | null>(null);
   const [isExportingTailoredResume, setIsExportingTailoredResume] =
     useState<TailoredResumeExportFormat | null>(null);
@@ -205,6 +241,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     useState<TailoredResumeDraft | null>(null);
   const workspaceRevisionRef = useRef(0);
   const analysisCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
+  const approvalCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const pdfExportCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   function startWorkspaceRequest(): number {
@@ -227,6 +264,19 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     setOpenclaw(status.openclaw);
     setReportHistory(status.reports);
     setUsage(status.usage);
+    setActiveOperation(status.activeOperation);
+    if (status.activeOperation) {
+      setWorkflowStep("ai");
+      const recoveredAnalysis = status.activeOperation.result;
+      if (isJobAnalysisResponse(recoveredAnalysis)) {
+        setAnalysis(recoveredAnalysis);
+        setActiveApplicationId(
+          status.applications.find(
+            (application) => application.report_id === recoveredAnalysis.report_id
+          )?.id ?? null
+        );
+      }
+    }
     setIsLoadingApplications(false);
     setIsLoadingHistory(false);
     setIsLoadingStatus(false);
@@ -248,6 +298,19 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       setOpenclaw(status.openclaw);
       setReportHistory(status.reports);
       setUsage(status.usage);
+      setActiveOperation(status.activeOperation);
+      if (status.activeOperation) {
+        setWorkflowStep("ai");
+        const recoveredAnalysis = status.activeOperation.result;
+        if (isJobAnalysisResponse(recoveredAnalysis)) {
+          setAnalysis(recoveredAnalysis);
+          setActiveApplicationId(
+            status.applications.find(
+              (application) => application.report_id === recoveredAnalysis.report_id
+            )?.id ?? null
+          );
+        }
+      }
       setIsLoadingApplications(false);
       setIsLoadingHistory(false);
       setIsLoadingStatus(false);
@@ -530,36 +593,35 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       }
 
       const responsePayload = (await response.json()) as unknown;
-      const nextAnalysis = isJobAnalysisResponse(responsePayload)
-        ? responsePayload
+      const outcome = isJobAnalysisResponse(responsePayload)
+        ? {
+            analysis: responsePayload,
+            status: "succeeded" as const
+          }
         : await waitForAnalysisOperation(
             requireWorkflowOperation(responsePayload),
             requestRevision,
             isCurrentWorkspaceRequest,
             setActiveOperation
           );
-      if (!nextAnalysis) {
+      if (!outcome) {
         return;
       }
       if (!isCurrentWorkspaceRequest(requestRevision)) {
         return;
       }
       analysisCommandRef.current = null;
+      const didLoadWorkspace = await loadAnalysisWorkspace(outcome.analysis, requestRevision);
+      if (!didLoadWorkspace || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+
+      if (outcome.status === "waiting_for_approval") {
+        setWorkflowStep("ai");
+        return;
+      }
+
       setActiveOperation(null);
-      setAnalysis(nextAnalysis);
-      const didLoadReport = await loadReport(nextAnalysis.report_id, requestRevision);
-      if (!didLoadReport || !isCurrentWorkspaceRequest(requestRevision)) {
-        return;
-      }
-      const [nextApplications, nextReportHistory] = await Promise.all([
-        fetchApplications(),
-        fetchReportHistory()
-      ]);
-      if (!isCurrentWorkspaceRequest(requestRevision)) {
-        return;
-      }
-      setApplications(nextApplications);
-      setReportHistory(nextReportHistory);
       setWorkflowStep("draft");
     } catch (error) {
       if (error instanceof TerminalOperationError) {
@@ -589,6 +651,146 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     }
   }
 
+  async function handleResumeAnalysisStatus() {
+    const operation = activeOperation;
+    if (!operation || !isActiveAnalysisOperation(operation)) {
+      setErrorMessage("There is no active analysis to resume.");
+      return;
+    }
+
+    const requestRevision = startWorkspaceRequest();
+    setErrorMessage(null);
+    setIsAnalyzing(true);
+    try {
+      const latest = await fetchWorkflowOperation(operation.id);
+      const outcome = await waitForAnalysisOperation(
+        latest,
+        requestRevision,
+        isCurrentWorkspaceRequest,
+        setActiveOperation
+      );
+      if (!outcome || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      const didLoadWorkspace = await loadAnalysisWorkspace(outcome.analysis, requestRevision);
+      if (!didLoadWorkspace || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      if (outcome.status === "waiting_for_approval") {
+        setWorkflowStep("ai");
+        return;
+      }
+      analysisCommandRef.current = null;
+      approvalCommandRef.current = null;
+      setActiveOperation(null);
+      setWorkflowStep("draft");
+    } catch (error) {
+      if (error instanceof TerminalOperationError) {
+        analysisCommandRef.current = null;
+        approvalCommandRef.current = null;
+      }
+      setErrorMessage(
+        error instanceof Error ? error.message : "Analysis status could not be resumed"
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function handleWorkflowApprovalDecision(decision: WorkflowApprovalDecision) {
+    const operation = activeOperation;
+    const approval = operation?.approval;
+    if (
+      !operation ||
+      operation.status !== "waiting_for_approval" ||
+      !approval ||
+      approval.status !== "pending"
+    ) {
+      setErrorMessage("This live draft is no longer waiting for a decision. Refresh and try again.");
+      return;
+    }
+
+    const requestRevision = startWorkspaceRequest();
+    const requestBody = {
+      approval_id: approval.id,
+      decision
+    };
+    const requestFingerprint = JSON.stringify({
+      operation_id: operation.id,
+      ...requestBody
+    });
+    if (approvalCommandRef.current?.fingerprint !== requestFingerprint) {
+      approvalCommandRef.current = {
+        fingerprint: requestFingerprint,
+        key: crypto.randomUUID()
+      };
+    }
+
+    setErrorMessage(null);
+    setIsAnalyzing(true);
+    setIsSubmittingApproval(true);
+
+    try {
+      const response = await fetch(
+        `/api/operations/${encodeURIComponent(operation.id)}/approval`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": approvalCommandRef.current.key
+          },
+          body: JSON.stringify(requestBody)
+        }
+      );
+      if (!response.ok) {
+        const message = await readApiError(response);
+        if (response.status === 409) {
+          const authoritative = await fetchWorkflowOperation(operation.id);
+          if (isCurrentWorkspaceRequest(requestRevision)) {
+            setActiveOperation(authoritative);
+          }
+        }
+        throw new Error(message);
+      }
+
+      const outcome = await waitForAnalysisOperation(
+        requireWorkflowOperation((await response.json()) as unknown),
+        requestRevision,
+        isCurrentWorkspaceRequest,
+        setActiveOperation
+      );
+      if (!outcome || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+
+      const didLoadWorkspace = await loadAnalysisWorkspace(outcome.analysis, requestRevision);
+      if (!didLoadWorkspace || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+
+      approvalCommandRef.current = null;
+      analysisCommandRef.current = null;
+      if (outcome.status === "waiting_for_approval") {
+        setWorkflowStep("ai");
+        return;
+      }
+
+      setActiveOperation(null);
+      setWorkflowStep("draft");
+    } catch (error) {
+      if (error instanceof TerminalOperationError) {
+        approvalCommandRef.current = null;
+        analysisCommandRef.current = null;
+      }
+      setErrorMessage(
+        error instanceof Error ? error.message : "Live draft decision could not be submitted"
+      );
+    } finally {
+      setIsSubmittingApproval(false);
+      setIsAnalyzing(false);
+    }
+  }
+
   async function loadReport(reportId: number, requestRevision?: number): Promise<boolean> {
     const [reportResponse, traceResponse, usageSummary] = await Promise.all([
       fetch(`/api/reports/${reportId}`, { cache: "no-store" }),
@@ -614,6 +816,37 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     setReport(nextReport);
     setUsage(usageSummary);
     setWorkflowTrace(nextTrace);
+    return true;
+  }
+
+  async function loadAnalysisWorkspace(
+    nextAnalysis: JobAnalysisResponse,
+    requestRevision: number
+  ): Promise<boolean> {
+    if (!isCurrentWorkspaceRequest(requestRevision)) {
+      return false;
+    }
+
+    setAnalysis(nextAnalysis);
+    const didLoadReport = await loadReport(nextAnalysis.report_id, requestRevision);
+    if (!didLoadReport || !isCurrentWorkspaceRequest(requestRevision)) {
+      return false;
+    }
+
+    const [nextApplications, nextReportHistory] = await Promise.all([
+      fetchApplications(),
+      fetchReportHistory()
+    ]);
+    if (!isCurrentWorkspaceRequest(requestRevision)) {
+      return false;
+    }
+
+    setApplications(nextApplications);
+    setReportHistory(nextReportHistory);
+    setActiveApplicationId(
+      nextApplications.find((application) => application.report_id === nextAnalysis.report_id)?.id ??
+        null
+    );
     return true;
   }
 
@@ -678,7 +911,15 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       jobText.trim()
     ) && Boolean(reviewedJobProfile);
   const isResumeReady = Boolean(resume);
-  const canAnalyze = isJobEvidenceReady && isResumeReady && !isAnalyzing;
+  const hasActiveAnalysisOperation = Boolean(
+    activeOperation && isActiveAnalysisOperation(activeOperation)
+  );
+  const canAnalyze =
+    isJobEvidenceReady &&
+    isResumeReady &&
+    !isAnalyzing &&
+    !isSubmittingApproval &&
+    !hasActiveAnalysisOperation;
   const workflowSteps = buildWorkflowSteps({
     analysisReady: Boolean(analysis && report),
     currentStep: workflowStep,
@@ -1136,9 +1377,14 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
                 allowLiveAiProcessing={allowLiveAiProcessing}
                 canAnalyze={canAnalyze}
                 isAnalyzing={isAnalyzing}
+                isSubmittingApproval={isSubmittingApproval}
                 operation={activeOperation}
                 onAllowLiveAiProcessingChange={setAllowLiveAiProcessing}
+                onApprovalDecision={(decision) =>
+                  void handleWorkflowApprovalDecision(decision)
+                }
                 onCancel={() => void handleCancelAnalysis()}
+                onResume={() => void handleResumeAnalysisStatus()}
                 onSubmit={handleAnalyze}
                 usage={usage}
               />
@@ -1176,6 +1422,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               applications={applications}
               isBusy={
                 isAnalyzing ||
+                isSubmittingApproval ||
+                hasActiveAnalysisOperation ||
                 isExportingReport !== null ||
                 isExportingTailoredResume !== null ||
                 isLoadingTailoredResume ||
@@ -1189,6 +1437,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
               }
             />
             <WorkflowSummaryCard
+              activeOperation={activeOperation}
               analysis={analysis}
               isJobEvidenceReady={isJobEvidenceReady}
               isJobReady={isJobSourceValid}
@@ -1228,6 +1477,8 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
             <ReportHistoryCard
               isBusy={
                 isAnalyzing ||
+                isSubmittingApproval ||
+                hasActiveAnalysisOperation ||
                 isExportingReport !== null ||
                 isExportingTailoredResume !== null ||
                 isLoadingTailoredResume ||
@@ -1268,23 +1519,57 @@ interface BuildWorkflowStepsInput {
 
 class TerminalOperationError extends Error {}
 
+class OperationFetchError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message);
+    this.name = "OperationFetchError";
+  }
+}
+
+interface AnalysisOperationOutcome {
+  analysis: JobAnalysisResponse;
+  status: "succeeded" | "waiting_for_approval";
+}
+
 async function waitForAnalysisOperation(
   initial: WorkflowOperation,
   requestRevision: number,
   isCurrent: (revision: number) => boolean,
   onUpdate: (operation: WorkflowOperation) => void
-): Promise<JobAnalysisResponse | null> {
+): Promise<AnalysisOperationOutcome | null> {
   let operation = initial;
+  let consecutivePollFailures = 0;
   for (let pollCount = 0; pollCount < 73; pollCount += 1) {
     if (!isCurrent(requestRevision)) {
       return null;
     }
     onUpdate(operation);
+    if (operation.status === "waiting_for_approval") {
+      if (!operation.approval) {
+        throw new TerminalOperationError(
+          "Analysis paused without a valid live draft approval request."
+        );
+      }
+      if (operation.approval.status === "pending") {
+        if (!isJobAnalysisResponse(operation.result)) {
+          throw new TerminalOperationError(
+            "Analysis paused without a deterministic baseline report."
+          );
+        }
+        return {
+          analysis: operation.result,
+          status: "waiting_for_approval"
+        };
+      }
+    }
     if (operation.status === "succeeded") {
       if (!isJobAnalysisResponse(operation.result)) {
         throw new TerminalOperationError("Analysis completed without a report result.");
       }
-      return operation.result;
+      return {
+        analysis: operation.result,
+        status: "succeeded"
+      };
     }
     if (["canceled", "failed", "dead_lettered"].includes(operation.status)) {
       throw new TerminalOperationError(
@@ -1299,17 +1584,50 @@ async function waitForAnalysisOperation(
     if (!isCurrent(requestRevision)) {
       return null;
     }
-    const response = await fetch(
-      `/api/operations/${encodeURIComponent(operation.id)}`,
-      { cache: "no-store" }
-    );
-    if (!response.ok) {
-      throw new Error(await readApiError(response));
+    try {
+      operation = await fetchWorkflowOperation(operation.id);
+      consecutivePollFailures = 0;
+    } catch (error) {
+      if (
+        error instanceof OperationFetchError &&
+        error.retryable &&
+        consecutivePollFailures < 3
+      ) {
+        consecutivePollFailures += 1;
+        continue;
+      }
+      throw error;
     }
-    operation = requireWorkflowOperation((await response.json()) as unknown);
   }
   throw new Error(
-    "Analysis is still running after five minutes. It remains durable; reopen the application shortly."
+    "Analysis is still running after five minutes. It remains durable; use Resume status to continue polling."
+  );
+}
+
+async function fetchWorkflowOperation(operationId: string): Promise<WorkflowOperation> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/operations/${encodeURIComponent(operationId)}`, {
+      cache: "no-store"
+    });
+  } catch {
+    throw new OperationFetchError(
+      "The analysis status could not be reached. Check the connection and use Resume status.",
+      true
+    );
+  }
+  if (!response.ok) {
+    const retryable =
+      [408, 425, 429].includes(response.status) || response.status >= 500;
+    throw new OperationFetchError(await readApiError(response), retryable);
+  }
+  return requireWorkflowOperation((await response.json()) as unknown);
+}
+
+function isActiveAnalysisOperation(operation: WorkflowOperation): boolean {
+  return (
+    operation.kind === "analysis" &&
+    !["succeeded", "canceled", "failed", "dead_lettered"].includes(operation.status)
   );
 }
 
@@ -1353,7 +1671,44 @@ function requireWorkflowOperation(value: unknown): WorkflowOperation {
   ) {
     throw new Error("Backend returned an invalid analysis operation.");
   }
+  if (
+    candidate.status === "waiting_for_approval" &&
+    !isWorkflowApproval(candidate.approval)
+  ) {
+    throw new Error("Backend returned an invalid live draft approval request.");
+  }
   return candidate as WorkflowOperation;
+}
+
+function isWorkflowApproval(
+  value: unknown
+): value is NonNullable<WorkflowOperation["approval"]> {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<NonNullable<WorkflowOperation["approval"]>>;
+  const proposal = candidate.proposal;
+  return (
+    typeof candidate.id === "string" &&
+    candidate.kind === "live_ai_draft" &&
+    ["pending", "submitted", "approved", "rejected"].includes(candidate.status ?? "") &&
+    typeof candidate.title === "string" &&
+    typeof candidate.message === "string" &&
+    Array.isArray(candidate.warning_codes) &&
+    typeof candidate.requested_at === "string" &&
+    typeof proposal === "object" &&
+    proposal !== null &&
+    typeof proposal.executive_summary === "string" &&
+    typeof proposal.cover_letter === "string" &&
+    Array.isArray(proposal.interview_questions) &&
+    proposal.interview_questions.every(
+      (group) =>
+        typeof group?.category === "string" &&
+        Array.isArray(group.questions) &&
+        group.questions.every((question) => typeof question === "string") &&
+        Array.isArray(group.suggested_answer_evidence_ids)
+    )
+  );
 }
 
 async function downloadPdfExport({

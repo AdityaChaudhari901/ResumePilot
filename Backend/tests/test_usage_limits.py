@@ -24,10 +24,10 @@ def test_usage_summary_starts_with_free_plan_limits(client):
     body = response.json()
     assert body["plan"] == "free"
     assert body["subscription_status"] == "inactive"
-    assert body["live_crewai_enabled"] is False
+    assert body["live_ai_enabled"] is False
     assert _limit(body, "analyses") == {"used": 0, "limit": 3, "remaining": 3}
     assert _limit(body, "exports") == {"used": 0, "limit": 5, "remaining": 5}
-    assert _limit(body, "crewai_runs") == {"used": 0, "limit": 0, "remaining": 0}
+    assert _limit(body, "live_ai_runs") == {"used": 0, "limit": 0, "remaining": 0}
 
 
 def test_configured_dev_user_can_start_on_paid_local_plan(tmp_path):
@@ -47,7 +47,7 @@ def test_configured_dev_user_can_start_on_paid_local_plan(tmp_path):
     body = response.json()
     assert body["plan"] == "premium"
     assert body["subscription_status"] == "active"
-    assert body["live_crewai_enabled"] is True
+    assert body["live_ai_enabled"] is True
     assert _limit(body, "analyses") == {"used": 0, "limit": 500, "remaining": 500}
 
 
@@ -75,7 +75,7 @@ def test_paid_local_plan_seed_only_applies_to_configured_dev_user(tmp_path):
     body = response.json()
     assert body["plan"] == "free"
     assert body["subscription_status"] == "inactive"
-    assert body["live_crewai_enabled"] is False
+    assert body["live_ai_enabled"] is False
 
 
 def test_analysis_usage_is_metered_and_limited(client, sample_resume_text, sample_job_text):
@@ -152,17 +152,18 @@ def test_usage_summary_is_tenant_scoped(client, sample_resume_text, sample_job_t
     assert _limit(user_b_summary, "analyses")["used"] == 0
 
 
-def test_free_plan_downgrades_crewai_without_consuming_live_runs(
+def test_free_plan_skips_langgraph_without_consuming_live_runs(
     client, monkeypatch, sample_resume_text, sample_job_text, settings
 ):
-    settings.agent_workflow_mode = AgentWorkflowMode.crewai
+    settings.agent_workflow_mode = AgentWorkflowMode.langgraph
 
-    def unexpected_runner(_settings):
-        raise AssertionError("Free plans must not attempt live CrewAI execution")
+    class UnexpectedRunner:
+        def __init__(self, **_kwargs):
+            raise AssertionError("Free plans must not attempt live LangGraph execution")
 
     monkeypatch.setattr(
-        "app.services.agent_workflow.build_crewai_workflow_runner",
-        unexpected_runner,
+        "app.services.workflow_job_service.LiveDraftGraphRunner",
+        UnexpectedRunner,
     )
 
     body = _upload_and_analyze(client, sample_resume_text, sample_job_text)
@@ -171,7 +172,7 @@ def test_free_plan_downgrades_crewai_without_consuming_live_runs(
 
     assert trace_response.status_code == 200
     assert trace_response.json()["trace"]["mode"] == AgentWorkflowMode.deterministic_fallback
-    assert _limit(summary, "crewai_runs") == {"used": 0, "limit": 0, "remaining": 0}
+    assert _limit(summary, "live_ai_runs") == {"used": 0, "limit": 0, "remaining": 0}
 
 
 def _upload_and_analyze(

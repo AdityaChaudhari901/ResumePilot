@@ -1,5 +1,98 @@
 # ResumePilot Operational Errors
 
+## [ERR-20260710-009] langgraph-start-replayed-paid-model-nodes
+
+**Logged**: 2026-07-10T08:48:01Z
+**Priority**: high
+**Status**: resolved
+**Area**: reliability
+
+### Summary
+
+Calling `LiveDraftGraphRunner.start()` again for an operation that had already
+reached its approval interrupt created a new graph turn and reran all three
+model nodes.
+
+### Error
+
+```text
+first start model calls: 3
+retry start model calls: 3
+```
+
+### Context
+
+- Reproduced with PostgreSQL after closing and reopening the checkpointer pool.
+- This is the worker-crash window between persisting the LangGraph interrupt
+  and marking the business operation as `waiting_for_approval`.
+- The duplicate calls could add latency and provider cost even though usage
+  metering remains keyed to one operation.
+
+### Suggested Fix
+
+Inspect and validate the existing thread snapshot before initial invocation.
+Return an existing interrupt unchanged, resume only an incomplete checkpoint,
+and reject mismatched operation, analysis, or graph-state versions.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/app/services/langgraph_workflow.py, Backend/tests/test_langgraph_workflow.py
+
+### Resolution
+
+- **Resolved**: 2026-07-10T08:48:01Z
+- **Notes**: Added idempotent start recovery and a no-rerun regression test;
+  PostgreSQL restart verification is rerun as executable proof.
+
+---
+
+## [ERR-20260710-008] langgraph-tables-crossed-alembic-ownership-boundary
+
+**Logged**: 2026-07-10T08:48:01Z
+**Priority**: high
+**Status**: resolved
+**Area**: database
+
+### Summary
+
+The PostgreSQL migration gate created LangGraph's package-owned checkpoint
+tables before running `alembic check`, so Alembic treated all four tables as
+schema drift and proposed removing them.
+
+### Error
+
+```text
+New upgrade operations detected: remove checkpoint_migrations, checkpoints,
+checkpoint_blobs, and checkpoint_writes
+```
+
+### Context
+
+- Alembic owns ResumePilot business tables.
+- `PostgresSaver.setup()` independently owns and migrates checkpoint tables.
+- The migration gate correctly exposed the conflict on a fresh PostgreSQL 16
+  database before release.
+
+### Suggested Fix
+
+Exclude reflected LangGraph checkpoint tables and their indexes from Alembic
+autogeneration while continuing to verify their presence through the dedicated
+checkpointer setup and readiness gates.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/migrations/env.py, Backend/scripts/run_postgres_migration_gate.py
+
+### Resolution
+
+- **Resolved**: 2026-07-10T08:48:01Z
+- **Notes**: Added an explicit Alembic ownership filter; the PostgreSQL gate is
+  rerun as the executable proof.
+
+---
+
 ## [ERR-20260710-001] frontend-check-node-path
 
 **Logged**: 2026-07-10T07:36:28Z
@@ -37,6 +130,47 @@ Prefix frontend verification commands explicitly with `PATH="$HOME/.nvm/versions
 
 - **Resolved**: 2026-07-10T07:37:30Z
 - **Notes**: Explicitly prefixed the Node 24 binary directory; TypeScript verification passed.
+
+---
+
+## [ERR-20260710-007] retired-crewai-packages-conflicted-with-new-lock
+
+**Logged**: 2026-07-10T14:12:00+05:30
+**Priority**: low
+**Status**: resolved
+**Area**: config
+
+### Summary
+
+The existing development virtualenv retained CrewAI after the project moved to
+the LangGraph dependency set, so `pip check` reported stale Pydantic conflicts.
+
+### Error
+
+```text
+crewai 1.15.2 requires pydantic<2.13, but the new lock installs pydantic 2.13.4.
+```
+
+### Context
+
+- Command: `.venv/bin/python -m pip install -e '.[dev]' -c requirements/py312-dev.constraints.txt`
+- The generated constraints and production lock contained no CrewAI package.
+- The conflict came from packages left in the pre-migration virtualenv.
+
+### Suggested Fix
+
+Recreate the virtualenv after removing an optional dependency family, or remove
+the retired top-level packages before running `pip check`.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/pyproject.toml, Backend/requirements/py312-dev.constraints.txt
+
+### Resolution
+
+- **Resolved**: 2026-07-10T14:13:00+05:30
+- **Notes**: Removed `crewai`, `crewai-cli`, and `crewai-core`; `pip check` passed.
 
 ---
 

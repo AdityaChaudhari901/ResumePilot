@@ -12,6 +12,52 @@ const BACKEND_PLATFORM_JOB_PATH = "/backend-platform-job.html";
 const DATA_API_JOB_PATH = "/data-api-job.html";
 const UNCLEAR_JOB_POSTING_PATH = "/unclear-job-posting.html";
 
+function pendingApprovalOperation() {
+  return {
+    id: "00000000-0000-4000-8000-000000000777",
+    kind: "analysis",
+    status: "waiting_for_approval",
+    stage: "approval_required",
+    progress_percent: 90,
+    attempt_count: 1,
+    max_attempts: 3,
+    cancelable: true,
+    result: {
+      analysis_id: 777,
+      report_id: 777,
+      match_score: 82,
+      status: "completed"
+    },
+    approval: {
+      id: "a".repeat(64),
+      kind: "live_ai_draft",
+      status: "pending",
+      title: "Review the validated live draft",
+      message: "Approve this evidence-safe proposal or keep the deterministic report.",
+      warning_codes: [],
+      requested_at: "2026-07-10T08:00:00Z",
+      decision: null,
+      decided_at: null,
+      proposal: {
+        executive_summary: "Evidence-safe live summary",
+        cover_letter: "Dear Hiring Team,\n\nEvidence-safe live cover letter.",
+        interview_questions: [
+          {
+            category: "Technical",
+            questions: ["Which evidence best supports this role?"],
+            suggested_answer_evidence_ids: ["project_001"]
+          }
+        ]
+      }
+    },
+    error: null,
+    created_at: "2026-07-10T08:00:00Z",
+    updated_at: "2026-07-10T08:01:00Z",
+    started_at: "2026-07-10T08:00:01Z",
+    finished_at: null
+  };
+}
+
 test("dashboard enforces browser security headers and an accessibility baseline", async ({
   page
 }) => {
@@ -43,6 +89,51 @@ test("dashboard enforces browser security headers and an accessibility baseline"
   }));
 
   expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+});
+
+test("dashboard restores a durable pending approval after refresh", async ({ page }) => {
+  const operation = pendingApprovalOperation();
+  await page.route("**/api/operations?limit=20", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ items: [operation], count: 1 }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Review the validated live draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Keep deterministic report" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Review the validated live draft" })).toBeVisible();
+  await expect(page.getByText("Evidence-safe live summary", { exact: true })).toBeVisible();
+});
+
+test("dashboard keeps recovery controls after a running operation is rehydrated", async ({
+  page
+}) => {
+  const operation = {
+    ...pendingApprovalOperation(),
+    approval: null,
+    result: null,
+    stage: "generating_report",
+    status: "running"
+  };
+  await page.route("**/api/operations?limit=20", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ items: [operation], count: 1 }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Resume status" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run AI analysis" })).toBeDisabled();
 });
 
 test("dashboard demo flow renders report and validates exports", async ({ page }, testInfo) => {

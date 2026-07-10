@@ -12,17 +12,24 @@ import type { FormEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
-import type { UsageSummaryResponse } from "@/features/dashboard/types";
-import type { WorkflowOperation } from "@/features/dashboard/types";
+import { WorkflowApprovalPanel } from "@/features/dashboard/components/workflow-approval-panel";
+import type {
+  UsageSummaryResponse,
+  WorkflowApprovalDecision,
+  WorkflowOperation
+} from "@/features/dashboard/types";
 
 interface AiWorkflowCardProps {
   allowLiveAiProcessing: boolean;
   canAnalyze: boolean;
   isAnalyzing: boolean;
+  isSubmittingApproval: boolean;
   operation: WorkflowOperation | null;
   usage: UsageSummaryResponse | null;
   onAllowLiveAiProcessingChange: (enabled: boolean) => void;
+  onApprovalDecision: (decision: WorkflowApprovalDecision) => void;
   onCancel: () => void;
+  onResume: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
@@ -38,7 +45,7 @@ const WORKFLOW_ITEMS = [
     label: "Match resume evidence"
   },
   {
-    description: "Draft ATS keywords, resume bullets, cover letter, and interview prep.",
+    description: "Draft ATS keywords, resume bullets, cover letter, and interview prep with LangGraph.",
     icon: Bot,
     label: "Generate application assets"
   },
@@ -53,17 +60,35 @@ export function AiWorkflowCard({
   allowLiveAiProcessing,
   canAnalyze,
   isAnalyzing,
+  isSubmittingApproval,
   onCancel,
   onAllowLiveAiProcessingChange,
+  onApprovalDecision,
+  onResume,
   onSubmit,
   operation,
   usage
 }: AiWorkflowCardProps) {
-  const workflowMode = usage?.live_crewai_enabled ? "Live CrewAI eligible" : "Deterministic gate";
+  const pendingApproval =
+    operation?.status === "waiting_for_approval" ? operation.approval : null;
+  const isOperationActive = Boolean(
+    operation && !["succeeded", "canceled", "failed", "dead_lettered"].includes(operation.status)
+  );
+  const shouldShowProgress = Boolean(operation && isOperationActive && !pendingApproval);
+  const workflowMode = pendingApproval
+    ? "Approval required"
+    : usage?.live_ai_enabled
+      ? "Live AI eligible"
+      : "Deterministic gate";
+  const workflowModeTone = pendingApproval
+    ? "warning"
+    : usage?.live_ai_enabled
+      ? "primary"
+      : "neutral";
 
   return (
     <Panel
-      action={<Badge tone={usage?.live_crewai_enabled ? "primary" : "neutral"}>{workflowMode}</Badge>}
+      action={<Badge tone={workflowModeTone}>{workflowMode}</Badge>}
       eyebrow="Step 04"
       title="AI services"
     >
@@ -108,12 +133,12 @@ export function AiWorkflowCard({
           })}
         </ol>
 
-        {usage?.live_crewai_enabled ? (
+        {usage?.live_ai_enabled ? (
           <label className="flex items-start gap-3 rounded-md border border-border bg-surface p-3 text-sm">
             <input
               checked={allowLiveAiProcessing}
               className="mt-1 h-4 w-4"
-              disabled={isAnalyzing}
+              disabled={isAnalyzing || isSubmittingApproval || Boolean(pendingApproval)}
               onChange={(event) => onAllowLiveAiProcessingChange(event.target.checked)}
               type="checkbox"
             />
@@ -129,7 +154,7 @@ export function AiWorkflowCard({
           </label>
         ) : null}
 
-        {isAnalyzing && operation ? (
+        {shouldShowProgress && operation ? (
           <div
             aria-live="polite"
             className="rounded-md border border-primary/20 bg-primary/5 p-3"
@@ -155,21 +180,35 @@ export function AiWorkflowCard({
           </div>
         ) : null}
 
+        {pendingApproval ? (
+          <WorkflowApprovalPanel
+            approval={pendingApproval}
+            isSubmitting={isSubmittingApproval}
+            onDecision={onApprovalDecision}
+          />
+        ) : null}
+
         <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-5 text-muted-foreground">
-            Live processing requires your consent for each analysis. Otherwise ResumePilot uses
-            the deterministic evidence workflow.
+            Live processing uses LangGraph and pauses before a live draft can replace the
+            deterministic report. Without consent, ResumePilot keeps the deterministic evidence
+            workflow.
           </p>
           <div className="flex gap-2">
-            {isAnalyzing && operation?.cancelable ? (
+            {operation?.cancelable ? (
               <Button onClick={onCancel} type="button" variant="secondary">
                 Cancel
+              </Button>
+            ) : null}
+            {isOperationActive && !isAnalyzing && !isSubmittingApproval && !pendingApproval ? (
+              <Button onClick={onResume} type="button" variant="secondary">
+                Resume status
               </Button>
             ) : null}
             <Button
               disabled={!canAnalyze}
               icon={
-                isAnalyzing ? (
+                isAnalyzing || isSubmittingApproval ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 ) : (
                   <Play className="h-4 w-4" aria-hidden="true" />
@@ -188,6 +227,8 @@ export function AiWorkflowCard({
 
 function operationStageLabel(stage: string): string {
   const labels: Record<string, string> = {
+    approval_required: "Your approval is required",
+    awaiting_approval: "Your approval is required",
     cancel_requested: "Canceling analysis",
     fetching_job: "Loading reviewed job evidence",
     generating_report: "Generating application materials",
@@ -197,7 +238,8 @@ function operationStageLabel(stage: string): string {
     retry_scheduled: "Retry scheduled",
     saving_application: "Saving application workspace",
     starting: "Starting analysis",
-    validating_claims: "Validating every claim"
+    validating_claims: "Validating every claim",
+    waiting_for_approval: "Your approval is required"
   };
   return labels[stage] ?? "Analysis in progress";
 }

@@ -12,6 +12,8 @@ class UsageEventType(StrEnum):
     latex_exported = "latex_exported"
     docx_exported = "docx_exported"
     pdf_exported = "pdf_exported"
+    live_ai_run = "live_ai_run"
+    # Historical usage rows may still contain this value.
     crewai_run = "crewai_run"
 
 
@@ -24,7 +26,7 @@ class UsageEventState(StrEnum):
 class UsageLimitMetric(StrEnum):
     analyses = "analyses"
     exports = "exports"
-    crewai_runs = "crewai_runs"
+    live_ai_runs = "live_ai_runs"
 
 
 class PlanLimit(StrictBaseModel):
@@ -43,4 +45,4 @@ class UsageSummaryResponse(StrictBaseModel):
     current_period_end: datetime
     limits: list[PlanLimit]
     total_cost_estimate_usd: float = Field(ge=0)
-    live_crewai_enabled: bool
+    live_ai_enabled: bool

@@ -17,7 +17,7 @@ from app.db.models import (
 from app.repositories.analyses import AnalysisRepository
 from app.repositories.jobs import JobRepository
 from app.repositories.resumes import ResumeRepository
-from app.schemas.agent import AgentWorkflowMode, AgentWorkflowTrace, ReportWorkflowTraceResponse
+from app.schemas.agent import AgentWorkflowTrace, ReportWorkflowTraceResponse
 from app.schemas.auth import CurrentUser
 from app.schemas.common import ValidationWarning
 from app.schemas.job import (
@@ -45,11 +45,8 @@ from app.services.report_generator import report_to_markdown
 from app.services.resume_parser import ResumeParseError, extract_resume_text, parse_resume_profile
 from app.services.usage_service import (
     finalize_analysis_usage,
-    finalize_crewai_usage,
-    is_live_crewai_enabled,
     release_usage_reservation,
     reserve_analysis_usage,
-    reserve_crewai_usage,
 )
 
 MIN_CONFIDENT_PREVIEW_TEXT_CHARS = 160
@@ -160,8 +157,6 @@ def analyze_job(
         analysis_usage = reserve_analysis_usage(db, current_user)
 
     analysis_record: AnalysisRecord | None = None
-    crewai_usage: UsageEventRecord | None = None
-    workflow_settings = resolved_settings
     try:
         _report_progress(progress_callback, "fetching_job", 15)
         resume = ResumeProfile.model_validate(resume_record.profile_json)
@@ -217,18 +212,12 @@ def analyze_job(
         analyses.add(analysis_record)
         _report_progress(progress_callback, "generating_report", 60)
 
-        workflow_settings, crewai_usage = _settings_for_user_plan(
-            resolved_settings,
-            db,
-            current_user,
-            allow_live_ai_processing=request.allow_live_ai_processing,
-        )
         workflow_result = run_application_agent_workflow(
             analysis_id=analysis_record.id,
             resume=resume,
             job=job,
             match=match,
-            settings=workflow_settings,
+            settings=resolved_settings,
         )
         _report_progress(progress_callback, "validating_claims", 80)
         report = workflow_result.report
@@ -283,32 +272,12 @@ def analyze_job(
             report_id=analysis_record.id,
             workflow_mode=analysis_record.workflow_mode,
         )
-        if crewai_usage:
-            finalize_crewai_usage(
-                db,
-                crewai_usage,
-                analysis_id=analysis_record.id,
-                runtime_status=(
-                    "completed"
-                    if workflow_result.trace.mode == AgentWorkflowMode.crewai
-                    else "fallback"
-                ),
-                cost_estimate_usd=workflow_result.trace.cost_estimate_usd,
-            )
         return _analysis_response(analysis_record)
     except Exception:
         if analysis_record is not None and analysis_record.status != "completed":
             analysis_record.status = "failed"
-            analysis_record.workflow_mode = workflow_settings.agent_workflow_mode.value
+            analysis_record.workflow_mode = "deterministic_fallback"
             analyses.save(analysis_record)
-        if crewai_usage:
-            finalize_crewai_usage(
-                db,
-                crewai_usage,
-                analysis_id=analysis_record.id if analysis_record else 0,
-                runtime_status="failed",
-                cost_estimate_usd=None,
-            )
         if release_usage_on_failure:
             release_usage_reservation(
                 db,
@@ -575,25 +544,6 @@ def _create_job_record(
     profile.job_id = record.id
     record.profile_json = profile.model_dump(mode="json")
     return jobs.save(record)
-
-
-def _settings_for_user_plan(
-    settings: Settings,
-    db: Session,
-    current_user: CurrentUser,
-    *,
-    allow_live_ai_processing: bool,
-) -> tuple[Settings, UsageEventRecord | None]:
-    if settings.agent_workflow_mode != AgentWorkflowMode.crewai:
-        return settings, None
-    if not allow_live_ai_processing or not is_live_crewai_enabled(current_user):
-        return (
-            settings.model_copy(
-                update={"agent_workflow_mode": AgentWorkflowMode.deterministic_fallback}
-            ),
-            None,
-        )
-    return settings, reserve_crewai_usage(db, current_user)
 
 
 def _workflow_trace_from_record(analysis: AnalysisRecord) -> AgentWorkflowTrace:

@@ -83,10 +83,9 @@ class Settings(BaseSettings):
         default=AgentWorkflowMode.deterministic_fallback,
         alias="AGENT_WORKFLOW_MODE",
     )
-    crewai_llm_model: str | None = Field(default=None, alias="CREWAI_LLM_MODEL")
-    crewai_max_iter: int = Field(default=2, ge=1, le=10, alias="CREWAI_MAX_ITER")
-    crewai_timeout_seconds: int = Field(default=60, ge=10, le=300, alias="CREWAI_TIMEOUT_SECONDS")
-    crewai_temperature: float = Field(default=0.2, ge=0, le=1, alias="CREWAI_TEMPERATURE")
+    llm_timeout_seconds: int = Field(default=60, ge=10, le=300, alias="LLM_TIMEOUT_SECONDS")
+    llm_temperature: float = Field(default=0.2, ge=0, le=1, alias="LLM_TEMPERATURE")
+    llm_max_retries: int = Field(default=2, ge=1, le=5, alias="LLM_MAX_RETRIES")
     latex_compile_timeout_seconds: int = Field(
         default=20,
         ge=5,
@@ -120,6 +119,12 @@ class Settings(BaseSettings):
         ge=1,
         le=10,
         alias="WORKFLOW_JOB_MAX_ATTEMPTS",
+    )
+    workflow_checkpoint_reconcile_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        alias="WORKFLOW_CHECKPOINT_RECONCILE_SECONDS",
     )
     usage_reservation_ttl_seconds: int = Field(
         default=900,
@@ -172,9 +177,15 @@ class Settings(BaseSettings):
             raise ValueError("value cannot be empty")
         return normalized
 
+    @field_validator("agent_workflow_mode")
+    @classmethod
+    def reject_retired_workflow_mode(cls, value: AgentWorkflowMode) -> AgentWorkflowMode:
+        if value == AgentWorkflowMode.crewai:
+            raise ValueError("AGENT_WORKFLOW_MODE=crewai is retired; use langgraph")
+        return value
+
     @field_validator(
         "vertex_project_id",
-        "crewai_llm_model",
         "dev_user_email",
         "auth_trusted_proxy_secret",
     )

@@ -6,7 +6,7 @@ proxy in front of Next.js and keep the FastAPI port private to the host/network.
 ## Runtime Shape
 
 - `frontend`: Next.js dashboard and backend-for-frontend identity proxy.
-- `migrate`: one-shot Alembic upgrade that must succeed before API/worker startup.
+- `migrate`: one-shot Alembic and LangGraph checkpoint setup that must succeed before API/worker startup.
 - `backend`: FastAPI command/query API and readiness checks.
 - `worker`: PostgreSQL-leased analysis and PDF execution with retries,
   cancellation, dead-letter state, and a shared artifact volume.
@@ -60,12 +60,22 @@ to 300.
 
 ## Release Boundaries
 
-- The default backend image uses hash-locked deterministic dependencies and
-  excludes CrewAI/ChromaDB because CrewAI 1.15.2 constrains ChromaDB to the
-  affected 1.1.x line; patched ChromaDB 1.5.9 is not yet compatible.
+- The backend image uses hash-locked LangGraph, LangChain, Google GenAI, and
+  PostgreSQL checkpointer dependencies. CrewAI and ChromaDB are absent.
 - Live AI requires a premium plan plus explicit consent for each analysis. The
   provider payload excludes candidate contact fields, links, name occurrences,
   and the deterministic cover letter.
+- LangGraph execution is durable but provider calls are at-least-once across a
+  hard process crash. A call can repeat if Vertex returns immediately before the
+  node checkpoint is committed. Monitor recorded usage against provider billing;
+  checkpointed nodes and approval resumes do not rerun completed generation.
+- Normal completion, cancellation, report deletion, and account deletion remove
+  checkpoints directly. The worker also reconciles orphan and terminal threads
+  at startup and every `WORKFLOW_CHECKPOINT_RECONCILE_SECONDS` (60 seconds by
+  default), which bounds cleanup after an abrupt worker or account-deletion race.
+- LangSmith tracing stays off by default so resume and draft content cannot
+  leave the application through an observability integration. Production Vertex
+  access should use Workload Identity or an attached least-privilege service account.
 - The amd64 image installs checksum-pinned Tectonic. Arm64 deployments must
   provide a verified compiler or leave PDF export unavailable. PDF compilation
   runs in the worker; apply network and resource isolation before sustained load.
@@ -90,7 +100,7 @@ forward the FastAPI port publicly.
 The migration, API, and worker services run:
 
 ```bash
-alembic upgrade head
+python scripts/migrate_runtime.py
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
 resumepilot-worker
 ```
@@ -104,6 +114,15 @@ Production startup fails if:
 - schema auto-creation is enabled.
 - migration readiness checks are disabled.
 
+Keep checkpoint reconciliation enabled in every worker deployment:
+
+```env
+WORKFLOW_CHECKPOINT_RECONCILE_SECONDS=60
+```
+
+The accepted range is 10 to 3600 seconds. Lower values shorten the residual
+cleanup window at the cost of more PostgreSQL maintenance queries.
+
 ## Health Checks
 
 ```bash
@@ -113,7 +132,7 @@ curl -fsS http://127.0.0.1:3050/
 ```
 
 `/health` proves the FastAPI process is alive. `/ready` proves the database is
-reachable and, in production, that the database revision matches Alembic head.
+reachable, the Alembic revision matches, and LangGraph checkpoint tables exist.
 
 ## Migrations
 

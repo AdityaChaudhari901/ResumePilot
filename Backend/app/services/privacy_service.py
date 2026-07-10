@@ -34,6 +34,8 @@ from app.schemas.privacy import (
 )
 from app.schemas.usage import UsageEventState
 from app.services.audit_service import add_audit_event
+from app.services.langgraph_checkpointer import delete_workflow_checkpoint
+from app.services.usage_service import scrub_live_ai_usage_for_privacy
 
 
 @dataclass
@@ -324,6 +326,7 @@ def delete_account(
     for resume in resumes:
         db.delete(resume)
     for workflow_job in workflow_jobs:
+        delete_workflow_checkpoint(settings, workflow_job.id)
         db.delete(workflow_job)
     db.flush()
     for usage_event in usage_events:
@@ -484,6 +487,7 @@ def _delete_workflow_job_records(
             linked_analysis.workflow_job_id = None
             db.add(linked_analysis)
         counts.deleted_export_files += _delete_workflow_artifact(settings, persisted)
+        delete_workflow_checkpoint(settings, persisted.id)
         _scrub_workflow_usage(db, persisted)
         if _requires_privacy_tombstone(persisted):
             _tombstone_active_workflow_job(persisted)
@@ -499,17 +503,23 @@ def _delete_workflow_job_records(
 
 def _scrub_workflow_usage(db: Session, record: WorkflowJobRecord) -> None:
     usage = db.get(UsageEventRecord, record.usage_event_id)
-    if usage is None or usage.user_id != record.user_id:
-        return
-    previous_state = usage.state
-    if usage.state == UsageEventState.reserved.value:
-        usage.state = UsageEventState.released.value
-        usage.settled_at = utc_now()
-    usage.metadata_json = {
-        "status": "privacy_deleted",
-        "previous_state": previous_state,
-    }
-    db.add(usage)
+    if usage is not None and usage.user_id == record.user_id:
+        previous_state = usage.state
+        if usage.state == UsageEventState.reserved.value:
+            usage.state = UsageEventState.released.value
+            usage.settled_at = utc_now()
+        usage.reservation_key = None
+        usage.metadata_json = {
+            "status": "privacy_deleted",
+            "previous_state": previous_state,
+        }
+        db.add(usage)
+    scrub_live_ai_usage_for_privacy(
+        db,
+        user_id=record.user_id,
+        operation_id=record.id,
+        analysis_id=record.analysis_id,
+    )
 
 
 def _tombstone_active_workflow_job(record: WorkflowJobRecord) -> None:

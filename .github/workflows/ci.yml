@@ -38,12 +38,12 @@ jobs:
           cache: pip
           cache-dependency-path: |
             Backend/pyproject.toml
-            Backend/requirements/py312-dev-ai.constraints.txt
+            Backend/requirements/py312-dev.constraints.txt
 
       - name: Install backend dependencies
         run: |
           python -m pip install --require-hashes -r requirements/py312-build.lock.txt
-          python -m pip install -e ".[dev]" -c requirements/py312-dev-ai.constraints.txt
+          python -m pip install -e ".[dev]" -c requirements/py312-dev.constraints.txt
           python -m pip check
           python --version
 
@@ -106,6 +106,8 @@ jobs:
       PIP_NO_PYTHON_VERSION_WARNING: "1"
       POSTGRES_ADMIN_URL: postgresql+psycopg://resumepilot:resumepilot-ci@127.0.0.1:5432/postgres
       DATABASE_URL: postgresql+psycopg://resumepilot:resumepilot-ci@127.0.0.1:5432/resumepilot_ci_fresh
+      LANGGRAPH_STRICT_MSGPACK: "true"
+      LANGSMITH_TRACING: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -117,12 +119,12 @@ jobs:
           cache: pip
           cache-dependency-path: |
             Backend/pyproject.toml
-            Backend/requirements/py312-dev-ai.constraints.txt
+            Backend/requirements/py312-dev.constraints.txt
 
       - name: Install backend dependencies
         run: |
           python -m pip install --require-hashes -r requirements/py312-build.lock.txt
-          python -m pip install -e ".[dev]" -c requirements/py312-dev-ai.constraints.txt
+          python -m pip install -e ".[dev]" -c requirements/py312-dev.constraints.txt
           python -m pip check
 
       - name: Run fresh and prior-release PostgreSQL migrations
@@ -170,7 +172,11 @@ jobs:
               payload = json.load(response_file)
           assert payload["status"] == "ok", payload
           checks = {check["name"]: check["status"] for check in payload["checks"]}
-          assert checks == {"database": "ok", "migrations": "ok"}, payload
+          assert checks == {
+              "database": "ok",
+              "migrations": "ok",
+              "langgraph_checkpointer": "ok",
+          }, payload
           PY
 
   frontend:
@@ -230,14 +236,14 @@ jobs:
           cache: pip
           cache-dependency-path: |
             Backend/pyproject.toml
-            Backend/requirements/py312-dev-ai.constraints.txt
+            Backend/requirements/py312-dev.constraints.txt
 
       - name: Install browser-test backend dependencies
         working-directory: Backend
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install --require-hashes -r requirements/py312-build.lock.txt
-          .venv/bin/python -m pip install -e . -c requirements/py312-dev-ai.constraints.txt
+          .venv/bin/python -m pip install -e . -c requirements/py312-dev.constraints.txt
           .venv/bin/python -m pip check
 
       - name: Set up Node.js

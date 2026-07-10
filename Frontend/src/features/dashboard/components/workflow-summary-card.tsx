@@ -10,10 +10,12 @@ import type {
   JobPreviewResponse,
   JobSourceType,
   ResumeUploadResponse,
-  TailoredResumeDraft
+  TailoredResumeDraft,
+  WorkflowOperation
 } from "@/features/dashboard/types";
 
 interface WorkflowSummaryCardProps {
+  activeOperation: WorkflowOperation | null;
   analysis: JobAnalysisResponse | null;
   isJobEvidenceReady: boolean;
   isJobReady: boolean;
@@ -34,6 +36,7 @@ interface WorkflowSummaryCardProps {
 }
 
 export function WorkflowSummaryCard({
+  activeOperation,
   analysis,
   isJobEvidenceReady,
   isJobReady,
@@ -53,6 +56,11 @@ export function WorkflowSummaryCard({
   workflowTrace
 }: WorkflowSummaryCardProps) {
   const resumeDetail = getResumeDetail(resume, isJobEvidenceReady);
+  const isApprovalPending = activeOperation?.status === "waiting_for_approval";
+  const isOperationActive = Boolean(
+    activeOperation &&
+      !["succeeded", "canceled", "failed", "dead_lettered"].includes(activeOperation.status)
+  );
 
   return (
     <Panel as="aside" eyebrow="Current application" title="Workflow summary">
@@ -62,7 +70,7 @@ export function WorkflowSummaryCard({
           actionName="Edit job listing"
           detail={formatJobDetail(jobSourceType, jobUrl, jobText)}
           icon={<BriefcaseBusiness className="h-4 w-4 text-primary" aria-hidden="true" />}
-          isActionDisabled={false}
+          isActionDisabled={isOperationActive}
           label="Job listing"
           status={isJobReady ? "ready" : "pending"}
           statusLabel={
@@ -75,7 +83,7 @@ export function WorkflowSummaryCard({
           actionName="Review extracted job evidence"
           detail={formatJobEvidenceDetail(jobPreview)}
           icon={<BriefcaseBusiness className="h-4 w-4 text-primary" aria-hidden="true" />}
-          isActionDisabled={!isJobReady}
+          isActionDisabled={!isJobReady || isOperationActive}
           label="Job evidence"
           status={isJobEvidenceReady ? "ready" : "pending"}
           statusLabel={isJobEvidenceReady ? "Reviewed" : "Pending"}
@@ -86,21 +94,33 @@ export function WorkflowSummaryCard({
           actionName={isResumeReady ? "Review resume evidence step" : "Open resume evidence step"}
           detail={resumeDetail}
           icon={<FileText className="h-4 w-4 text-primary" aria-hidden="true" />}
-          isActionDisabled={!isJobEvidenceReady}
+          isActionDisabled={!isJobEvidenceReady || isOperationActive}
           label="Resume evidence"
           status={isResumeReady ? "ready" : "pending"}
           statusLabel={isResumeReady ? "Parsed" : "Pending"}
           onAction={onEditResume}
         />
         <SummaryRow
-          actionLabel={analysis ? "Rerun" : "Run"}
-          actionName={analysis ? "Open AI services to rerun" : "Open AI services step"}
-          detail={workflowTrace ? workflowModeLabel(workflowTrace.mode) : "Evidence workflow not run"}
+          actionLabel={isApprovalPending ? "Review" : analysis ? "Rerun" : "Run"}
+          actionName={
+            isApprovalPending
+              ? "Review the live AI draft approval"
+              : analysis
+                ? "Open AI services to rerun"
+                : "Open AI services step"
+          }
+          detail={
+            isApprovalPending
+              ? activeOperation.approval?.title ?? "Live AI draft needs your decision"
+              : workflowTrace
+                ? workflowModeLabel(workflowTrace.mode)
+                : "Evidence workflow not run"
+          }
           icon={<Bot className="h-4 w-4 text-primary" aria-hidden="true" />}
           isActionDisabled={!isJobEvidenceReady || !isResumeReady}
           label="AI services"
-          status={analysis ? "ready" : "pending"}
-          statusLabel={analysis ? "Complete" : "Ready after resume"}
+          status={isApprovalPending ? "attention" : analysis ? "ready" : "pending"}
+          statusLabel={isApprovalPending ? "Approval required" : analysis ? "Complete" : "Ready after resume"}
           onAction={onRunAi}
         />
         <SummaryRow
@@ -108,7 +128,7 @@ export function WorkflowSummaryCard({
           actionName="View report"
           detail={analysis ? `Report ${analysis.report_id}` : "No validated report yet"}
           icon={<ClipboardList className="h-4 w-4 text-primary" aria-hidden="true" />}
-          isActionDisabled={!analysis}
+          isActionDisabled={!analysis || isOperationActive}
           label="Validated report"
           status={analysis ? "ready" : "pending"}
           statusLabel={analysis ? "Generated" : "Pending"}
@@ -119,7 +139,7 @@ export function WorkflowSummaryCard({
           actionName="Open tailored resume draft"
           detail={formatDraftDetail(tailoredResumeDraft, analysis)}
           icon={<FileCheck2 className="h-4 w-4 text-primary" aria-hidden="true" />}
-          isActionDisabled={!analysis}
+          isActionDisabled={!analysis || isOperationActive}
           label="Tailored resume"
           status={tailoredResumeDraft?.export_ready ? "ready" : "pending"}
           statusLabel={tailoredResumeDraft?.export_ready ? "Export ready" : "Needs review"}
@@ -141,7 +161,7 @@ interface SummaryRowProps {
   icon: ReactNode;
   isActionDisabled: boolean;
   label: string;
-  status: "pending" | "ready";
+  status: "attention" | "pending" | "ready";
   statusLabel: string;
   onAction: () => void;
 }
@@ -167,7 +187,11 @@ function SummaryRow({
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">{detail}</p>
         </div>
-        <Badge tone={status === "ready" ? "success" : "neutral"}>{statusLabel}</Badge>
+        <Badge
+          tone={status === "ready" ? "success" : status === "attention" ? "warning" : "neutral"}
+        >
+          {statusLabel}
+        </Badge>
       </div>
       <div className="mt-3 flex justify-end">
         <Button
@@ -222,7 +246,9 @@ function formatJobEvidenceDetail(preview: JobPreviewResponse | null): string {
 }
 
 function workflowModeLabel(mode: AgentWorkflowTrace["mode"]): string {
-  return mode === "crewai" ? "Live CrewAI completed" : "Deterministic fallback completed";
+  return mode === "deterministic_fallback"
+    ? "Deterministic fallback completed"
+    : "Live AI workflow completed";
 }
 
 function formatDraftDetail(

@@ -1,8 +1,9 @@
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from time import perf_counter
 
-from app.core.config import Settings, get_cached_settings
+from app.core.config import Settings
 from app.schemas.agent import (
     AgentStepName,
     AgentStepTrace,
@@ -13,6 +14,7 @@ from app.schemas.agent import (
     AtsOptimizerAgentOutput,
     CoverLetterAgentOutput,
     InterviewCoachAgentOutput,
+    LiveDraftSections,
     ResumeMatchAgentOutput,
 )
 from app.schemas.common import (
@@ -23,10 +25,10 @@ from app.schemas.common import (
 )
 from app.schemas.job import JobProfile
 from app.schemas.match import MatchResult
+from app.schemas.operation import LiveDraftProposal
 from app.schemas.report import ApplicationReport, InterviewQuestionGroup
 from app.schemas.resume import ResumeFact, ResumeProfile
 from app.services.claim_validation import find_unsupported_claims
-from app.services.crewai_workflow import CrewAIWorkflowSections, build_crewai_workflow_runner
 from app.services.provider_pricing import ProviderCostEstimate, estimate_provider_cost
 from app.services.report_generator import generate_report
 from app.services.skill_normalizer import find_skills
@@ -34,7 +36,7 @@ from app.services.validator import validate_report_against_resume
 
 
 @dataclass(frozen=True, slots=True)
-class _ValidatedLiveSections:
+class ValidatedLiveSections:
     executive_summary: str
     cover_letter: str
     cover_letter_evidence_ids: list[str]
@@ -51,24 +53,14 @@ def run_application_agent_workflow(
     match: MatchResult,
     settings: Settings | None = None,
 ) -> AgentWorkflowResult:
-    """Run the bounded application-writing workflow with safe CrewAI fallback."""
+    """Build the deterministic source-of-truth report before optional live drafting."""
 
-    resolved_settings = settings or get_cached_settings()
-    deterministic_result = _run_deterministic_application_agent_workflow(
+    del settings
+    return _run_deterministic_application_agent_workflow(
         analysis_id=analysis_id,
         resume=resume,
         job=job,
         match=match,
-    )
-    if resolved_settings.agent_workflow_mode != AgentWorkflowMode.crewai:
-        return deterministic_result
-
-    return _run_crewai_application_agent_workflow(
-        resume=resume,
-        job=job,
-        match=match,
-        deterministic_result=deterministic_result,
-        settings=resolved_settings,
     )
 
 
@@ -81,7 +73,7 @@ def _run_deterministic_application_agent_workflow(
 ) -> AgentWorkflowResult:
     """Run the deterministic fallback workflow.
 
-    This deterministic fallback mirrors the planned CrewAI agent sequence while keeping
+    This deterministic fallback mirrors the live drafting sequence while keeping
     deterministic parsing, matching, and validation as the source of truth.
     """
 
@@ -184,36 +176,22 @@ def _run_deterministic_application_agent_workflow(
     )
 
 
-def _run_crewai_application_agent_workflow(
+def apply_approved_live_draft(
     *,
     resume: ResumeProfile,
     job: JobProfile,
     match: MatchResult,
     deterministic_result: AgentWorkflowResult,
     settings: Settings,
+    sections: LiveDraftSections,
+    proposal: LiveDraftProposal,
+    live_duration_ms: int,
 ) -> AgentWorkflowResult:
     workflow_start = perf_counter()
-    crewai_step_start = perf_counter()
-    try:
-        sections = build_crewai_workflow_runner(settings).run(
-            resume=resume,
-            job=job,
-            match=match,
-            deterministic_report=deterministic_result.report,
-        )
-    except Exception as exc:
-        return _with_crewai_fallback_warning(
-            deterministic_result,
-            exc,
-            settings=settings,
-            crewai_duration_ms=_elapsed_ms(crewai_step_start),
-        )
-
-    crewai_duration_ms = _elapsed_ms(crewai_step_start)
     ats, ats_duration_ms = _timed_call(
         lambda: _ats_optimizer_agent(deterministic_result.report, match)
     )
-    validated_live = _validate_live_sections(
+    validated_live = validate_live_draft_sections(
         sections=sections,
         deterministic_report=deterministic_result.report,
         resume=resume,
@@ -222,12 +200,12 @@ def _run_crewai_application_agent_workflow(
     report = deterministic_result.report.model_copy(
         deep=True,
         update={
-            "executive_summary": validated_live.executive_summary,
+            "executive_summary": proposal.executive_summary,
             "tailored_bullets": ats.tailored_bullets,
             "ats_keywords": ats.keyword_suggestions,
-            "cover_letter": validated_live.cover_letter,
+            "cover_letter": proposal.cover_letter,
             "cover_letter_evidence_ids": validated_live.cover_letter_evidence_ids,
-            "interview_questions": validated_live.interview_questions,
+            "interview_questions": proposal.interview_questions,
             "next_actions": _next_actions(deterministic_result.report, sections.resume_match, ats),
         },
     )
@@ -263,13 +241,13 @@ def _run_crewai_application_agent_workflow(
             ),
         ),
         AgentStepTrace(
-            name=AgentStepName.crewai_runtime,
+            name=AgentStepName.langgraph_runtime,
             status="completed",
             summary=(
-                "Executed live CrewAI structured-output agents with model "
-                f"{settings.crewai_llm_model or settings.llm_model}."
+                "Executed LangChain structured model calls inside resumable LangGraph nodes "
+                f"with model {settings.llm_model}."
             ),
-            duration_ms=crewai_duration_ms,
+            duration_ms=live_duration_ms,
         ),
         AgentStepTrace(
             name=AgentStepName.resume_match,
@@ -282,7 +260,7 @@ def _run_crewai_application_agent_workflow(
                 "Unsafe live resume-match text was replaced with deterministic content."
                 if AgentStepName.resume_match.value in validated_live.blocked_sections
                 else (
-                    "CrewAI explained deterministic fit with "
+                    "Live AI explained deterministic fit with "
                     f"{len(sections.resume_match.evidence_ids)} resume evidence references."
                 )
             ),
@@ -308,7 +286,7 @@ def _run_crewai_application_agent_workflow(
                 "Unsafe live cover-letter text was replaced with deterministic content."
                 if AgentStepName.cover_letter.value in validated_live.blocked_sections
                 else (
-                    "CrewAI drafted cover letter from validated evidence; "
+                    "Live AI drafted the cover letter from validated evidence; "
                     f"{len(sections.cover_letter.evidence_ids)} evidence references used."
                 )
             ),
@@ -326,7 +304,7 @@ def _run_crewai_application_agent_workflow(
                 "deterministic content."
                 if AgentStepName.interview_coach.value in validated_live.blocked_sections
                 else (
-                    "CrewAI prepared "
+                    "Live AI prepared "
                     f"{len(sections.interview_coach.question_groups)} interview question groups."
                 )
             ),
@@ -338,11 +316,17 @@ def _run_crewai_application_agent_workflow(
             summary=_validation_summary(validation_status, validation_warnings),
             started_at=validation_step_start,
         ),
+        AgentStepTrace(
+            name=AgentStepName.human_approval,
+            status="completed",
+            summary="The user approved the validated live draft before it replaced baseline text.",
+            duration_ms=None,
+        ),
     ]
     return AgentWorkflowResult(
         report=report,
         trace=AgentWorkflowTrace(
-            mode=AgentWorkflowMode.crewai,
+            mode=AgentWorkflowMode.langgraph,
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
             validation_status=validation_status,
@@ -362,18 +346,18 @@ def _run_crewai_application_agent_workflow(
     )
 
 
-def _with_crewai_fallback_warning(
+def with_langgraph_fallback_warning(
     deterministic_result: AgentWorkflowResult,
     exc: Exception,
     *,
     settings: Settings,
-    crewai_duration_ms: int | None = None,
+    live_duration_ms: int | None = None,
 ) -> AgentWorkflowResult:
     report = deterministic_result.report.model_copy(deep=True)
     warning = ValidationWarning(
-        code="crewai_unavailable",
+        code="langgraph_unavailable",
         message=(
-            "CrewAI workflow mode was requested, but live execution was unavailable; "
+            "The LangGraph live-draft workflow was requested, but execution was unavailable; "
             f"returned deterministic fallback. Reason: {_public_error_summary(exc)}"
         ),
     )
@@ -381,13 +365,13 @@ def _with_crewai_fallback_warning(
     validation_status = _set_report_validation(report, validation_warnings)
     traces = [
         AgentStepTrace(
-            name=AgentStepName.crewai_runtime,
+            name=AgentStepName.langgraph_runtime,
             status="failed",
             summary=(
-                "CrewAI live execution unavailable; deterministic fallback returned. "
+                "LangGraph live drafting was unavailable; deterministic fallback returned. "
                 f"Reason: {_public_error_summary(exc)}"
             ),
-            duration_ms=crewai_duration_ms,
+            duration_ms=live_duration_ms,
         ),
         *deterministic_result.trace.steps,
     ]
@@ -398,7 +382,7 @@ def _with_crewai_fallback_warning(
             steps=traces,
             validation_warning_codes=[warning.code for warning in validation_warnings],
             validation_status=validation_status,
-            duration_ms=(deterministic_result.trace.duration_ms or 0) + (crewai_duration_ms or 0),
+            duration_ms=(deterministic_result.trace.duration_ms or 0) + (live_duration_ms or 0),
             provider=_runtime_provider(settings),
             model=_runtime_model(settings),
             token_usage=None,
@@ -408,6 +392,108 @@ def _with_crewai_fallback_warning(
                 status="failed",
                 token_usage=None,
                 fallback_reason=_public_error_summary(exc),
+            ),
+        ),
+    )
+
+
+def with_live_ai_limit_warning(
+    deterministic_result: AgentWorkflowResult,
+    *,
+    settings: Settings,
+) -> AgentWorkflowResult:
+    """Return the completed deterministic report when live quota is unavailable."""
+
+    report = deterministic_result.report.model_copy(deep=True)
+    warning = ValidationWarning(
+        code="live_ai_limit_reached",
+        message=(
+            "The deterministic report completed, but live drafting was skipped because the "
+            "current plan's live AI limit was reached."
+        ),
+    )
+    validation_warnings = _dedupe_warnings([*report.validation_warnings, warning])
+    validation_status = _set_report_validation(report, validation_warnings)
+    return AgentWorkflowResult(
+        report=report,
+        trace=AgentWorkflowTrace(
+            mode=AgentWorkflowMode.deterministic_fallback,
+            steps=[
+                AgentStepTrace(
+                    name=AgentStepName.langgraph_runtime,
+                    status="degraded",
+                    summary=(
+                        "Live drafting was skipped because the live AI plan limit was reached; "
+                        "the deterministic report completed successfully."
+                    ),
+                    duration_ms=0,
+                ),
+                *deterministic_result.trace.steps,
+            ],
+            validation_warning_codes=[warning.code for warning in validation_warnings],
+            validation_status=validation_status,
+            duration_ms=deterministic_result.trace.duration_ms,
+            provider=_runtime_provider(settings),
+            model=_runtime_model(settings),
+            runtime_metadata=_runtime_metadata(
+                settings=settings,
+                status="skipped_limit",
+                token_usage=None,
+            ),
+        ),
+    )
+
+
+def with_rejected_live_draft(
+    deterministic_result: AgentWorkflowResult,
+    *,
+    settings: Settings,
+    sections: LiveDraftSections,
+    live_duration_ms: int,
+) -> AgentWorkflowResult:
+    """Retain the deterministic report while recording the explicit user decision."""
+
+    provider = _runtime_provider(settings)
+    model = _runtime_model(settings)
+    cost_estimate = estimate_provider_cost(
+        provider=provider,
+        model=model,
+        region=settings.vertex_region,
+        token_usage=sections.token_usage,
+    )
+    return AgentWorkflowResult(
+        report=deterministic_result.report.model_copy(deep=True),
+        trace=AgentWorkflowTrace(
+            mode=AgentWorkflowMode.deterministic_fallback,
+            steps=[
+                AgentStepTrace(
+                    name=AgentStepName.langgraph_runtime,
+                    status="completed",
+                    summary="Generated and validated a live draft inside LangGraph.",
+                    duration_ms=live_duration_ms,
+                ),
+                AgentStepTrace(
+                    name=AgentStepName.human_approval,
+                    status="degraded",
+                    summary=(
+                        "The user rejected the live draft; the deterministic report was retained."
+                    ),
+                    duration_ms=None,
+                ),
+                *deterministic_result.trace.steps,
+            ],
+            validation_warning_codes=deterministic_result.trace.validation_warning_codes,
+            validation_status=deterministic_result.trace.validation_status,
+            duration_ms=(deterministic_result.trace.duration_ms or 0) + live_duration_ms,
+            provider=provider,
+            model=model,
+            token_usage=sections.token_usage,
+            cost_estimate_usd=cost_estimate.amount_usd if cost_estimate else None,
+            runtime_metadata=_runtime_metadata(
+                settings=settings,
+                status="rejected",
+                token_usage=sections.token_usage,
+                cost_estimate=cost_estimate,
             ),
         ),
     )
@@ -638,13 +724,13 @@ def _facts_for_ids(resume: ResumeProfile, evidence_ids: list[str]) -> list[Resum
     return [facts_by_id[evidence_id] for evidence_id in evidence_ids if evidence_id in facts_by_id]
 
 
-def _validate_live_sections(
+def validate_live_draft_sections(
     *,
-    sections: CrewAIWorkflowSections,
+    sections: LiveDraftSections,
     deterministic_report: ApplicationReport,
     resume: ResumeProfile,
     job: JobProfile,
-) -> _ValidatedLiveSections:
+) -> ValidatedLiveSections:
     warnings: list[ValidationWarning] = []
     blocked_sections: set[str] = set()
 
@@ -657,12 +743,13 @@ def _validate_live_sections(
         resume=resume,
         job=job,
         require_evidence=True,
-        validate_skills=False,
+        validate_skills=True,
+        expected_match_score=deterministic_report.match_score,
     )
+    executive_summary = deterministic_report.executive_summary
     if fit_warning:
         warnings.append(fit_warning)
         blocked_sections.add(AgentStepName.resume_match.value)
-        executive_summary = deterministic_report.executive_summary
 
     cover_letter = sections.cover_letter.draft
     cover_letter_evidence_ids = sections.cover_letter.evidence_ids
@@ -675,6 +762,7 @@ def _validate_live_sections(
         job=job,
         require_evidence=True,
         validate_skills=True,
+        expected_match_score=None,
     )
     if cover_warning:
         warnings.append(cover_warning)
@@ -699,7 +787,7 @@ def _validate_live_sections(
         blocked_sections.add(AgentStepName.interview_coach.value)
         interview_questions = deterministic_report.interview_questions
 
-    return _ValidatedLiveSections(
+    return ValidatedLiveSections(
         executive_summary=executive_summary,
         cover_letter=cover_letter,
         cover_letter_evidence_ids=cover_letter_evidence_ids,
@@ -719,6 +807,7 @@ def _live_text_block_warning(
     job: JobProfile,
     require_evidence: bool,
     validate_skills: bool,
+    expected_match_score: float | None,
 ) -> ValidationWarning | None:
     facts_by_id = {fact.id: fact for fact in resume.facts}
     missing_evidence_ids = [
@@ -738,6 +827,11 @@ def _live_text_block_warning(
     )
     reasons.update(finding.category.value for finding in unsupported_claims)
 
+    if expected_match_score is not None and _contains_changed_match_score(
+        text, expected_match_score
+    ):
+        reasons.add("match score")
+
     if validate_skills:
         evidence_skills = set(find_skills(evidence_text))
         if any(skill not in evidence_skills for skill in find_skills(text)):
@@ -754,6 +848,18 @@ def _live_text_block_warning(
         ),
         evidence_ids=list(dict.fromkeys([*evidence_ids, *missing_evidence_ids])),
         severity=ValidationSeverity.block,
+    )
+
+
+def _contains_changed_match_score(text: str, expected_score: float) -> bool:
+    score_pattern = re.compile(
+        r"\b(?:match|fit|score|scores|scored)\b[^\d]{0,16}"
+        r"(?P<score>\d{1,3}(?:\.\d+)?)\s*(?:/\s*100|%)",
+        re.IGNORECASE,
+    )
+    return any(
+        abs(float(match.group("score")) - expected_score) > 0.05
+        for match in score_pattern.finditer(text)
     )
 
 
@@ -876,10 +982,8 @@ def _runtime_provider(settings: Settings) -> str:
 
 
 def _runtime_model(settings: Settings) -> str:
-    if settings.crewai_llm_model:
-        return settings.crewai_llm_model
     if _runtime_provider(settings) == "vertex":
-        return f"google/{settings.llm_model}"
+        return f"google_genai/{settings.llm_model}"
     return settings.llm_model
 
 
@@ -893,11 +997,11 @@ def _runtime_metadata(
     blocked_live_sections: frozenset[str] | None = None,
 ) -> dict[str, str | int | float | bool | None]:
     metadata: dict[str, str | int | float | bool | None] = {
-        "workflow_runtime": "crewai",
+        "workflow_runtime": "langgraph",
         "runtime_status": status,
         "provider": _runtime_provider(settings),
         "model": _runtime_model(settings),
-        "token_usage_source": "crewai_llm_summary" if token_usage else "unavailable",
+        "token_usage_source": "langchain_message_usage" if token_usage else "unavailable",
         "cost_estimate_source": "unavailable",
     }
     if cost_estimate:
