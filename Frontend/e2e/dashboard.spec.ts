@@ -3,6 +3,8 @@ import path from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test, type TestInfo } from "@playwright/test";
 
+import type { ApplicationReport } from "@/features/dashboard/types";
+
 const RESUME_FIXTURE = path.resolve(
   process.cwd(),
   "../Backend/evals/resumes/backend_fresher.md"
@@ -706,6 +708,9 @@ test("dashboard demo flow renders report and validates exports", async ({ page }
     prefix: "%PDF-"
   });
 
+  expect(
+    await page.evaluate(() => document.documentElement.scrollHeight)
+  ).toBeLessThan(3_000);
   await captureDashboardScreenshot(page, testInfo, "dashboard-desktop.png");
 
   await page.goto(`/app/applications/${applicationId}`);
@@ -752,6 +757,77 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   ).toBe(true);
   await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-320-score.png");
 
+  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect
+    .poll(() =>
+      page
+        .getByRole("button", { name: "Download Markdown" })
+        .evaluate((element) => window.getComputedStyle(element).color)
+    )
+    .toBe("rgb(241, 244, 233)");
+  const darkReportAccessibilityScan = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    darkReportAccessibilityScan.violations.map((violation) => violation.id),
+    JSON.stringify(darkReportAccessibilityScan.violations, null, 2)
+  ).toEqual([]);
+
+  for (const testId of [
+    "score-method-disclosure",
+    "skill-evidence-disclosure",
+    "resume-recommendations-disclosure",
+    "application-materials-disclosure"
+  ]) {
+    await page.getByTestId(testId).locator("summary").first().click();
+  }
+  const mobileMaterials = page.getByTestId("application-materials-disclosure");
+  await mobileMaterials.getByText("Read full cover letter", { exact: true }).click();
+  const mobileInterviewPanel = mobileMaterials.locator("section").filter({
+    has: page.getByRole("heading", { name: "Interview preparation" })
+  });
+  await mobileInterviewPanel.locator("details > summary").first().click();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true);
+  await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-320-report-expanded.png");
+
+  const unbrokenToken = "schemaUnboundedReportToken".repeat(12);
+  for (const label of [
+    "Python, matched",
+    "Observability, preferred",
+    "Distributed tracing, add only if true"
+  ]) {
+    await page
+      .getByRole("region", { name: "Report at a glance" })
+      .getByLabel(label)
+      .evaluate((element, token) => {
+        const nestedLabel = element.querySelector("span");
+        (nestedLabel ?? element).textContent = token;
+      }, unbrokenToken);
+  }
+  const expandedLedgerValues = [
+    page.getByTestId("skill-evidence-disclosure").locator("h5").first(),
+    page.getByTestId("skill-evidence-disclosure").locator("h5").last(),
+    page.getByTestId("resume-recommendations-disclosure").locator("h5").first(),
+    mobileInterviewPanel.locator("h4").first()
+  ];
+  for (const value of expandedLedgerValues) {
+    await value.evaluate((element, token) => {
+      element.textContent = token;
+    }, unbrokenToken);
+    expect(
+      await value.evaluate((element) => ({
+        contained: element.scrollWidth <= element.clientWidth,
+        overflowWrap: window.getComputedStyle(element).overflowWrap
+      }))
+    ).toEqual({ contained: true, overflowWrap: "anywhere" });
+  }
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true);
+
   await page.goto(`/app/applications/${applicationId}`);
   await expectApplicationCaseOverview(page);
   const mobileNextActionBounds = await page.getByTestId("case-next-action").boundingBox();
@@ -779,7 +855,9 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
 });
 
 async function expectApplicationCaseOverview(page: Page): Promise<void> {
-  await expect(page.getByRole("region", { name: "Application case overview" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Application case overview" })).toBeVisible({
+    timeout: 20_000
+  });
   await expect(page.getByRole("heading", { name: "Evidence-fit score" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Evidence snapshot" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Every gate stays visible" })).toBeVisible();
@@ -1057,9 +1135,14 @@ test("dashboard flags unclear job requirement extraction", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByText("Needs job details", { exact: true })).toBeVisible();
   await expect(page.getByText("Job details need review", { exact: true })).toBeVisible();
-  await expect(page.getByText("No evidence-backed matches yet", { exact: true })).toBeVisible();
-  await expect(page.getByText("Gaps not available", { exact: true })).toBeVisible();
-  await expect(page.getByText("No ATS keywords extracted", { exact: true })).toBeVisible();
+  const reportAtGlance = page.getByRole("region", { name: "Report at a glance" });
+  await expect(
+    reportAtGlance.getByText("No evidence-backed matches yet", { exact: true })
+  ).toBeVisible();
+  await expect(reportAtGlance.getByText("Gaps not available", { exact: true })).toBeVisible();
+  await expect(
+    reportAtGlance.getByText("No ATS keywords extracted", { exact: true })
+  ).toBeVisible();
 });
 
 test("dashboard labels and preserves a legacy report without a score breakdown", async ({
@@ -1083,6 +1166,13 @@ test("dashboard labels and preserves a legacy report without a score breakdown",
   await expect(page.getByText("Legacy unversioned score", { exact: true })).toBeVisible();
   await expect(page.getByText("Legacy score", { exact: true })).toBeVisible();
   await expect(page.getByText("Historical score", { exact: true }).first()).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "About this historical score" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "How this evidence-fit score is calculated" })
+  ).toHaveCount(0);
+  await page.getByTestId("score-method-disclosure").locator("summary").first().click();
   await expect(
     page.getByText(
       "Detailed evidence components were not recorded for this historical report. " +
@@ -1250,6 +1340,102 @@ interface RunAiAnalysisResult {
   reportId: string;
 }
 
+async function installExpandedReportFixture(page: Page): Promise<void> {
+  await page.route(/\/api\/reports\/\d+$/, async (route) => {
+    const response = await route.fetch();
+    const report = (await response.json()) as ApplicationReport;
+
+    while (report.matched_skills.length < 10) {
+      const index = report.matched_skills.length + 1;
+      report.matched_skills.push({
+        confidence: "high",
+        job_evidence_text: `Overflow skill ${index} is required by the reviewed job evidence.`,
+        match_type: "exact",
+        resume_evidence_ids: ["projects_001"],
+        skill: `Overflow skill ${index}`
+      });
+    }
+    if (!report.matched_skills.some((item) => item.skill === "Overflow skill 10")) {
+      report.matched_skills.push({
+        confidence: "high",
+        job_evidence_text: "Overflow skill 10 is required by the reviewed job evidence.",
+        match_type: "exact",
+        resume_evidence_ids: ["projects_001"],
+        skill: "Overflow skill 10"
+      });
+    }
+    if (!report.missing_skills.some((item) => item.importance === "preferred")) {
+      report.missing_skills.unshift({
+        importance: "preferred",
+        job_evidence_text: "Observability is preferred for this role.",
+        recommendation: "Add observability only when supported by truthful project evidence.",
+        skill: "Observability",
+        why_it_matters: "The reviewed job evidence marks this capability as preferred."
+      });
+    }
+    if (report.weak_skills.length === 0) {
+      report.weak_skills.push({
+        reason: "The resume mentions ownership without a concrete project or work example.",
+        resume_evidence_ids: ["summary_001"],
+        skill: "Production ownership"
+      });
+    }
+    while (report.missing_skills.length < 6) {
+      const index = report.missing_skills.length + 1;
+      report.missing_skills.push({
+        importance: "required",
+        job_evidence_text: `Overflow gap ${index} is required by the role.`,
+        recommendation: `Prepare truthful evidence for overflow gap ${index}.`,
+        skill: `Overflow gap ${index}`,
+        why_it_matters: "The reviewed job evidence marks this capability as required."
+      });
+    }
+    if (!report.missing_skills.some((item) => item.skill === "Overflow gap 6")) {
+      report.missing_skills.push({
+        importance: "required",
+        job_evidence_text: "Overflow gap 6 is required by the role.",
+        recommendation: "Prepare truthful evidence for overflow gap 6.",
+        skill: "Overflow gap 6",
+        why_it_matters: "The reviewed job evidence marks this capability as required."
+      });
+    }
+    if (!report.ats_keywords.some((item) => item.status === "add_only_if_true")) {
+      report.ats_keywords.unshift({
+        evidence_ids: [],
+        keyword: "Distributed tracing",
+        note: "Add only if the resume can link this phrase to truthful delivery evidence.",
+        status: "add_only_if_true"
+      });
+    }
+    while (report.ats_keywords.length < 12) {
+      const index = report.ats_keywords.length + 1;
+      report.ats_keywords.push({
+        evidence_ids: ["projects_001"],
+        keyword: `Overflow keyword ${index}`,
+        note: "Supported by linked project evidence.",
+        status: "supported"
+      });
+    }
+    if (!report.ats_keywords.some((item) => item.keyword === "Overflow keyword 12")) {
+      report.ats_keywords.push({
+        evidence_ids: ["projects_001"],
+        keyword: "Overflow keyword 12",
+        note: "Supported by linked project evidence.",
+        status: "supported"
+      });
+    }
+    while (report.next_actions.length < 6) {
+      const index = report.next_actions.length + 1;
+      report.next_actions.push(`Overflow next action ${index}.`);
+    }
+    if (!report.next_actions.includes("Overflow next action 6.")) {
+      report.next_actions.push("Overflow next action 6.");
+    }
+
+    await route.fulfill({ json: report, response });
+  });
+}
+
 async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboardFlow> {
   await mockFixtureJobPreviews(page);
   await page.goto(WORKFLOW_PATH);
@@ -1287,6 +1473,7 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
   await expect(page.getByRole("heading", { name: "Evidence ledger" })).toBeVisible();
   await page.getByText("Review parsed resume evidence", { exact: true }).click();
 
+  await installExpandedReportFixture(page);
   const result = await runAiAnalysis(page, { acceptFirstDraft: true });
 
   await expect(page.getByText("Evidence-fit score", { exact: true })).toBeVisible();
@@ -1296,34 +1483,104 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
   await expect(
     page.getByRole("heading", { name: "How this evidence-fit score is calculated" })
   ).toBeVisible();
-  await expect(page.getByText("Required skill evidence", { exact: true })).toBeVisible();
-  await expect(page.getByText("Preferred skill evidence", { exact: true })).toBeVisible();
-  await expect(page.getByText("Project/work evidence strength", { exact: true })).toBeVisible();
-  await expect(
-    page.getByRole("progressbar", { name: "Required skill evidence score" })
-  ).toBeVisible();
-  const scoreBreakdown = page.locator("section").filter({
-    has: page.getByRole("heading", { name: "How this evidence-fit score is calculated" })
-  });
-  await expect(scoreBreakdown.getByLabel(/Resume .* evidence\./).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Matched skills" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Missing or weak" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "ATS keywords" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Cover letter draft" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Interview preparation" })).toBeVisible();
+  const reportAtGlance = page.getByRole("region", { name: "Report at a glance" });
+  await expect(reportAtGlance.getByLabel("Observability, preferred")).toBeVisible();
+  await expect(reportAtGlance.getByLabel("Production ownership, weak evidence")).toBeVisible();
+  await expect(reportAtGlance.getByLabel("Distributed tracing, add only if true")).toBeVisible();
   await expect(page.getByText(/Validation: (Passed|Needs review|Blocked)/)).toBeVisible();
+  const openCoverLetterButton = page.getByRole("button", { name: "Open cover letter" });
+  await expect(openCoverLetterButton).toBeVisible();
   await expect(page.getByRole("button", { name: "Download DOCX" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Workflow trace" })).toBeVisible();
   await expect(page.getByText(/Report \d+/).first()).toBeVisible();
   await expect(page.getByText("Deterministic fallback", { exact: true })).toBeVisible();
   await expect(page.getByText(/\d+(?:\.\d)? (?:ms|s) total/)).toBeVisible();
-  const reportAccessibilityScan = await new AxeBuilder({ page })
+  await expect(page.getByText("Overflow skill 10", { exact: true })).not.toBeVisible();
+  await expect(page.getByText("Overflow keyword 12", { exact: true })).not.toBeVisible();
+
+  const collapsedReportAccessibilityScan = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
   expect(
-    reportAccessibilityScan.violations.map((violation) => violation.id),
-    JSON.stringify(reportAccessibilityScan.violations, null, 2)
+    collapsedReportAccessibilityScan.violations.map((violation) => violation.id),
+    JSON.stringify(collapsedReportAccessibilityScan.violations, null, 2)
+  ).toEqual([]);
+
+  const scoreDisclosure = page.getByTestId("score-method-disclosure");
+  const scoreSummary = scoreDisclosure.locator("summary").first();
+  await expect(scoreDisclosure).not.toHaveAttribute("open", "");
+  await scoreSummary.focus();
+  await page.keyboard.press("Enter");
+  await expect(scoreDisclosure).toHaveAttribute("open", "");
+  await expect(scoreSummary).toBeFocused();
+  await expect(page.getByText("Required skill evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preferred skill evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText("Work/project proof", { exact: true })).toBeVisible();
+  await expect(
+    scoreDisclosure.getByText(
+      /\d+ backed by work\/projects · \d+ from other resume sections · Does not change the fit score/
+    )
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Work/project proof score" })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("progressbar", { name: "Required skill evidence score" })
+  ).toBeVisible();
+  await scoreDisclosure.getByText(/View calculation and \d+ linked/).first().click();
+  await expect(scoreDisclosure.getByLabel(/Resume .* evidence\./).first()).toBeVisible();
+  const workProofRow = scoreDisclosure.locator("article").filter({
+    has: page.getByText("Work/project proof", { exact: true })
+  });
+  await workProofRow.getByText(/View explanation and \d+ linked/).click();
+  await expect(
+    workProofRow.getByText(/this check does not add or remove fit-score points/i)
+  ).toBeVisible();
+
+  const skillDisclosure = page.getByTestId("skill-evidence-disclosure");
+  const skillSummary = skillDisclosure.locator("summary").first();
+  await skillSummary.focus();
+  await page.keyboard.press("Space");
+  await expect(skillDisclosure).toHaveAttribute("open", "");
+  await expect(skillSummary).toBeFocused();
+  await expect(skillDisclosure.getByText("Overflow skill 10", { exact: true })).toBeVisible();
+  await expect(skillDisclosure.getByText("Overflow gap 6", { exact: true })).toBeVisible();
+
+  const recommendationDisclosure = page.getByTestId("resume-recommendations-disclosure");
+  await recommendationDisclosure.locator("summary").first().click();
+  await expect(
+    recommendationDisclosure.getByText("Overflow keyword 12", { exact: true })
+  ).toBeVisible();
+  await expect(
+    recommendationDisclosure.getByText(/Overflow next action 6\./)
+  ).toBeVisible();
+
+  const materialsDisclosure = page.getByTestId("application-materials-disclosure");
+  await expect(materialsDisclosure).not.toHaveAttribute("open", "");
+  await openCoverLetterButton.click();
+  await expect(materialsDisclosure).toHaveAttribute("open", "");
+  await expect(page.getByRole("heading", { name: "Cover letter draft" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Interview preparation" })).toBeVisible();
+  const coverLetterDisclosure = materialsDisclosure.getByTestId(
+    "cover-letter-draft-disclosure"
+  );
+  await expect(coverLetterDisclosure).toHaveAttribute("open", "");
+  await expect(coverLetterDisclosure.locator("summary")).toBeFocused();
+  const interviewPanel = materialsDisclosure.locator("section").filter({
+    has: page.getByRole("heading", { name: "Interview preparation" })
+  });
+  await interviewPanel.locator("details > summary").first().click();
+
+  const expandedReportAccessibilityScan = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    expandedReportAccessibilityScan.violations.map((violation) => violation.id),
+    JSON.stringify(expandedReportAccessibilityScan.violations, null, 2)
   ).toEqual([]);
 
   if (!result.applicationId) {
@@ -1346,9 +1603,15 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
 
   await page.goto(`/app/applications/${result.applicationId}/report`);
   await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible();
+  const savedSkillDisclosure = page.getByTestId("skill-evidence-disclosure");
+  await savedSkillDisclosure.locator("summary").first().click();
+  await savedSkillDisclosure.getByText(/View \d+ linked/).first().click();
   const pageText = await page.locator("body").innerText();
   expect(pageText).not.toMatch(/(?:summary|skills)_\d{3} ·/);
   expect(pageText).toMatch(/(?:Project evidence|Work evidence|Resume summary|Skills section) #\d+/);
+  await savedSkillDisclosure.locator("summary").first().click();
+  await expect(savedSkillDisclosure).not.toHaveAttribute("open", "");
+  await page.evaluate(() => window.scrollTo(0, 0));
 
   return {
     applicationId: result.applicationId,
@@ -1367,13 +1630,18 @@ async function analyzeJob(page: Page, input: AnalyzeJobInput): Promise<string> {
 }
 
 async function enterJobListing(page: Page, input: AnalyzeJobInput): Promise<void> {
+  await expect(page.getByRole("button", { name: "Refresh workspace status" })).toBeEnabled({
+    timeout: 20_000
+  });
   const jobUrlInput = page.getByRole("textbox", { name: "Job listing URL" });
   if (!(await jobUrlInput.isVisible().catch(() => false))) {
     await page.getByRole("button", { name: "Edit job listing" }).click();
   }
 
   await jobUrlInput.fill(input.url);
-  await page.getByRole("button", { name: "Review job evidence" }).click();
+  const reviewJobEvidenceButton = page.getByRole("button", { name: "Review job evidence" });
+  await expect(reviewJobEvidenceButton).toBeEnabled({ timeout: 20_000 });
+  await reviewJobEvidenceButton.click();
   await expect(page.getByRole("heading", { name: "Review job evidence" })).toBeVisible();
   await page.getByRole("button", { name: /^(Save and continue|Continue with warning)$/ }).click();
 }

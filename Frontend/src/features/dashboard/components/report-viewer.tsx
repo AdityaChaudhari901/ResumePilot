@@ -1,7 +1,6 @@
 import {
   AlertTriangle,
   Bot,
-  CheckCircle2,
   ChevronDown,
   CircleAlert,
   CircleCheck,
@@ -9,12 +8,13 @@ import {
   ClipboardList,
   Download,
   FileCheck2,
+  FileText,
   GitBranch,
   ListChecks,
   SearchCheck,
   ShieldCheck
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,9 @@ import { EvidenceIdBadges } from "@/features/dashboard/components/evidence-id-ba
 import { MatchScoreBreakdownView } from "@/features/dashboard/components/match-score-breakdown";
 import { ReportCoverLetterPanel } from "@/features/dashboard/components/report-cover-letter-panel";
 import { ReportInterviewPrepPanel } from "@/features/dashboard/components/report-interview-prep-panel";
+import { ReportRecommendations } from "@/features/dashboard/components/report-recommendations";
+import { ReportSectionDisclosure } from "@/features/dashboard/components/report-section-disclosure";
+import { ReportSkillEvidence } from "@/features/dashboard/components/report-skill-evidence";
 import type {
   AgentStepName,
   AgentStepStatus,
@@ -58,6 +61,8 @@ export function ReportViewer({
   resumeProfile,
   workflowTrace
 }: ReportViewerProps) {
+  const materialsDisclosureRef = useRef<HTMLDetailsElement>(null);
+
   if (!report || !analysis) {
     return (
       <Panel eyebrow="Step 05" title="Report">
@@ -82,7 +87,29 @@ export function ReportViewer({
     badgeTone: scoreBadgeTone,
     heading: scoreHeading
   } = reportScorePresentation(report);
-  const topKeywords = report.ats_keywords.slice(0, 10);
+  const matchedPreview = report.matched_skills.slice(0, 6);
+  const missingPreview = report.missing_skills.slice(0, report.weak_skills.length > 0 ? 5 : 6);
+  const gapPreview = [
+    ...missingPreview.map((item) => ({
+      label: item.importance,
+      skill: item.skill,
+      tone: item.importance === "required" ? ("danger" as const) : ("warning" as const)
+    })),
+    ...report.weak_skills.slice(0, 6 - missingPreview.length).map((item) => ({
+      label: "weak evidence",
+      skill: item.skill,
+      tone: "warning" as const
+    }))
+  ].slice(0, 6);
+  const keywordPreview = report.ats_keywords.slice(0, 8);
+  const actionPreview = report.next_actions.slice(0, 3);
+  const gapCount = report.missing_skills.length + report.weak_skills.length;
+  const scoreDetailTitle = report.score_breakdown
+    ? "How this evidence-fit score is calculated"
+    : "About this historical score";
+  const scoreDetailDescription = report.score_breakdown
+    ? "Inspect weighting, contributions, caps, and the evidence behind every score component."
+    : "Review the saved score provenance without implying that unrecorded components can be reconstructed.";
   const validationStatus = reportValidationStatus(report);
   const coverLetterWarnings = report.validation_warnings.filter((warning) =>
     warning.code.startsWith("cover_letter")
@@ -90,6 +117,32 @@ export function ReportViewer({
   const interviewWarnings = report.validation_warnings.filter((warning) =>
     warning.code.startsWith("interview")
   );
+
+  function revealCoverLetter() {
+    const materialsDisclosure = materialsDisclosureRef.current;
+    if (!materialsDisclosure) {
+      return;
+    }
+
+    materialsDisclosure.open = true;
+    const coverLetterDisclosure = materialsDisclosure.querySelector<HTMLDetailsElement>(
+      '[data-testid="cover-letter-draft-disclosure"]'
+    );
+    if (coverLetterDisclosure) {
+      coverLetterDisclosure.open = true;
+    }
+
+    window.requestAnimationFrame(() => {
+      const target = coverLetterDisclosure?.querySelector<HTMLElement>("summary");
+      target?.focus();
+      target?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "center"
+      });
+    });
+  }
 
   return (
     <Panel
@@ -109,6 +162,13 @@ export function ReportViewer({
             Markdown
           </ReportExportButton>
           <Button
+            icon={<FileText className="h-4 w-4" aria-hidden="true" />}
+            onClick={revealCoverLetter}
+            variant="secondary"
+          >
+            Open cover letter
+          </Button>
+          <Button
             disabled={!canOpenTailoredResume}
             icon={<FileCheck2 className="h-4 w-4" aria-hidden="true" />}
             onClick={onOpenTailoredResume}
@@ -125,37 +185,43 @@ export function ReportViewer({
       eyebrow={`Report ${analysis.report_id}`}
       title="Evidence-backed fit"
     >
-      <div className="space-y-5">
-        <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-[14rem_1fr]">
-          <div className="bg-foreground p-5 text-background">
-            <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-background/60">
+      <div className="space-y-4">
+        <section
+          aria-label="Report decision brief"
+          className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border lg:grid-cols-[15rem_minmax(0,1fr)]"
+        >
+          <div className="bg-terminal p-5 text-white">
+            <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-white/60">
               {scoreHeading}
             </p>
             <p className="mt-3 font-mono text-6xl font-semibold tracking-[-0.08em] text-primary tabular-nums">
               {formatScore(report.match_score)}
             </p>
             <Badge
-              className="mt-3 border-background/25 bg-background text-foreground"
+              className="mt-3 border-white/25 bg-white text-[#171a14]"
               tone={scoreBadgeTone}
             >
               {scoreBadgeLabel}
             </Badge>
-            <p className="mt-4 text-xs leading-5 text-background/65">
+            <p className="mt-4 text-xs leading-5 text-white/65">
               This deterministic comparison is not a hiring probability or ATS guarantee.
             </p>
           </div>
-          <div className="bg-surface-raised p-5 sm:p-6">
+          <div className="min-w-0 bg-surface-raised p-5 sm:p-6">
             <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
-              Executive summary
+              Decision brief
             </p>
-            <p className="mt-4 text-sm leading-7 text-muted-foreground">{report.executive_summary}</p>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">
+              {report.executive_summary}
+            </p>
+            <dl className="mt-5 grid grid-cols-2 gap-2 border-t border-border pt-4 sm:grid-cols-4">
+              <ReportMetric label="Matched" value={report.matched_skills.length} />
+              <ReportMetric label="Missing" value={report.missing_skills.length} />
+              <ReportMetric label="Weak" value={report.weak_skills.length} />
+              <ReportMetric label="Warnings" value={report.validation_warnings.length} />
+            </dl>
           </div>
-        </div>
-
-        <MatchScoreBreakdownView
-          breakdown={report.score_breakdown}
-          scoringVersion={report.scoring_version}
-        />
+        </section>
 
         {hasUnclearJobRequirements ? (
           <div
@@ -181,200 +247,163 @@ export function ReportViewer({
           </div>
         ) : null}
 
-        <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-3">
-          <Metric label="Matched" value={report.matched_skills.length} />
-          <Metric label="Missing" value={report.missing_skills.length} />
-          <Metric label="Warnings" value={report.validation_warnings.length} />
-        </div>
-
-        <WorkflowTracePanel trace={workflowTrace} />
-
-        <section className="grid gap-4 lg:grid-cols-2">
-          <div>
-            <div className="mb-3 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-validation" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Matched skills</h3>
+        <section aria-label="Report at a glance" className="grid gap-3 xl:grid-cols-12">
+          <article className="min-w-0 rounded-xl border border-border bg-surface p-4 sm:p-5 xl:col-span-7">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <SearchCheck className="h-4 w-4 text-validation" aria-hidden="true" />
+                <h3 className="text-sm font-bold text-foreground">Matched skills</h3>
+              </div>
+              <Badge tone="success">{report.matched_skills.length} linked</Badge>
             </div>
-            <div className="space-y-2">
-              {report.matched_skills.slice(0, 8).map((item) => (
-                <div className="rounded-xl border border-border bg-surface p-4" key={item.skill}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{item.skill}</p>
-                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                      <Badge tone="success">{item.match_type}</Badge>
-                      <Badge tone={confidenceTone(item.confidence)}>
-                        {item.confidence} confidence
-                      </Badge>
-                    </div>
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
-                    {item.job_evidence_text}
-                  </p>
-                  <EvidenceIdBadges evidenceIds={item.resume_evidence_ids} />
-                </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {matchedPreview.map((item) => (
+                <Badge
+                  aria-label={`${item.skill}, matched`}
+                  className="max-w-full whitespace-normal [overflow-wrap:anywhere]"
+                  key={item.skill}
+                  tone="success"
+                >
+                  {item.skill}
+                </Badge>
               ))}
               {report.matched_skills.length === 0 ? (
-                <EmptyReportState
-                  tone={hasUnclearJobRequirements ? "warning" : "neutral"}
-                  title="No evidence-backed matches yet"
-                >
-                  {hasUnclearJobRequirements
-                    ? "No matches can be trusted until the job requirements are extracted."
-                    : "No resume evidence matched the extracted job skills."}
-                </EmptyReportState>
-              ) : null}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-3 flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Missing or weak</h3>
-            </div>
-            <div className="space-y-2">
-              {report.missing_skills.slice(0, 5).map((item) => (
-                <div className="rounded-xl border border-border bg-surface p-4" key={item.skill}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{item.skill}</p>
-                    <Badge tone={item.importance === "required" ? "danger" : "warning"}>
-                      {item.importance}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{item.recommendation}</p>
-                </div>
-              ))}
-              {report.weak_skills.slice(0, 5).map((item) => (
-                <div className="rounded-xl border border-border bg-surface p-4" key={item.skill}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{item.skill}</p>
-                    <Badge tone="warning">weak evidence</Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{item.reason}</p>
-                  <EvidenceIdBadges evidenceIds={item.resume_evidence_ids} />
-                </div>
-              ))}
-              {report.missing_skills.length === 0 && report.weak_skills.length === 0 && (
-                <EmptyReportState
-                  tone={hasUnclearJobRequirements ? "warning" : "neutral"}
-                  title={
-                    hasUnclearJobRequirements ? "Gaps not available" : "No gaps detected"
-                  }
-                >
-                  {hasUnclearJobRequirements
-                    ? "Missing skills cannot be determined until explicit job requirements are extracted."
-                    : "No missing or weak skills were found in the extracted job evidence."}
-                </EmptyReportState>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">Tailored bullets</h3>
-          </div>
-          <div className="space-y-2">
-            {report.tailored_bullets.map((item) => (
-              <div className="rounded-xl border border-border bg-surface p-4" key={item.bullet}>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <p className="text-sm leading-6">{item.bullet}</p>
-                  {item.unsupported_claims.length > 0 ? (
-                    <Badge className="shrink-0" tone="warning">
-                      review only
-                    </Badge>
-                  ) : null}
-                </div>
-                <EvidenceIdBadges evidenceIds={item.evidence_ids} />
-                {item.jd_keywords_used.length > 0 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Uses JD keywords: {item.jd_keywords_used.join(", ")}
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    No evidence-backed matches yet
                   </p>
-                ) : null}
-              </div>
-            ))}
-            {report.tailored_bullets.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border-strong bg-surface p-4 text-sm text-muted-foreground">
-                No project or experience evidence was strong enough for an exportable tailored
-                bullet. Add truthful project/work evidence before editing the resume.
-              </div>
-            ) : null}
-          </div>
-        </section>
-
-        <section className="grid gap-4 lg:grid-cols-2">
-          <div>
-            <div className="mb-3 flex items-center gap-2">
-              <SearchCheck className="h-4 w-4 text-primary" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">ATS keywords</h3>
-            </div>
-            <div className="space-y-2">
-              {topKeywords.map((item) => (
-                <div className="rounded-xl border border-border bg-surface p-4" key={item.keyword}>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{item.keyword}</p>
-                    <Badge tone={keywordStatusTone(item.status)}>
-                      {keywordStatusLabel(item.status)}
-                    </Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{item.note}</p>
-                  <EvidenceIdBadges evidenceIds={item.evidence_ids} />
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    {hasUnclearJobRequirements
+                      ? "No matches can be trusted until the job requirements are extracted."
+                      : "No resume evidence matched the extracted job skills."}
+                  </p>
                 </div>
-              ))}
-              {topKeywords.length === 0 ? (
-                <EmptyReportState
-                  tone={hasUnclearJobRequirements ? "warning" : "neutral"}
-                  title="No ATS keywords extracted"
-                >
-                  {hasUnclearJobRequirements
-                    ? "The job page did not expose enough requirement evidence for safe keyword suggestions."
-                    : "No supported or add-only-if-true keywords were produced for this report."}
-                </EmptyReportState>
               ) : null}
             </div>
-          </div>
+            {report.matched_skills.length > matchedPreview.length ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                +{report.matched_skills.length - matchedPreview.length} more in Full skill evidence
+              </p>
+            ) : null}
+          </article>
 
-          <div>
-            <div className="mb-3 flex items-center gap-2">
-              <ListChecks className="h-4 w-4 text-validation" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Next actions</h3>
+          <article className="min-w-0 rounded-xl border border-border bg-surface p-4 sm:p-5 xl:col-span-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />
+                <h3 className="text-sm font-bold text-foreground">Missing or weak</h3>
+              </div>
+              <Badge tone={gapCount > 0 ? "warning" : "success"}>{gapCount} to review</Badge>
             </div>
-            <ol className="space-y-2">
-              {report.next_actions.map((action) => (
-                <li
-                  className="rounded-xl border border-border bg-surface p-4 text-sm leading-6 text-muted-foreground"
-                  key={action}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {gapPreview.map((item) => (
+                <Badge
+                  aria-label={`${item.skill}, ${item.label}`}
+                  className="max-w-full flex-wrap gap-1 whitespace-normal [overflow-wrap:anywhere]"
+                  key={`${item.label}-${item.skill}`}
+                  tone={item.tone}
                 >
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{item.skill}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere]">· {item.label}</span>
+                </Badge>
+              ))}
+              {gapCount === 0 ? (
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {hasUnclearJobRequirements ? "Gaps not available" : "No gaps detected"}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    {hasUnclearJobRequirements
+                      ? "Missing skills cannot be determined until explicit job requirements are extracted."
+                      : "No missing or weak skills were found in the extracted job evidence."}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+            {gapCount > gapPreview.length ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                +{gapCount - gapPreview.length} more in Full skill evidence
+              </p>
+            ) : null}
+          </article>
+
+          <article className="min-w-0 rounded-xl border border-border bg-surface p-4 sm:p-5 xl:col-span-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <SearchCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+                <h3 className="text-sm font-bold text-foreground">ATS keywords</h3>
+              </div>
+              <Badge tone="neutral">{report.ats_keywords.length} reviewed</Badge>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {keywordPreview.map((item) => (
+                <Badge
+                  aria-label={`${item.keyword}, ${keywordStatusLabel(item.status)}`}
+                  className="max-w-full flex-wrap gap-1 whitespace-normal [overflow-wrap:anywhere]"
+                  key={item.keyword}
+                  tone={keywordStatusTone(item.status)}
+                >
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{item.keyword}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere]">
+                    · {keywordStatusLabel(item.status)}
+                  </span>
+                </Badge>
+              ))}
+              {keywordPreview.length === 0 ? (
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    No ATS keywords extracted
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    {hasUnclearJobRequirements
+                      ? "The job page did not expose enough requirement evidence for safe keyword suggestions."
+                      : "No supported or add-only-if-true keywords were produced for this report."}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+            {report.ats_keywords.length > keywordPreview.length ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                +{report.ats_keywords.length - keywordPreview.length} more in Resume recommendations
+              </p>
+            ) : null}
+          </article>
+
+          <article className="min-w-0 rounded-xl border border-border bg-surface p-4 sm:p-5 xl:col-span-7">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <ListChecks className="h-4 w-4 text-validation" aria-hidden="true" />
+                <h3 className="text-sm font-bold text-foreground">Next actions</h3>
+              </div>
+              <Badge tone="neutral">Top {Math.min(3, report.next_actions.length)}</Badge>
+            </div>
+            <ol className="mt-4 space-y-2">
+              {actionPreview.map((action, index) => (
+                <li className="flex gap-3 text-sm leading-6 text-muted-foreground" key={action}>
+                  <span className="font-mono text-xs font-semibold text-accent">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
                   {action}
                 </li>
               ))}
             </ol>
-          </div>
-        </section>
-
-        <section className="grid gap-4 xl:grid-cols-2" aria-label="Application materials">
-          <ReportCoverLetterPanel
-            coverLetter={report.cover_letter}
-            evidenceIds={report.cover_letter_evidence_ids ?? []}
-            resumeProfile={resumeProfile}
-            warnings={coverLetterWarnings}
-          />
-          <ReportInterviewPrepPanel
-            groups={report.interview_questions}
-            resumeProfile={resumeProfile}
-            warnings={interviewWarnings}
-          />
+            {report.next_actions.length > actionPreview.length ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                +{report.next_actions.length - actionPreview.length} more in Resume recommendations
+              </p>
+            ) : null}
+          </article>
         </section>
 
         {report.validation_warnings.length > 0 ? (
-          <section>
+          <section className="rounded-xl border border-warning/25 bg-warning/10 p-4 sm:p-5">
             <div className="mb-3 flex items-center gap-2">
               <CircleAlert className="h-4 w-4 text-warning" aria-hidden="true" />
-              <h3 className="text-sm font-semibold">Validation warnings</h3>
+              <h3 className="text-sm font-bold text-foreground">Validation warnings</h3>
             </div>
-            <div className="space-y-2">
+            <div className="divide-y divide-warning/20">
               {report.validation_warnings.map((warning) => (
-                <div className="rounded-xl border border-border bg-surface p-4" key={warning.code}>
+                <article className="py-3 first:pt-0 last:pb-0" key={warning.code}>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={validationSeverityTone(warning)}>
                       {validationSeverityLabel(warning)}
@@ -385,11 +414,99 @@ export function ReportViewer({
                     {warning.message}
                   </p>
                   <EvidenceIdBadges evidenceIds={warning.evidence_ids} />
-                </div>
+                </article>
               ))}
             </div>
           </section>
         ) : null}
+
+        <section aria-labelledby="report-details-title" className="space-y-3 pt-1">
+          <div>
+            <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              Supporting detail
+            </p>
+            <h3 className="mt-1 text-base font-extrabold tracking-[-0.03em]" id="report-details-title">
+              Expand only what you need
+            </h3>
+          </div>
+
+          <ReportSectionDisclosure
+            badge={
+              <Badge tone={report.score_status === "provisional" ? "warning" : "neutral"}>
+                {scoringVersionLabel(report)}
+              </Badge>
+            }
+            description={scoreDetailDescription}
+            icon={<SearchCheck className="h-4 w-4" aria-hidden="true" />}
+            id="score-method"
+            title={scoreDetailTitle}
+          >
+            <MatchScoreBreakdownView
+              breakdown={report.score_breakdown}
+              embedded
+              scoringVersion={report.scoring_version}
+            />
+          </ReportSectionDisclosure>
+
+          <ReportSectionDisclosure
+            badge={<Badge tone="neutral">{report.matched_skills.length + gapCount} items</Badge>}
+            description="Review every match, missing requirement, weak claim, and linked resume source."
+            icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />}
+            id="skill-evidence"
+            title="Full skill evidence"
+          >
+            <ReportSkillEvidence
+              hasUnclearJobRequirements={hasUnclearJobRequirements}
+              report={report}
+            />
+          </ReportSectionDisclosure>
+
+          <ReportSectionDisclosure
+            badge={
+              <Badge tone="neutral">
+                {report.tailored_bullets.length + report.ats_keywords.length} suggestions
+              </Badge>
+            }
+            description="See tailored bullets, the complete keyword review, and every recommended next step."
+            icon={<FileCheck2 className="h-4 w-4" aria-hidden="true" />}
+            id="resume-recommendations"
+            title="Resume recommendations"
+          >
+            <ReportRecommendations
+              hasUnclearJobRequirements={hasUnclearJobRequirements}
+              report={report}
+            />
+          </ReportSectionDisclosure>
+
+          <ReportSectionDisclosure
+            badge={
+              <Badge tone="neutral">
+                {report.interview_questions.length} interview groups
+              </Badge>
+            }
+            description="Copy the cover letter or open only the interview category you want to practice."
+            detailsRef={materialsDisclosureRef}
+            icon={<ClipboardList className="h-4 w-4" aria-hidden="true" />}
+            id="application-materials"
+            title="Application materials"
+          >
+            <div className="grid min-w-0 items-start gap-4 xl:grid-cols-2">
+              <ReportCoverLetterPanel
+                coverLetter={report.cover_letter}
+                evidenceIds={report.cover_letter_evidence_ids ?? []}
+                resumeProfile={resumeProfile}
+                warnings={coverLetterWarnings}
+              />
+              <ReportInterviewPrepPanel
+                groups={report.interview_questions}
+                resumeProfile={resumeProfile}
+                warnings={interviewWarnings}
+              />
+            </div>
+          </ReportSectionDisclosure>
+        </section>
+
+        <WorkflowTracePanel trace={workflowTrace} />
       </div>
     </Panel>
   );
@@ -430,47 +547,17 @@ interface MetricProps {
   value: number;
 }
 
-function Metric({ label, value }: MetricProps) {
+function ReportMetric({ label, value }: MetricProps) {
   return (
-    <div className="bg-surface-raised p-4">
-      <p className="font-mono text-[0.66rem] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+    <div className="min-w-0 rounded-lg border border-border bg-surface p-3">
+      <dt className="font-mono text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
         {label}
-      </p>
-      <p className="mt-2 font-mono text-3xl font-semibold tracking-[-0.05em] tabular-nums">{value}</p>
+      </dt>
+      <dd className="mt-1 font-mono text-2xl font-semibold tracking-[-0.05em] tabular-nums">
+        {value}
+      </dd>
     </div>
   );
-}
-
-function EmptyReportState({
-  children,
-  title,
-  tone
-}: {
-  children: string;
-  title: string;
-  tone: "neutral" | "warning";
-}) {
-  const toneClass =
-    tone === "warning"
-      ? "border-warning/25 bg-warning/10"
-      : "border-border bg-surface";
-
-  return (
-    <div className={`rounded-xl border p-4 ${toneClass}`}>
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">{children}</p>
-    </div>
-  );
-}
-
-function confidenceTone(confidence: ApplicationReport["matched_skills"][number]["confidence"]) {
-  if (confidence === "high") {
-    return "success";
-  }
-  if (confidence === "low") {
-    return "warning";
-  }
-  return "neutral";
 }
 
 function reportValidationStatus(report: ApplicationReport): ValidationStatus {
@@ -717,11 +804,15 @@ function formatCost(costEstimateUsd: number | null | undefined): string {
   return `$${costEstimateUsd.toFixed(6)}`;
 }
 
-function keywordStatusLabel(status: ApplicationReport["ats_keywords"][number]["status"]): string {
-  if (status === "add_only_if_true") {
-    return "add only if true";
+function scoringVersionLabel(report: ApplicationReport): string {
+  const version = report.score_breakdown?.scoring_version ?? report.scoring_version;
+  if (version === "evidence_v2") {
+    return "Evidence v2";
   }
-  return status;
+  if (version === "deterministic_v1") {
+    return "Deterministic v1";
+  }
+  return "Legacy score";
 }
 
 function keywordStatusTone(
@@ -734,4 +825,13 @@ function keywordStatusTone(
     return "warning";
   }
   return "neutral";
+}
+
+function keywordStatusLabel(
+  status: ApplicationReport["ats_keywords"][number]["status"]
+): string {
+  if (status === "add_only_if_true") {
+    return "add only if true";
+  }
+  return status;
 }

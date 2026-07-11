@@ -1,5 +1,249 @@
 # ResumePilot Operational Errors
 
+## [ERR-20260711-021] browser-helper-before-hydration
+
+**Logged**: 2026-07-11T17:00:18Z
+**Priority**: medium
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+A full-suite legacy scenario filled the server-rendered job URL input before the workspace client
+had hydrated, so the React state never enabled the review action and Playwright retried for the
+entire test timeout.
+
+### Error
+
+```text
+Playwright: Review job evidence remained disabled until the 90 second test timeout.
+```
+
+### Context
+
+- The isolated legacy scenario and complete flow passed consistently.
+- The failure screenshot showed the server-rendered loading shell and unstyled markup.
+- The shared helper waited for a heading but had no authoritative client-readiness boundary.
+
+### Suggested Fix
+
+Wait for the workspace refresh control to become enabled before entering data, then explicitly
+bound the review button's enabled-state assertion before clicking it.
+
+### Metadata
+
+- Reproducible: intermittent under repeated production builds and full browser runs
+- Related Files: Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T17:00:18Z
+- **Notes**: Added explicit hydration and preview-ready assertions to the shared job-entry helper.
+
+---
+
+## [ERR-20260711-020] live-dark-report-score-contrast
+
+**Logged**: 2026-07-11T16:53:39Z
+**Priority**: high
+**Status**: resolved
+**Area**: accessibility
+
+### Summary
+
+The real saved report failed the dark-theme Axe gate because its inverted score card used the
+theme foreground as a background, which becomes light in dark mode.
+
+### Error
+
+```text
+Axe color-contrast: chartreuse score #c2ef55 on #f1f4e9 measured 1.19:1; 3:1 required.
+```
+
+### Context
+
+- The light report and fixture-based report scans passed.
+- The live saved report exposed the theme inversion only after forcing the production surface to dark mode.
+- The score card is a deliberate inverse brand surface and should not invert with the document theme.
+
+### Suggested Fix
+
+Use the theme-invariant terminal graphite token with fixed light supporting text, then cover the
+real interaction with a dark report Axe regression.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/report-viewer.tsx, Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T16:53:39Z
+- **Notes**: Made the score card theme-invariant and added an explicit dark report WCAG A/AA scan.
+
+---
+
+## [ERR-20260711-019] protected-route-hydration-test-timeout
+
+**Logged**: 2026-07-11T10:16:42Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+One full browser run timed out while the mobile test revisited a protected application route,
+although the same scenario passed in isolation and the remaining 18 scenarios passed.
+
+### Error
+
+```text
+Playwright: Application case overview was still at Loading application case file after 10 seconds.
+```
+
+### Context
+
+- The route correctly rendered its fail-closed loading shell; no stale case controls were exposed.
+- Repeated production builds and browser runs were competing for local workstation resources.
+- Protected route hydration performs multiple owner-scoped requests before showing the overview.
+
+### Suggested Fix
+
+Keep the fail-closed assertion, but allow the first authoritative overview boundary 20 seconds to
+hydrate under constrained CI or local build load.
+
+### Metadata
+
+- Reproducible: intermittent
+- Related Files: Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T10:16:42Z
+- **Notes**: Increased only the protected overview's first visibility timeout; all later assertions retain their default bound.
+
+---
+
+## [ERR-20260711-018] compact-status-opacity-contrast
+
+**Logged**: 2026-07-11T09:58:07Z
+**Priority**: medium
+**Status**: resolved
+**Area**: accessibility
+
+### Summary
+
+The first visible status-label treatment reduced the secondary label to 70% opacity, which made
+warning, danger, and success badge text fail WCAG AA contrast in both desktop and mobile scans.
+
+### Error
+
+```text
+Axe color-contrast: compact status text measured between 2.85:1 and 3.31:1; 4.5:1 required.
+```
+
+### Context
+
+- The original badge text passed because it used the full semantic tone color.
+- Only the new nested status span had the contrast-reducing opacity class.
+
+### Suggested Fix
+
+Keep status text at the badge's full semantic color instead of using opacity to create hierarchy.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/report-viewer.tsx, Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T09:58:07Z
+- **Notes**: Removed opacity from the visible status labels; rerun the collapsed and expanded Axe gates.
+
+---
+
+## [ERR-20260711-017] split-badge-text-selector
+
+**Logged**: 2026-07-11T09:57:01Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+A status-label regression used one text locator for a badge whose visible skill and status were
+intentionally rendered in separate spans, so Playwright did not find the combined string.
+
+### Error
+
+```text
+Playwright: getByText(/Observability · preferred/) did not find the split badge text.
+```
+
+### Context
+
+- The screenshot confirmed both the skill and its preferred status were visible.
+- The regression must also prove that assistive technology receives the combined meaning.
+
+### Suggested Fix
+
+Give each compact status badge one explicit accessible label and assert that label instead of
+depending on text-node concatenation.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/report-viewer.tsx, Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T09:57:01Z
+- **Notes**: Added combined skill/status accessible labels and changed the regression to query them.
+
+---
+
+## [ERR-20260711-016] disclosure-fixture-sentinel-and-scope
+
+**Logged**: 2026-07-11T09:37:06Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The first progressive-disclosure browser fixture only padded arrays to a minimum length, so a
+named overflow sentinel was absent when the real report already met that length; an unclear-state
+assertion also matched visible summary text and hidden detail text.
+
+### Error
+
+```text
+Playwright: Overflow next action 6. not found; strict locator matched two copies of the empty-state title.
+```
+
+### Context
+
+- The disclosure test needs deterministic named overflow records regardless of the source report's existing count.
+- Progressive disclosure intentionally repeats some section terminology in visible summaries and hidden detail bodies.
+
+### Suggested Fix
+
+Append named sentinels when absent after padding the arrays, and scope summary-state assertions to
+the labeled `Report at a glance` region.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T09:37:06Z
+- **Notes**: Made every overflow sentinel explicit and scoped the unclear-state assertions to the visible overview region.
+
+---
+
 ## [ERR-20260711-015] case-overview-authority-edge-states
 
 **Logged**: 2026-07-11T08:42:28Z

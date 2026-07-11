@@ -1,4 +1,4 @@
-import { MessageSquareText } from "lucide-react";
+import { ChevronDown, MessageSquareText } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type {
@@ -22,7 +22,10 @@ export function ReportInterviewPrepPanel({
   const factsById = new Map(resumeProfile?.facts.map((fact) => [fact.id, fact.text]) ?? []);
 
   return (
-    <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="interview-prep-title">
+    <section
+      aria-labelledby="interview-prep-title"
+      className="min-w-0 rounded-lg border border-border bg-surface p-4"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <MessageSquareText className="h-4 w-4 text-primary" aria-hidden="true" />
         <h3 className="text-sm font-semibold" id="interview-prep-title">
@@ -39,36 +42,60 @@ export function ReportInterviewPrepPanel({
       {groups.length > 0 ? (
         <div className="mt-4 space-y-3">
           {groups.map((group, groupIndex) => (
-            <article className="rounded-md border border-border bg-background p-3" key={`${group.category}-${groupIndex}`}>
-              <h4 className="text-sm font-semibold text-foreground">{group.category}</h4>
-              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
-                {group.questions.map((question) => (
-                  <li key={question}>{question}</li>
-                ))}
-              </ol>
+            <details
+              className="group overflow-hidden rounded-md border border-border bg-background"
+              key={`${group.category}-${groupIndex}`}
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+                <h4 className="min-w-0 text-sm font-semibold text-foreground [overflow-wrap:anywhere]">
+                  {group.category}
+                </h4>
+                <span className="flex shrink-0 items-center gap-2">
+                  <Badge tone="neutral">
+                    {group.questions.length} {group.questions.length === 1 ? "question" : "questions"}
+                  </Badge>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180"
+                  />
+                </span>
+              </summary>
+              <div className="border-t border-border p-3">
+                <ol className="list-decimal space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
+                  {group.questions.map((question) => (
+                    <li className="break-words [overflow-wrap:anywhere]" key={question}>
+                      {question}
+                    </li>
+                  ))}
+                </ol>
 
-              {group.suggested_answer_evidence_ids.length > 0 ? (
-                <details className="group mt-3 rounded-md border border-border bg-surface">
-                  <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
-                    Suggested answer evidence ({group.suggested_answer_evidence_ids.length})
-                  </summary>
-                  <div className="space-y-2 border-t border-border p-3">
-                    {group.suggested_answer_evidence_ids.map((evidenceId) => {
-                      const evidence = formatEvidenceSource(evidenceId);
-                      return (
-                        <div key={`${group.category}-${evidenceId}`}>
-                          <Badge tone={evidence.tone}>{evidence.label}</Badge>
-                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                            {factsById.get(evidenceId) ??
-                              "Evidence text is unavailable in this saved view."}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </details>
-              ) : null}
-            </article>
+                {group.suggested_answer_evidence_ids.length > 0 ? (
+                  <details className="group/evidence mt-3 rounded-md border border-border bg-surface">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+                      Suggested answer evidence ({group.suggested_answer_evidence_ids.length})
+                      <ChevronDown
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 transition-transform group-open/evidence:rotate-180"
+                      />
+                    </summary>
+                    <div className="space-y-2 border-t border-border p-3">
+                      {group.suggested_answer_evidence_ids.map((evidenceId) => {
+                        const evidence = formatEvidenceSource(evidenceId);
+                        return (
+                          <div key={`${group.category}-${evidenceId}`}>
+                            <Badge tone={evidence.tone}>{evidence.label}</Badge>
+                            <p className="mt-1 break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
+                              {factsById.get(evidenceId) ??
+                                "Evidence text is unavailable in this saved view."}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+            </details>
           ))}
         </div>
       ) : (
@@ -80,7 +107,7 @@ export function ReportInterviewPrepPanel({
       {warnings.length > 0 ? (
         <ul className="mt-3 space-y-2" aria-label="Interview preparation validation issues">
           {warnings.map((warning) => (
-            <li className="rounded-md border border-warning/25 bg-warning/10 p-3 text-xs leading-5 text-muted-foreground" key={warning.code}>
+            <li className="rounded-md border border-warning/25 bg-warning/10 p-3 text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]" key={warning.code}>
               {warning.message}
             </li>
           ))}

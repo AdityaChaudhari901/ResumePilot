@@ -1,3 +1,5 @@
+import { ChevronDown } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { EvidenceIdBadges } from "@/features/dashboard/components/evidence-id-badges";
 import type {
@@ -6,9 +8,11 @@ import type {
   MatchScoreComponentKey,
   ScoringVersion
 } from "@/features/dashboard/types";
+import { cn } from "@/lib/cn";
 
 interface MatchScoreBreakdownProps {
   breakdown: MatchScoreBreakdown | null | undefined;
+  embedded?: boolean;
   scoringVersion: ScoringVersion | undefined;
 }
 
@@ -18,26 +22,30 @@ const COMPONENT_LABELS: Record<MatchScoreComponentKey, string> = {
   preferred_skills: "Preferred skill evidence",
   experience: "Experience evidence",
   domain: "Domain evidence",
-  evidence_strength: "Project/work evidence strength"
+  evidence_strength: "Work/project proof"
 };
 
 export function MatchScoreBreakdownView({
   breakdown,
+  embedded = false,
   scoringVersion
 }: MatchScoreBreakdownProps) {
   if (!breakdown) {
     return (
       <section
-        aria-labelledby="score-breakdown-title"
-        className="rounded-xl border border-border bg-surface p-5"
+        aria-label={embedded ? "Historical score calculation details" : undefined}
+        aria-labelledby={embedded ? undefined : "score-breakdown-title"}
+        className={cn(!embedded && "rounded-xl border border-border bg-surface p-5")}
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold" id="score-breakdown-title">
-            Evidence breakdown
-          </h3>
-          <Badge tone="neutral">{formatScoringVersion(scoringVersion)}</Badge>
-        </div>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        {embedded ? null : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold" id="score-breakdown-title">
+              Evidence breakdown
+            </h3>
+            <Badge tone="neutral">{formatScoringVersion(scoringVersion)}</Badge>
+          </div>
+        )}
+        <p className={cn("text-sm leading-6 text-muted-foreground", !embedded && "mt-2")}>
           Detailed evidence components were not recorded for this historical report. Re-running
           creates a new report whose score may differ; this saved report remains unchanged.
         </p>
@@ -47,52 +55,72 @@ export function MatchScoreBreakdownView({
 
   return (
     <section
-      aria-labelledby="score-breakdown-title"
-      className="rounded-xl border border-border bg-surface p-5"
+      aria-label={embedded ? "Evidence-fit score calculation details" : undefined}
+      aria-labelledby={embedded ? undefined : "score-breakdown-title"}
+      className={cn(!embedded && "rounded-xl border border-border bg-surface p-5")}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold" id="score-breakdown-title">
-            How this evidence-fit score is calculated
-          </h3>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Not-applicable dimensions are removed and reweighted. Unknown required evidence keeps
-            its weight with zero contribution, so missing information cannot raise the score.
-          </p>
+      {embedded ? (
+        <p className="text-xs leading-5 text-muted-foreground">
+          Not-applicable dimensions are removed and reweighted. Unknown required evidence keeps
+          its weight with zero contribution, so missing information cannot raise the score.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold" id="score-breakdown-title">
+              How this evidence-fit score is calculated
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Not-applicable dimensions are removed and reweighted. Unknown required evidence keeps
+              its weight with zero contribution, so missing information cannot raise the score.
+            </p>
+          </div>
+          <Badge tone={breakdown.score_status === "provisional" ? "warning" : "neutral"}>
+            {formatScoringVersion(breakdown.scoring_version)}
+          </Badge>
         </div>
-        <Badge tone={breakdown.score_status === "provisional" ? "warning" : "neutral"}>
-          {formatScoringVersion(breakdown.scoring_version)}
-        </Badge>
-      </div>
+      )}
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div
+        className={cn(
+          "divide-y divide-border overflow-hidden rounded-xl border border-border bg-background",
+          embedded ? "mt-3" : "mt-4"
+        )}
+      >
         {breakdown.components.map((component) => {
-          const detailsId = `score-component-${component.key}-details`;
+          const summaryId = `score-component-${component.key}-summary`;
           return (
-            <div className="rounded-xl border border-border bg-background p-4" key={component.key}>
+            <article className="p-3.5 sm:p-4" key={component.key}>
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-medium">{COMPONENT_LABELS[component.key]}</p>
                 <Badge tone={componentTone(component)}>{componentValue(component)}</Badge>
               </div>
-              {component.score === null ? null : (
+              {component.score === null || component.key === "evidence_strength" ? null : (
                 <progress
-                  aria-describedby={detailsId}
+                  aria-describedby={summaryId}
                   aria-label={`${COMPONENT_LABELS[component.key]} score`}
                   className="mt-3 h-2 w-full overflow-hidden rounded-full accent-primary"
                   max={100}
                   value={component.score}
                 />
               )}
-              <div id={detailsId}>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground" id={summaryId}>
+                {componentSummary(component)}
+              </p>
+              <details className="group mt-2">
+                <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 transition-transform group-open:rotate-180"
+                  />
+                  {component.key === "evidence_strength" ? "View explanation" : "View calculation"} and {component.evidence_ids.length} linked {component.evidence_ids.length === 1 ? "source" : "sources"}
+                </summary>
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  {componentSummary(component)}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {component.explanation}
+                  {componentExplanation(component)}
                 </p>
                 <EvidenceIdBadges evidenceIds={component.evidence_ids} />
-              </div>
-            </div>
+              </details>
+            </article>
           );
         })}
       </div>
@@ -114,6 +142,13 @@ function componentValue(component: MatchScoreComponent): string {
   if (component.status === "not_applicable") {
     return "Not listed";
   }
+  if (
+    component.key === "evidence_strength" &&
+    component.matched_count !== null &&
+    component.total_count !== null
+  ) {
+    return `${component.matched_count}/${component.total_count} backed`;
+  }
   return `${Math.round(component.score ?? 0)}%`;
 }
 
@@ -123,12 +158,18 @@ function componentSummary(component: MatchScoreComponent): string {
       ? `${component.effective_weight.toFixed(1)}% effective weight reserved at zero.`
       : "Not included in the calculated score.";
   }
+  if (
+    component.key === "evidence_strength" &&
+    component.matched_count !== null &&
+    component.total_count !== null
+  ) {
+    const otherSectionCount = Math.max(0, component.total_count - component.matched_count);
+    return `${component.matched_count} backed by work/projects · ${otherSectionCount} from other resume sections · Does not change the fit score`;
+  }
   const countSummary =
     component.matched_count === null || component.total_count === null
       ? null
-      : component.key === "evidence_strength"
-        ? `${component.matched_count} of ${component.total_count} have project/work support`
-        : `${component.matched_count} of ${component.total_count} supported`;
+      : `${component.matched_count} of ${component.total_count} supported`;
   if (component.base_weight === 0) {
     return [countSummary, "Diagnostic only; not added to the total"].filter(Boolean).join(" · ");
   }
@@ -139,6 +180,18 @@ function componentSummary(component: MatchScoreComponent): string {
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+function componentExplanation(component: MatchScoreComponent): string {
+  if (component.key !== "evidence_strength") {
+    return component.explanation;
+  }
+  return (
+    "This confidence check shows how many matched skills have proof in project or work history. " +
+    "The remaining matches may come from other resume sections, including Skills, Summary, " +
+    "Education, or Certifications. Add truthful project or work examples when available; this " +
+    "check does not add or remove fit-score points."
+  );
 }
 
 function componentTone(component: MatchScoreComponent): "success" | "warning" | "neutral" {

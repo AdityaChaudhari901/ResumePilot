@@ -27,7 +27,7 @@ export function Panel({
       {...props}
     >
       {(eyebrow || title || action) && (
-        <div className="mb-5 flex items-start justify-between gap-4 border-b border-border pb-4">
+        <div className="mb-5 flex flex-col items-stretch gap-4 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             {eyebrow && (
               <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-muted-foreground">

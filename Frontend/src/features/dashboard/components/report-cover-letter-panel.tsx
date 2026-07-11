@@ -1,4 +1,4 @@
-import { Check, ClipboardCopy, FileText, ShieldCheck } from "lucide-react";
+import { Check, ChevronDown, ClipboardCopy, FileText, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +37,10 @@ export function ReportCoverLetterPanel({
   }
 
   return (
-    <section className="rounded-lg border border-border bg-surface p-4" aria-labelledby="cover-letter-title">
+    <section
+      aria-labelledby="cover-letter-title"
+      className="min-w-0 rounded-lg border border-border bg-surface p-4"
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -51,7 +54,7 @@ export function ReportCoverLetterPanel({
             Review and personalize this evidence-backed draft before sending it.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <span aria-live="polite" className="text-xs text-muted-foreground">
             {copyState === "copied"
               ? "Copied"
@@ -76,9 +79,24 @@ export function ReportCoverLetterPanel({
         </div>
       </div>
 
-      <div className="mt-4 whitespace-pre-line rounded-md border border-border bg-background p-4 text-sm leading-7 text-foreground">
-        {coverLetter}
-      </div>
+      <details
+        className="group mt-4 overflow-hidden rounded-md border border-border bg-background"
+        data-testid="cover-letter-draft-disclosure"
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+          <span>Read full cover letter</span>
+          <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
+            {coverLetter.length.toLocaleString()} characters
+            <ChevronDown
+              aria-hidden="true"
+              className="h-4 w-4 transition-transform group-open:rotate-180"
+            />
+          </span>
+        </summary>
+        <div className="whitespace-pre-line break-words border-t border-border p-4 text-sm leading-7 text-foreground [overflow-wrap:anywhere]">
+          {coverLetter}
+        </div>
+      </details>
 
       {evidenceIds.length > 0 ? (
         <details className="group mt-3 rounded-md border border-border bg-background">
@@ -91,7 +109,7 @@ export function ReportCoverLetterPanel({
               return (
                 <div className="rounded border border-border bg-surface p-2" key={evidenceId}>
                   <Badge tone={evidence.tone}>{evidence.label}</Badge>
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
                     {factsById.get(evidenceId) ?? "Evidence text is unavailable in this saved view."}
                   </p>
                 </div>
@@ -117,7 +135,9 @@ export function ReportCoverLetterPanel({
                 <Badge tone={warning.severity === "block" ? "danger" : "warning"}>
                   {warning.severity === "block" ? "Blocked" : "Review"}
                 </Badge>
-                <span className="text-xs font-medium text-foreground">{warning.message}</span>
+                <span className="min-w-0 text-xs font-medium text-foreground [overflow-wrap:anywhere]">
+                  {warning.message}
+                </span>
               </div>
             </li>
           ))}
