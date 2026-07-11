@@ -133,6 +133,16 @@ def enqueue_analysis_job(
     if existing:
         return _validate_idempotent_replay(existing, fingerprint), False
 
+    if request.application_id is not None:
+        active = repository.list_active(
+            user_id=current_user.id,
+            kind=kind,
+            application_id=request.application_id,
+            limit=1,
+        )
+        if active:
+            raise _active_analysis_conflict(active[0])
+
     job_id = str(uuid4())
     usage = add_analysis_usage_reservation(
         db,
@@ -165,6 +175,7 @@ def enqueue_analysis_job(
         priority=0,
         available_at=now,
         usage_event_id=usage.id,
+        application_id=request.application_id,
         result_json={},
         request_id=request_id,
         created_at=now,
@@ -181,9 +192,18 @@ def enqueue_analysis_job(
             kind=kind,
             idempotency_key_hash=key_hash,
         )
-        if existing is None:
-            raise
-        return _validate_idempotent_replay(existing, fingerprint), False
+        if existing is not None:
+            return _validate_idempotent_replay(existing, fingerprint), False
+        if request.application_id is not None:
+            active = repository.list_active(
+                user_id=current_user.id,
+                kind=kind,
+                application_id=request.application_id,
+                limit=1,
+            )
+            if active:
+                raise _active_analysis_conflict(active[0]) from None
+        raise
     return record, True
 
 
@@ -248,6 +268,7 @@ def enqueue_pdf_export_job(
         priority=0,
         available_at=now,
         usage_event_id=usage.id,
+        application_id=application_id,
         result_json={},
         request_id=request_id,
         created_at=now,
@@ -321,6 +342,37 @@ def list_workflow_jobs(
     limit: int,
 ) -> WorkflowJobListResponse:
     records = WorkflowJobRepository(db).list_recent(user_id=current_user.id, limit=limit)
+    return WorkflowJobListResponse(
+        items=[workflow_job_response(record) for record in records],
+        count=len(records),
+    )
+
+
+def list_active_workflow_jobs(
+    db: Session,
+    current_user: CurrentUser,
+    *,
+    kind: WorkflowJobKind,
+    application_id: int | None,
+) -> WorkflowJobListResponse:
+    records = WorkflowJobRepository(db).list_active(
+        user_id=current_user.id,
+        kind=kind.value,
+        application_id=application_id,
+        limit=2,
+    )
+    if len(records) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "multiple_active_operations",
+                "message": (
+                    "Multiple active operations match this recovery request. "
+                    "Open the relevant application before continuing."
+                ),
+                "operation_ids": [record.id for record in records],
+            },
+        )
     return WorkflowJobListResponse(
         items=[workflow_job_response(record) for record in records],
         count=len(records),
@@ -501,11 +553,19 @@ def workflow_job_response(record: WorkflowJobRecord) -> WorkflowJobResponse:
     result = dict(record.result_json or {})
     approval_payload = result.pop("_approval", None)
     approval = _public_approval(approval_payload)
+    application_id = record.application_id
+    if (
+        isinstance(application_id, bool)
+        or not isinstance(application_id, int)
+        or application_id < 1
+    ):
+        application_id = None
     error = None
     if record.error_code and record.error_message:
         error = WorkflowJobError(code=record.error_code, message=record.error_message)
     return WorkflowJobResponse(
         id=record.id,
+        application_id=application_id,
         kind=WorkflowJobKind(record.kind),
         status=job_status,
         stage=record.stage,
@@ -1401,6 +1461,18 @@ def _validate_idempotent_replay(
             },
         )
     return record
+
+
+def _active_analysis_conflict(record: WorkflowJobRecord) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "analysis_already_active",
+            "message": "An analysis is already active for this application.",
+            "operation_id": record.id,
+            "application_id": record.application_id,
+        },
+    )
 
 
 def _request_fingerprint(payload: dict[str, Any]) -> str:

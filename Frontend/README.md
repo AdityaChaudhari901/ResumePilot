@@ -13,7 +13,22 @@ Next.js evidence workspace and public authentication surface for ResumePilot.
 - Server route handlers as a backend-for-frontend proxy to FastAPI
 - Playwright browser smoke tests
 
-## Current dashboard capabilities
+## Authenticated route map
+
+- `/app/dashboard` — portfolio overview, active-operation attention, recent applications, and latest reports.
+- `/app/applications` — complete application pipeline and status management.
+- `/app/applications/new` — combined job source, evidence review, resume upload, analysis, report, and approval workflow.
+- `/app/applications/[applicationId]` — focused application continuation.
+- `/app/applications/[applicationId]/report` — application-linked evidence report.
+- `/app/applications/[applicationId]/resume` — tailored bullet approval and accepted-draft exports.
+- `/app/reports` and `/app/reports/[reportId]` — report ledger and standalone read-only report deep links.
+- `/app/settings` — account scope, plan usage, runtime health, OpenClaw integration, and export boundaries.
+
+Every `/app` route is server-gated. The public `/` route remains the product and
+authentication entry point, and authenticated root requests redirect to the
+workspace dashboard.
+
+## Current workspace capabilities
 
 - Guided workflow: job URL or pasted description, reviewed job evidence, resume
   upload, durable AI analysis, validated report, and tailored resume approval.
@@ -22,14 +37,20 @@ Next.js evidence workspace and public authentication surface for ResumePilot.
 - Resume upload through the same-origin `/api/resumes/upload` proxy after the job evidence is reviewed.
 - Job analysis through `/api/jobs/analyze` using the saved reviewed source
   snapshot, with operation progress, cancellation, safe failures, and retry-safe
-  idempotency.
+  idempotency. Operation responses carry application provenance, and routed
+  approval/cancellation controls reject operations owned by another case file.
+  Active recovery uses an application-filtered endpoint and fails closed when
+  status cannot be verified; unlinked in-flight work is isolated from intake.
+  Saved-route actions also remain locked until application detail, resume
+  evidence, and report evidence hydrate successfully, and Refresh retries both
+  status and protected route hydration.
 - Per-analysis live AI consent for eligible plans; deterministic processing remains the default and provider prompts exclude candidate contact details.
 - Tailored resume workspace through `/api/applications/[applicationId]/tailored-resume` where users edit, accept, or reject evidence-backed bullets before final DOCX, LaTeX, or PDF export.
 - Report viewing with JSON, Markdown, workflow trace timings/runtime metadata,
   provider token/cost estimates, claim-validation status, cover-letter and
   interview-prep panels, and evidence comparisons. Resume DOCX/LaTeX/PDF
   downloads are available only from the accepted application draft.
-- Collapsed workspace review for report history, parsed resume evidence, account/session state, usage limits, OpenClaw Gateway/provider readiness, and validation boundaries.
+- Dedicated application/report portfolio views plus a Settings surface for account/session state, usage limits, OpenClaw Gateway/provider readiness, runtime health, and validation boundaries.
 - Branded anonymous, Clerk sign-in/sign-up, loading, error, and not-found states with a shared evidence-desk visual system.
 - Theme persistence, system dark-mode support, and purposefully limited motion that is removed for `prefers-reduced-motion` users.
 
@@ -77,11 +98,14 @@ starts a fresh production Next.js server on `127.0.0.1:3040`, captures the sampl
 job listing URL, verifies the job evidence review gate, uploads the backend
 sample resume, runs the AI workflow, verifies the job URL request contract,
 checks URL and pasted-description snapshots, application-id analysis operations,
-progress/cancellation behavior, workflow trace timing, Markdown report export,
+cross-application operation isolation across reloads, progress/cancellation
+behavior, dependency-hydration failure and recovery, workflow trace timing,
+Markdown report export,
 accepted-draft DOCX/LaTeX/PDF exports, application status transitions, security headers, and
-the automated WCAG A/AA baseline. Compact 320px dark/reduced-motion behavior,
-completed report/draft overflow, and the branded 404 recovery path are covered
-as well. It captures
+the automated WCAG A/AA baseline. The suite also verifies routed Dashboard,
+Applications, Reports, Settings, application report, and tailored-resume views,
+plus compact 320px dark/reduced-motion behavior, completed report/draft overflow,
+and the branded 404 recovery path. It captures
 desktop/mobile screenshots under
 `Frontend/.local/playwright-results`.
 

@@ -451,7 +451,11 @@ def _workflow_job_references(
     application_ids: set[int],
     operation_ids: set[str],
 ) -> bool:
-    if record.id in operation_ids or record.analysis_id in analysis_ids:
+    if (
+        record.id in operation_ids
+        or record.analysis_id in analysis_ids
+        or record.application_id in application_ids
+    ):
         return True
     for values in (record.payload_json, record.result_json):
         if not isinstance(values, dict):
@@ -569,6 +573,7 @@ def _tombstone_active_workflow_job(record: WorkflowJobRecord) -> None:
     record.error_message = None
     record.request_id = None
     record.analysis_id = None
+    record.application_id = None
     record.updated_at = now
 
 

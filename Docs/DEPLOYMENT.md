@@ -172,6 +172,15 @@ worker verifies the Alembic head before polling. PostgreSQL also rejects an old
 worker that tries to claim an `evidence_v2` job, but that fence is a last line of
 defense, not a substitute for stopping old workers.
 
+Migration `20260711_0011` also preflights legacy workflow provenance before any
+DDL. If it reports duplicate active analyses for one tenant/application, cancel
+or finish the operation IDs named in the error and rerun the migration. The
+preflight deliberately leaves the database at `20260710_0010` with no partial
+`application_id` column, including on SQLite. After upgrade, a partial unique
+index enforces the single-active-analysis invariant atomically; concurrent
+losers receive `409 analysis_already_active` without consuming another quota
+reservation.
+
 Verify the exact release after startup:
 
 ```bash
@@ -183,8 +192,11 @@ docker compose --env-file .env.production ps
 
 ## Rollback
 
-The safe score-version rollback boundary is exactly `20260710_0010` to
-`20260710_0009`. Before crossing it:
+The current schema head is `20260711_0011`. Its adjacent downgrade to
+`20260710_0010` removes only the workflow/application provenance column, so the
+frontend, API, and worker must be rolled back together. The safe score-version
+rollback boundary remains exactly `20260710_0010` to `20260710_0009`. Before
+crossing it:
 
 1. Remove public ingress and stop new submissions.
 2. Take and verify a PostgreSQL backup; record the current and target image SHAs.
@@ -194,7 +206,7 @@ The safe score-version rollback boundary is exactly `20260710_0010` to
 4. Stop frontend, API, and worker processes. The migration also takes exclusive
    locks on `workflow_jobs`, `analyses`, and `applications` so a late writer
    cannot slip between the guard and the rollback snapshot.
-5. Run the downgrade with the current `0010` migration image, then deploy the
+5. Run the downgrade with the current `0011` migration image, then deploy the
    recorded `0009` images.
 
 ```bash
@@ -205,11 +217,12 @@ docker compose --env-file .env.production run --rm migrate \
 docker compose --env-file .env.production up -d worker backend frontend
 ```
 
-The adjacent downgrade keeps score provenance in foreign-key-backed sidecar
+The score-version downgrade keeps provenance in foreign-key-backed sidecar
 tables. Re-upgrading to `0010` restores unchanged analyses, applications, and
-terminal/queued scorer snapshots, then removes those sidecars. Tenant deletion
-continues to cascade into the sidecars, so rollback cannot resurrect deleted
-score metadata.
+terminal/queued scorer snapshots, then removes those sidecars; upgrading once
+more to `0011` restores and backfills workflow/application provenance. Tenant
+deletion continues to cascade into the score sidecars, so rollback cannot
+resurrect deleted score metadata.
 
 Do not downgrade below `0009` while the sidecars contain `evidence_v2`
 provenance. Migration `0009` blocks that destructive step. If disaster recovery

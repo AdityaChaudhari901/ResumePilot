@@ -82,6 +82,9 @@ def finalize_analysis_transaction(
         analysis=locked_analysis,
         application=application,
     )
+    if locked_workflow is not None:
+        locked_workflow.application_id = linked_application.id
+        db.add(locked_workflow)
     ensure_analysis_audit_event(
         db,
         event_type="application.analyzed",

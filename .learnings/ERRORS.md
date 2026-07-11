@@ -1,5 +1,395 @@
 # ResumePilot Operational Errors
 
+## [ERR-20260711-011] zsh-live-probe-used-reserved-variable-names
+
+**Logged**: 2026-07-11T05:17:26Z
+**Priority**: low
+**Status**: resolved
+**Area**: release verification
+
+### Summary
+
+A combined live HTTP probe used zsh's special `path` and read-only `status`
+variables, which removed `curl` from command lookup before the route checks.
+
+### Suggested Fix
+
+Use neutral shell names such as `route_path` and `http_code` in zsh release
+scripts, then rerun the complete probe rather than treating it as an app error.
+
+### Resolution
+
+- **Resolved**: 2026-07-11T05:17:26Z
+- **Notes**: Reran the probe with safe names; all routes returned 200 and the live revision, index, containers, and worker were verified.
+
+---
+
+## [ERR-20260711-010] provenance-migration-validated-after-sqlite-ddl
+
+**Logged**: 2026-07-10T20:03:49Z
+**Priority**: high
+**Status**: resolved
+**Area**: database migration
+
+### Summary
+
+The first `0011` migration rejected duplicate active analyses only after adding
+and backfilling `application_id`. SQLite can retain that DDL after the migration
+fails, leaving revision `0010` with a partial `0011` schema that cannot retry.
+
+### Suggested Fix
+
+Derive and reject duplicate application provenance before any DDL, then prove a
+blocked SQLite upgrade leaves the old schema intact and succeeds after draining.
+
+### Resolution
+
+- **Resolved**: 2026-07-10T20:03:49Z
+- **Notes**: Moved duplicate detection ahead of the column addition and added a failed-upgrade/remediation/retry regression plus the PostgreSQL migration gate.
+
+---
+
+## [ERR-20260711-009] route-refresh-exposed-unhydrated-approval
+
+**Logged**: 2026-07-10T20:03:49Z
+**Priority**: high
+**Status**: resolved
+**Area**: frontend workflow integrity
+
+### Summary
+
+If a saved application detail, resume, or report request failed, Refresh could
+still load its active operation and expose approval controls without verified
+case evidence because the mutable hydrated application ID remained null.
+
+### Suggested Fix
+
+Use the route ID as authoritative mutation provenance, keep all route controls
+locked until every protected dependency hydrates, and make Refresh retry both
+status and route hydration.
+
+### Resolution
+
+- **Resolved**: 2026-07-10T20:03:49Z
+- **Notes**: Added explicit hydration state, route-owned operation guards, locked recovery UI, and an E2E regression covering detail, resume, and report failures before a successful refresh.
+
+---
+
+## [ERR-20260711-008] application-analysis-single-active-race
+
+**Logged**: 2026-07-10T20:03:49Z
+**Priority**: high
+**Status**: resolved
+**Area**: workflow concurrency
+
+### Summary
+
+Two different idempotency keys could pass the application-level active check
+concurrently and enqueue two analyses for the same tenant/application. The
+first unique-index patch then surfaced the losing request as an unhandled 500.
+
+### Suggested Fix
+
+Enforce the invariant with a partial unique database index, translate the
+losing write to an authoritative 409, and roll back its quota reservation.
+
+### Resolution
+
+- **Resolved**: 2026-07-10T20:03:49Z
+- **Notes**: Added the partial index, typed conflict recovery, ambiguous-active fail-closed handling, API regressions, and a two-transaction PostgreSQL race gate.
+
+---
+
+## [ERR-20260711-007] routed-provenance-tests-used-pre-filter-contract
+
+**Logged**: 2026-07-10T19:34:00Z
+**Priority**: medium
+**Status**: resolved
+**Area**: browser regression coverage
+
+### Summary
+
+The first routed-provenance browser fixture returned an application-B operation
+from an endpoint filtered for application A, then a canonical report redirect
+left one helper scoped to the retired combined-workflow container.
+
+### Error
+
+```text
+Run AI analysis remained disabled; later the report-id locator timed out.
+```
+
+### Context
+
+- The client correctly failed closed on the impossible filtered response.
+- The production report was visible on its canonical route, outside the old
+  `Active workflow step` section.
+
+### Suggested Fix
+
+Make mocks honor authoritative query filters, test lookup failure separately,
+and target route-owned content rather than retired page containers.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:41:00Z
+- **Notes**: Corrected the active-operation fixture, preserved the fail-closed warning, and updated the report locator; focused desktop/mobile flows pass.
+
+---
+
+## [ERR-20260711-006] workflow-provenance-derived-from-immutable-request
+
+**Logged**: 2026-07-10T19:23:00Z
+**Priority**: high
+**Status**: resolved
+**Area**: workflow state integrity
+
+### Summary
+
+The first application-provenance patch read only the immutable analysis request.
+Raw URL/text workflows create their application during finalization, so paused
+operations still returned a null application ID and could not be approved after
+the frontend inferred the newly created case file.
+
+### Error
+
+```text
+waiting_for_approval operation application_id=None while application 1 existed
+```
+
+### Context
+
+- Adding the generated ID back into the executable request would invalidate
+  retries because `application_id` cannot be combined with raw job input.
+- Active lookup also depended on the newest 20 generic operations and failed open.
+
+### Suggested Fix
+
+Persist authoritative application provenance separately, set it atomically in
+analysis finalization, and query active operations through a filtered endpoint.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/app/db/models.py, Backend/app/services/analysis_finalization_service.py, Frontend/src/features/dashboard/components/dashboard-shell.tsx
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:38:00Z
+- **Notes**: Added migration 20260711_0011, raw-workflow/list/get coverage, filtered active lookup, fail-closed UI state, and isolated unlinked recovery.
+
+---
+
+## [ERR-20260711-005] operation-provenance-guard-ruff-sim114
+
+**Logged**: 2026-07-10T19:18:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: backend quality gate
+
+### Summary
+
+The first workflow-operation provenance guard used two branches that assigned
+the same fallback, which Ruff rejected under `SIM114`.
+
+### Error
+
+```text
+SIM114 Combine if branches using logical or operator
+```
+
+### Context
+
+- The validation correctly rejected booleans, non-integers, and non-positive IDs.
+- The failure was structural and occurred before the focused regression test ran.
+
+### Suggested Fix
+
+Combine the invalid-value predicates into one short-circuiting condition.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Backend/app/services/workflow_job_service.py
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:19:00Z
+- **Notes**: Consolidated the predicates and reran Ruff before the regression test.
+
+---
+
+## [ERR-20260711-004] mobile-test-used-retired-summary-action
+
+**Logged**: 2026-07-10T19:00:23Z
+**Priority**: low
+**Status**: resolved
+**Area**: tests
+
+### Summary
+
+The routed mobile E2E scenario still waited for the retired same-page “Open
+tailored resume draft” summary action after the helper had moved to the
+canonical application report URL.
+
+### Error
+
+```text
+locator.click: waiting for button Open tailored resume draft
+```
+
+### Context
+
+- All other fifteen browser scenarios passed.
+- The report route correctly exposes “Review tailored resume,” which navigates
+  to the application-scoped resume approval page.
+
+### Suggested Fix
+
+Use the report action and assert the canonical `/app/applications/[id]/resume`
+route before checking accepted-draft exports.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-10T19:00:23Z
+- **Notes**: Updated the mobile route transition and URL assertion.
+
+---
+
+## [ERR-20260711-003] mobile-workflow-rail-keyboard-access
+
+**Logged**: 2026-07-10T18:57:27Z
+**Priority**: medium
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The first routed Playwright pass found that the horizontally scrollable mobile
+workflow rail could not receive keyboard focus in Safari-compatible semantics.
+
+### Error
+
+```text
+scrollable-region-focusable: Scrollable region must have keyboard access
+```
+
+### Context
+
+- Fifteen of sixteen browser scenarios passed.
+- The failure appeared in the WCAG A/AA scan at the 390 px workflow viewport.
+
+### Suggested Fix
+
+Make the labeled workflow region focusable so keyboard users can scroll it,
+while retaining the ordered-list progress semantics.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/workflow-progress.tsx
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:57:27Z
+- **Notes**: Added keyboard focusability to the scrollable workflow region.
+
+---
+
+## [ERR-20260711-002] route-hydration-effect-synchronous-state
+
+**Logged**: 2026-07-10T18:52:00Z
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The first multi-route lint pass rejected a synchronous loading-state update in
+the route hydration effect and found two unused overview icons.
+
+### Error
+
+```text
+react-hooks/set-state-in-effect: Avoid calling setState() directly within an effect
+```
+
+### Context
+
+- TypeScript passed in the same verification run.
+- The loading state was already initialized correctly from the route props, so
+  the effect update was redundant.
+
+### Suggested Fix
+
+Let the state initializer cover routes without IDs, keep effect updates inside
+the asynchronous hydration path, and remove unused imports.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/dashboard-shell.tsx, Frontend/src/features/dashboard/components/workspace-overview.tsx
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:52:00Z
+- **Notes**: Removed the redundant state update and unused imports before rerunning lint.
+
+---
+
+## [ERR-20260711-001] frontend-agent-shared-guidance-still-missing
+
+**Logged**: 2026-07-10T18:34:18Z
+**Priority**: medium
+**Status**: resolved
+**Area**: config
+
+### Summary
+
+The installed `frontend-agent` skill still references shared protocol files
+that are absent from its installation, so its optional preparation checklist
+cannot be read in full.
+
+### Error
+
+```text
+wc: /Users/adityachaudhari/.codex/skills/_shared/difficulty-guide.md: open: No such file or directory
+```
+
+### Context
+
+- Recurred while preparing the multi-route ResumePilot interface redesign.
+- The skill's own execution protocol, checklist, examples, and Tailwind rules
+  remain available and were read completely.
+
+### Suggested Fix
+
+Repair the installed `frontend-agent` package so its referenced `_shared`
+resources ship with the skill, or remove those stale references.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: none
+- See Also: ERR-20260710-018
+
+### Resolution
+
+- **Resolved**: 2026-07-10T18:34:18Z
+- **Notes**: Continued with the available skill resources plus repository-specific conventions.
+
+---
+
 ## [ERR-20260710-009] langgraph-start-replayed-paid-model-nodes
 
 **Logged**: 2026-07-10T08:48:01Z

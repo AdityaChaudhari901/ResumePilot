@@ -1,37 +1,36 @@
 "use client";
 
-import { CheckCircle2, ChevronDown, FileCheck2, RefreshCcw, ScanSearch } from "lucide-react";
+import { ArrowLeft, FileText, Plus } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ProductMark } from "@/components/product-mark";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Panel } from "@/components/ui/panel";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { AccountSessionCard } from "@/features/dashboard/components/account-session-card";
 import { AiWorkflowCard } from "@/features/dashboard/components/ai-workflow-card";
 import { ApplicationPipelineCard } from "@/features/dashboard/components/application-pipeline-card";
-import { HealthStrip } from "@/features/dashboard/components/health-strip";
 import { JobEvidenceReviewCard } from "@/features/dashboard/components/job-evidence-review-card";
 import {
   JobListingCard,
   MAX_JOB_TEXT_CHARS,
   MIN_JOB_TEXT_CHARS
 } from "@/features/dashboard/components/job-listing-card";
-import { OpenClawStatusCard } from "@/features/dashboard/components/openclaw-status-card";
 import { ReportHistoryCard } from "@/features/dashboard/components/report-history-card";
 import { ReportViewer } from "@/features/dashboard/components/report-viewer";
 import { ResumeProfileReviewCard } from "@/features/dashboard/components/resume-profile-review-card";
 import { ResumeUploadCard } from "@/features/dashboard/components/resume-upload-card";
 import { TailoredResumeWorkspaceCard } from "@/features/dashboard/components/tailored-resume-workspace-card";
-import { UsageStatusCard } from "@/features/dashboard/components/usage-status-card";
 import {
   WorkflowProgress,
   type WorkflowProgressStep,
   type WorkflowStepId
 } from "@/features/dashboard/components/workflow-progress";
 import { WorkflowSummaryCard } from "@/features/dashboard/components/workflow-summary-card";
+import {
+  WorkspaceAppShell,
+  WorkspacePageHeader
+} from "@/features/dashboard/components/workspace-app-shell";
+import { WorkspaceOverview } from "@/features/dashboard/components/workspace-overview";
+import { WorkspaceSettingsView } from "@/features/dashboard/components/workspace-settings-view";
 import type {
   AgentWorkflowTrace,
   ApplicationDetail,
@@ -70,6 +69,8 @@ import {
 
 interface DashboardStatusPayload {
   activeOperation: WorkflowOperation | null;
+  activeOperationLookupError: string | null;
+  activeOperationVerified: boolean;
   applications: ApplicationItem[];
   auth: DashboardAuthSession | null;
   health: HealthStatus;
@@ -78,7 +79,33 @@ interface DashboardStatusPayload {
   usage: UsageSummaryResponse | null;
 }
 
-async function fetchDashboardStatus(): Promise<DashboardStatusPayload> {
+type ActiveOperationScope = number | "any" | "none";
+
+async function fetchDashboardStatus(
+  activeOperationScope: ActiveOperationScope
+): Promise<DashboardStatusPayload> {
+  const activeOperationLookupPromise =
+    activeOperationScope === "none"
+      ? Promise.resolve({
+          errorMessage: null,
+          operation: null,
+          verified: true
+        })
+      : fetchActiveAnalysisOperation(
+          activeOperationScope === "any" ? undefined : activeOperationScope
+        ).then(
+          (operation) => ({
+            errorMessage: null,
+            operation,
+            verified: true
+          }),
+          () => ({
+            errorMessage:
+              "Active analyses could not be verified. Refresh before starting another analysis.",
+            operation: null,
+            verified: false
+          })
+        );
   const [
     authResponse,
     healthResponse,
@@ -86,7 +113,7 @@ async function fetchDashboardStatus(): Promise<DashboardStatusPayload> {
     applications,
     reports,
     usage,
-    activeOperation
+    activeOperationLookup
   ] = await Promise.all([
     fetch("/api/auth/session", { cache: "no-store" }),
     fetch("/api/health", { cache: "no-store" }),
@@ -94,11 +121,13 @@ async function fetchDashboardStatus(): Promise<DashboardStatusPayload> {
     fetchApplications(),
     fetchReportHistory(),
     fetchUsageSummary(),
-    fetchActiveAnalysisOperation()
+    activeOperationLookupPromise
   ]);
 
   return {
-    activeOperation,
+    activeOperation: activeOperationLookup.operation,
+    activeOperationLookupError: activeOperationLookup.errorMessage,
+    activeOperationVerified: activeOperationLookup.verified,
     auth: authResponse.ok ? ((await authResponse.json()) as DashboardAuthSession) : null,
     health: (await healthResponse.json()) as HealthStatus,
     openclaw: (await openclawResponse.json()) as OpenClawStatus,
@@ -121,23 +150,33 @@ async function fetchApplications(): Promise<ApplicationItem[]> {
   }
 }
 
-async function fetchActiveAnalysisOperation(): Promise<WorkflowOperation | null> {
-  try {
-    const response = await fetch("/api/operations?limit=20", { cache: "no-store" });
-    if (!response.ok) {
-      return null;
-    }
-    const payload = (await response.json()) as WorkflowOperationListResponse;
-    for (const candidate of payload.items) {
-      const operation = requireWorkflowOperation(candidate);
-      if (isActiveAnalysisOperation(operation)) {
-        return operation;
-      }
-    }
-    return null;
-  } catch {
+async function fetchActiveAnalysisOperation(
+  applicationId?: number
+): Promise<WorkflowOperation | null> {
+  const query = new URLSearchParams();
+  if (applicationId !== undefined) {
+    query.set("application_id", String(applicationId));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  const response = await fetch(`/api/operations/active${suffix}`, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  const payload = (await response.json()) as WorkflowOperationListResponse;
+  if (!Array.isArray(payload.items) || payload.items.length > 1) {
+    throw new Error("Backend returned an invalid active analysis result.");
+  }
+  if (payload.items.length === 0) {
     return null;
   }
+  const operation = requireWorkflowOperation(payload.items[0]);
+  if (
+    !isActiveAnalysisOperation(operation) ||
+    (applicationId !== undefined && operation.application_id !== applicationId)
+  ) {
+    throw new Error("Backend returned an invalid active analysis result.");
+  }
+  return operation;
 }
 
 async function fetchApplicationDetail(applicationId: number): Promise<ApplicationDetail> {
@@ -198,13 +237,73 @@ async function fetchTailoredResumeDraft(applicationId: number): Promise<Tailored
   return (await response.json()) as TailoredResumeDraft;
 }
 
-interface DashboardShellProps {
-  initialAuthSession: DashboardAuthSession;
+interface ReportWorkspacePayload {
+  report: ApplicationReport;
+  trace: AgentWorkflowTrace | null;
+  usage: UsageSummaryResponse | null;
 }
 
-export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
+async function fetchReportWorkspace(reportId: number): Promise<ReportWorkspacePayload> {
+  const [reportResponse, traceResponse, usage] = await Promise.all([
+    fetch(`/api/reports/${encodeURIComponent(String(reportId))}`, { cache: "no-store" }),
+    fetch(`/api/reports/${encodeURIComponent(String(reportId))}/trace`, { cache: "no-store" }),
+    fetchUsageSummary()
+  ]);
+
+  if (!reportResponse.ok) {
+    throw new Error(await readApiError(reportResponse));
+  }
+
+  return {
+    report: (await reportResponse.json()) as ApplicationReport,
+    trace: traceResponse.ok
+      ? ((await traceResponse.json()) as ReportWorkflowTraceResponse).trace
+      : null,
+    usage
+  };
+}
+
+export type DashboardView =
+  | "application"
+  | "applicationReport"
+  | "applicationResume"
+  | "applications"
+  | "overview"
+  | "reportDetail"
+  | "reports"
+  | "settings"
+  | "workflow";
+
+function activeOperationScopeForView(
+  view: DashboardView,
+  initialApplicationId?: number
+): ActiveOperationScope {
+  if (view === "application" && initialApplicationId) {
+    return initialApplicationId;
+  }
+  if (view === "workflow" || view === "overview") {
+    return "any";
+  }
+  return "none";
+}
+
+interface DashboardShellProps {
+  initialApplicationId?: number;
+  initialAuthSession: Extract<DashboardAuthSession, { isAuthenticated: true }>;
+  initialReportId?: number;
+  view: DashboardView;
+}
+
+export function DashboardShell({
+  initialApplicationId,
+  initialAuthSession,
+  initialReportId,
+  view
+}: DashboardShellProps) {
+  const router = useRouter();
   const [analysis, setAnalysis] = useState<JobAnalysisResponse | null>(null);
   const [activeOperation, setActiveOperation] = useState<WorkflowOperation | null>(null);
+  const [activeOperationLookupError, setActiveOperationLookupError] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationItem[]>([]);
   const [authSession, setAuthSession] = useState<DashboardAuthSession | null>(
     initialAuthSession
@@ -220,6 +319,17 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isLoadingApplications, setIsLoadingApplications] = useState(true);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [isActiveOperationStatusVerified, setIsActiveOperationStatusVerified] = useState(
+    activeOperationScopeForView(view, initialApplicationId) === "none"
+  );
+  const [isInitialStatusLoaded, setIsInitialStatusLoaded] = useState(false);
+  const [isLoadingRouteSelection, setIsLoadingRouteSelection] = useState(
+    Boolean(initialApplicationId || initialReportId)
+  );
+  const [isRouteSelectionHydrated, setIsRouteSelectionHydrated] = useState(
+    !initialApplicationId && !initialReportId
+  );
+  const [routeHydrationAttempt, setRouteHydrationAttempt] = useState(0);
   const [isPreviewingJob, setIsPreviewingJob] = useState(false);
   const [isLoadingTailoredResume, setIsLoadingTailoredResume] = useState(false);
   const [isUpdatingTailoredResume, setIsUpdatingTailoredResume] = useState(false);
@@ -238,10 +348,12 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const [workflowStep, setWorkflowStep] = useState<WorkflowStepId>("job");
   const [workflowTrace, setWorkflowTrace] = useState<AgentWorkflowTrace | null>(null);
   const [activeApplicationId, setActiveApplicationId] = useState<number | null>(null);
+  const expectedOperationApplicationId = initialApplicationId ?? activeApplicationId;
   const [allowLiveAiProcessing, setAllowLiveAiProcessing] = useState(false);
   const [tailoredResumeDraft, setTailoredResumeDraft] =
     useState<TailoredResumeDraft | null>(null);
   const workspaceRevisionRef = useRef(0);
+  const initialActiveOperationRef = useRef<WorkflowOperation | null>(null);
   const analysisCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const approvalCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const pdfExportCommandRef = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -258,64 +370,95 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   }
 
   const loadStatus = useCallback(async () => {
+    const activeOperationScope = activeOperationScopeForView(view, initialApplicationId);
     setIsLoadingStatus(true);
-    const status = await fetchDashboardStatus();
-    setAuthSession(status.auth);
-    setApplications(status.applications);
-    setHealth(status.health);
-    setOpenclaw(status.openclaw);
-    setReportHistory(status.reports);
-    setUsage(status.usage);
-    setActiveOperation(status.activeOperation);
-    if (status.activeOperation) {
-      setWorkflowStep("ai");
-      const recoveredAnalysis = status.activeOperation.result;
-      if (isJobAnalysisResponse(recoveredAnalysis)) {
-        setAnalysis(recoveredAnalysis);
-        setActiveApplicationId(
-          status.applications.find(
-            (application) => application.report_id === recoveredAnalysis.report_id
-          )?.id ?? null
-        );
-      }
+    if (activeOperationScope !== "none") {
+      setIsActiveOperationStatusVerified(false);
     }
-    setIsLoadingApplications(false);
-    setIsLoadingHistory(false);
-    setIsLoadingStatus(false);
-  }, []);
+    try {
+      const status = await fetchDashboardStatus(activeOperationScope);
+      setAuthSession(status.auth);
+      setApplications(status.applications);
+      setHealth(status.health);
+      setOpenclaw(status.openclaw);
+      setReportHistory(status.reports);
+      setUsage(status.usage);
+      setIsActiveOperationStatusVerified(status.activeOperationVerified);
+      initialActiveOperationRef.current = status.activeOperation;
+      setActiveOperation(status.activeOperation);
+      setActiveOperationLookupError(status.activeOperationLookupError);
+      if (status.activeOperation && view === "workflow") {
+        if (status.activeOperation.application_id) {
+          router.replace(`/app/applications/${status.activeOperation.application_id}`);
+        } else {
+          setWorkflowStep("ai");
+        }
+      } else if (
+        status.activeOperation &&
+        view === "application" &&
+        isRouteSelectionHydrated
+      ) {
+        setWorkflowStep("ai");
+      }
+      setIsLoadingApplications(false);
+      setIsLoadingHistory(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Workspace status could not refresh");
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  }, [initialApplicationId, isRouteSelectionHydrated, router, view]);
+
+  async function handleWorkspaceRefresh() {
+    await loadStatus();
+    if (initialApplicationId || initialReportId) {
+      setRouteHydrationAttempt((attempt) => attempt + 1);
+    }
+  }
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadInitialStatus() {
-      const status = await fetchDashboardStatus();
+      const activeOperationScope = activeOperationScopeForView(view, initialApplicationId);
+      try {
+        const status = await fetchDashboardStatus(activeOperationScope);
 
-      if (!isMounted) {
-        return;
-      }
+        if (!isMounted) {
+          return;
+        }
 
-      setHealth(status.health);
-      setAuthSession(status.auth);
-      setApplications(status.applications);
-      setOpenclaw(status.openclaw);
-      setReportHistory(status.reports);
-      setUsage(status.usage);
-      setActiveOperation(status.activeOperation);
-      if (status.activeOperation) {
-        setWorkflowStep("ai");
-        const recoveredAnalysis = status.activeOperation.result;
-        if (isJobAnalysisResponse(recoveredAnalysis)) {
-          setAnalysis(recoveredAnalysis);
-          setActiveApplicationId(
-            status.applications.find(
-              (application) => application.report_id === recoveredAnalysis.report_id
-            )?.id ?? null
+        setHealth(status.health);
+        setAuthSession(status.auth);
+        setApplications(status.applications);
+        setOpenclaw(status.openclaw);
+        setReportHistory(status.reports);
+        setUsage(status.usage);
+        setIsActiveOperationStatusVerified(status.activeOperationVerified);
+        initialActiveOperationRef.current = status.activeOperation;
+        setActiveOperation(status.activeOperation);
+        setActiveOperationLookupError(status.activeOperationLookupError);
+        if (status.activeOperation && view === "workflow") {
+          if (status.activeOperation.application_id) {
+            router.replace(`/app/applications/${status.activeOperation.application_id}`);
+          } else {
+            setWorkflowStep("ai");
+          }
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Workspace status could not be loaded"
           );
         }
+      } finally {
+        if (isMounted) {
+          setIsLoadingApplications(false);
+          setIsLoadingHistory(false);
+          setIsLoadingStatus(false);
+          setIsInitialStatusLoaded(true);
+        }
       }
-      setIsLoadingApplications(false);
-      setIsLoadingHistory(false);
-      setIsLoadingStatus(false);
     }
 
     void loadInitialStatus();
@@ -323,7 +466,158 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [initialApplicationId, router, view]);
+
+  useEffect(() => {
+    if (!isInitialStatusLoaded) {
+      return;
+    }
+    if (!initialApplicationId && !initialReportId) {
+      return;
+    }
+
+    let isMounted = true;
+
+    async function hydrateRouteSelection() {
+      setIsLoadingRouteSelection(true);
+      setIsRouteSelectionHydrated(false);
+      setErrorMessage(null);
+      try {
+        if (initialApplicationId) {
+          const detail = await fetchApplicationDetail(initialApplicationId);
+          const [profile, reportWorkspace] = await Promise.all([
+            detail.resume_id ? fetchResumeProfile(detail.resume_id) : Promise.resolve(null),
+            detail.report_id ? fetchReportWorkspace(detail.report_id) : Promise.resolve(null)
+          ]);
+          if (!isMounted) {
+            return;
+          }
+
+          setActiveApplicationId(detail.id);
+          setJobSourceType(detail.source_type);
+          setJobUrl(detail.job_url ?? "");
+          setJobText(detail.source_type === "pasted_text" ? detail.reviewed_job_text : "");
+          setJobPreview(jobPreviewFromApplication(detail));
+          setReviewedJobProfile(detail.reviewed_job_profile);
+          setFile(null);
+          const matchingActiveOperation = initialActiveOperationRef.current;
+          const shouldResumeActiveOperation = Boolean(
+            matchingActiveOperation &&
+              isActiveAnalysisOperation(matchingActiveOperation) &&
+              matchingActiveOperation.application_id === detail.id
+          );
+
+          if (profile) {
+            setResume({
+              candidate_name: profile.candidate.name,
+              resume_id: profile.resume_id,
+              status: "parsed",
+              warnings: profile.warnings
+            });
+            setResumeProfile(profile);
+          } else {
+            setResume(null);
+            setResumeProfile(null);
+          }
+
+          if (reportWorkspace && detail.report_id && detail.analysis_id) {
+            setAnalysis({
+              analysis_id: detail.analysis_id,
+              match_score: detail.match_score ?? reportWorkspace.report.match_score,
+              report_id: detail.report_id,
+              scoring_version:
+                detail.scoring_version ?? reportWorkspace.report.scoring_version ?? undefined,
+              score_status: detail.score_status ?? reportWorkspace.report.score_status ?? undefined,
+              status: "completed"
+            });
+            setReport(reportWorkspace.report);
+            setWorkflowTrace(reportWorkspace.trace);
+            setUsage(reportWorkspace.usage);
+            setWorkflowStep(
+              shouldResumeActiveOperation
+                ? "ai"
+                : view === "applicationResume"
+                  ? "draft"
+                  : "report"
+            );
+          } else {
+            setAnalysis(null);
+            setReport(null);
+            setTailoredResumeDraft(null);
+            setWorkflowTrace(null);
+            setWorkflowStep(
+              shouldResumeActiveOperation ? "ai" : detail.resume_id ? "ai" : "resume"
+            );
+            if (view === "applicationReport" || view === "applicationResume") {
+              setErrorMessage(
+                "Complete the evidence analysis before opening this application output."
+              );
+            }
+          }
+          setIsRouteSelectionHydrated(true);
+          return;
+        }
+
+        if (initialReportId) {
+          const reportWorkspace = await fetchReportWorkspace(initialReportId);
+          const profile = await fetchResumeProfile(reportWorkspace.report.resume_id);
+          if (!isMounted) {
+            return;
+          }
+
+          setActiveApplicationId(null);
+          setAnalysis({
+            analysis_id: reportWorkspace.report.analysis_id,
+            match_score: reportWorkspace.report.match_score,
+            report_id: initialReportId,
+            scoring_version: reportWorkspace.report.scoring_version,
+            score_status: reportWorkspace.report.score_status,
+            status: "completed"
+          });
+          setReport(reportWorkspace.report);
+          setWorkflowTrace(reportWorkspace.trace);
+          setUsage(reportWorkspace.usage);
+          setResume({
+            candidate_name: profile.candidate.name,
+            resume_id: profile.resume_id,
+            status: "parsed",
+            warnings: profile.warnings
+          });
+          setResumeProfile(profile);
+          setWorkflowStep("report");
+          setIsRouteSelectionHydrated(true);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setActiveApplicationId(null);
+          setAnalysis(null);
+          setReport(null);
+          setResume(null);
+          setResumeProfile(null);
+          setTailoredResumeDraft(null);
+          setWorkflowTrace(null);
+          setIsRouteSelectionHydrated(false);
+          setErrorMessage(error instanceof Error ? error.message : "Workspace item could not load");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingRouteSelection(false);
+        }
+      }
+    }
+
+    void hydrateRouteSelection();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    initialApplicationId,
+    initialReportId,
+    isInitialStatusLoaded,
+    routeHydrationAttempt,
+    view
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -595,17 +889,24 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       }
 
       const responsePayload = (await response.json()) as unknown;
-      const outcome = isJobAnalysisResponse(responsePayload)
-        ? {
-            analysis: responsePayload,
-            status: "succeeded" as const
-          }
-        : await waitForAnalysisOperation(
-            requireWorkflowOperation(responsePayload),
-            requestRevision,
-            isCurrentWorkspaceRequest,
-            setActiveOperation
-          );
+      let outcome: AnalysisOperationOutcome | null;
+      if (isJobAnalysisResponse(responsePayload)) {
+        outcome = {
+          analysis: responsePayload,
+          applicationId: activeApplicationId,
+          status: "succeeded"
+        };
+      } else {
+        const operation = requireWorkflowOperation(responsePayload);
+        requireOperationApplication(operation, expectedOperationApplicationId);
+        outcome = await waitForAnalysisOperation(
+          operation,
+          expectedOperationApplicationId,
+          requestRevision,
+          isCurrentWorkspaceRequest,
+          setActiveOperation
+        );
+      }
       if (!outcome) {
         return;
       }
@@ -615,6 +916,11 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       analysisCommandRef.current = null;
       const didLoadWorkspace = await loadAnalysisWorkspace(outcome.analysis, requestRevision);
       if (!didLoadWorkspace || !isCurrentWorkspaceRequest(requestRevision)) {
+        return;
+      }
+      analysisCommandRef.current = null;
+      approvalCommandRef.current = null;
+      if (navigateToOperationOutcome(outcome)) {
         return;
       }
 
@@ -636,18 +942,22 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   }
 
   async function handleCancelAnalysis() {
-    if (!activeOperation?.cancelable) {
+    const operation = activeOperation;
+    if (!operation?.cancelable) {
       return;
     }
     try {
+      requireOperationApplication(operation, expectedOperationApplicationId);
       const response = await fetch(
-        `/api/operations/${encodeURIComponent(activeOperation.id)}/cancel`,
+        `/api/operations/${encodeURIComponent(operation.id)}/cancel`,
         { method: "POST" }
       );
       if (!response.ok) {
         throw new Error(await readApiError(response));
       }
-      setActiveOperation((await response.json()) as WorkflowOperation);
+      const canceledOperation = requireWorkflowOperation((await response.json()) as unknown);
+      requireOperationApplication(canceledOperation, expectedOperationApplicationId);
+      setActiveOperation(canceledOperation);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Analysis cancellation failed");
     }
@@ -659,6 +969,12 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       setErrorMessage("There is no active analysis to resume.");
       return;
     }
+    try {
+      requireOperationApplication(operation, expectedOperationApplicationId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Analysis context is invalid.");
+      return;
+    }
 
     const requestRevision = startWorkspaceRequest();
     setErrorMessage(null);
@@ -667,6 +983,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       const latest = await fetchWorkflowOperation(operation.id);
       const outcome = await waitForAnalysisOperation(
         latest,
+        expectedOperationApplicationId,
         requestRevision,
         isCurrentWorkspaceRequest,
         setActiveOperation
@@ -678,12 +995,13 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       if (!didLoadWorkspace || !isCurrentWorkspaceRequest(requestRevision)) {
         return;
       }
+      if (navigateToOperationOutcome(outcome)) {
+        return;
+      }
       if (outcome.status === "waiting_for_approval") {
         setWorkflowStep("ai");
         return;
       }
-      analysisCommandRef.current = null;
-      approvalCommandRef.current = null;
       setActiveOperation(null);
       setWorkflowStep("report");
     } catch (error) {
@@ -709,6 +1027,12 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       approval.status !== "pending"
     ) {
       setErrorMessage("This live draft is no longer waiting for a decision. Refresh and try again.");
+      return;
+    }
+    try {
+      requireOperationApplication(operation, expectedOperationApplicationId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Approval context is invalid.");
       return;
     }
 
@@ -748,6 +1072,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
         const message = await readApiError(response);
         if (response.status === 409) {
           const authoritative = await fetchWorkflowOperation(operation.id);
+          requireOperationApplication(authoritative, expectedOperationApplicationId);
           if (isCurrentWorkspaceRequest(requestRevision)) {
             setActiveOperation(authoritative);
           }
@@ -757,6 +1082,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
 
       const outcome = await waitForAnalysisOperation(
         requireWorkflowOperation((await response.json()) as unknown),
+        expectedOperationApplicationId,
         requestRevision,
         isCurrentWorkspaceRequest,
         setActiveOperation
@@ -769,9 +1095,12 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       if (!didLoadWorkspace || !isCurrentWorkspaceRequest(requestRevision)) {
         return;
       }
-
       approvalCommandRef.current = null;
       analysisCommandRef.current = null;
+      if (navigateToOperationOutcome(outcome)) {
+        return;
+      }
+
       if (outcome.status === "waiting_for_approval") {
         setWorkflowStep("ai");
         return;
@@ -794,20 +1123,7 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   }
 
   async function loadReport(reportId: number, requestRevision?: number): Promise<boolean> {
-    const [reportResponse, traceResponse, usageSummary] = await Promise.all([
-      fetch(`/api/reports/${reportId}`, { cache: "no-store" }),
-      fetch(`/api/reports/${reportId}/trace`, { cache: "no-store" }),
-      fetchUsageSummary()
-    ]);
-
-    if (!reportResponse.ok) {
-      throw new Error(await readApiError(reportResponse));
-    }
-
-    const nextReport = (await reportResponse.json()) as ApplicationReport;
-    const nextTrace = traceResponse.ok
-      ? ((await traceResponse.json()) as ReportWorkflowTraceResponse).trace
-      : null;
+    const reportWorkspace = await fetchReportWorkspace(reportId);
     if (
       requestRevision !== undefined &&
       !isCurrentWorkspaceRequest(requestRevision)
@@ -815,9 +1131,9 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
       return false;
     }
 
-    setReport(nextReport);
-    setUsage(usageSummary);
-    setWorkflowTrace(nextTrace);
+    setReport(reportWorkspace.report);
+    setUsage(reportWorkspace.usage);
+    setWorkflowTrace(reportWorkspace.trace);
     return true;
   }
 
@@ -852,54 +1168,13 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     return true;
   }
 
-  async function handleSelectReport(item: ReportHistoryItem) {
-    const requestRevision = startWorkspaceRequest();
-    setErrorMessage(null);
-    const nextAnalysis: JobAnalysisResponse = {
-      analysis_id: item.analysis_id,
-      match_score: item.match_score,
-      report_id: item.report_id,
-      scoring_version: item.scoring_version,
-      score_status: item.score_status,
-      status: item.status
-    };
-    setAnalysis(nextAnalysis);
-    setReport(null);
-    setWorkflowTrace(null);
-    setWorkflowStep("report");
-    setActiveApplicationId(null);
-    setResume((currentResume) =>
-      currentResume?.resume_id === item.resume_id
-        ? currentResume
-        : {
-            candidate_name: item.resume_candidate_name,
-            resume_id: item.resume_id,
-            status: "parsed",
-            warnings: []
-          }
-    );
-    try {
-      const [profile, nextApplications] = await Promise.all([
-        fetchResumeProfile(item.resume_id),
-        fetchApplications()
-      ]);
-      if (!isCurrentWorkspaceRequest(requestRevision)) {
-        return;
-      }
-      setResumeProfile(profile);
-      setApplications(nextApplications);
-      setActiveApplicationId(
-        nextApplications.find((application) => application.report_id === item.report_id)?.id ?? null
-      );
-      const didLoadReport = await loadReport(item.report_id, requestRevision);
-      if (!didLoadReport || !isCurrentWorkspaceRequest(requestRevision)) {
-        return;
-      }
-    } catch (error) {
-      if (isCurrentWorkspaceRequest(requestRevision)) {
-        setErrorMessage(error instanceof Error ? error.message : "Report history load failed");
-      }
+  function navigateToOperationOutcome(outcome: AnalysisOperationOutcome): boolean {
+    if (!outcome.applicationId) {
+      return false;
     }
+    const suffix = outcome.status === "succeeded" ? "/report" : "";
+    router.replace(`/app/applications/${outcome.applicationId}${suffix}`);
+    return true;
   }
 
   const isJobSourceValid = isJobInputValid(
@@ -918,9 +1193,15 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   const hasActiveAnalysisOperation = Boolean(
     activeOperation && isActiveAnalysisOperation(activeOperation)
   );
+  const workspaceErrorMessage = activeOperationLookupError ?? errorMessage;
+  const isRouteContextReady =
+    !initialApplicationId ||
+    (isRouteSelectionHydrated && activeApplicationId === initialApplicationId);
   const canAnalyze =
     isJobEvidenceReady &&
     isResumeReady &&
+    isActiveOperationStatusVerified &&
+    isRouteContextReady &&
     !isAnalyzing &&
     !isSubmittingApproval &&
     !hasActiveAnalysisOperation;
@@ -1032,63 +1313,6 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
   function handleViewDraftFromSummary() {
     if (analysis && activeApplicationId !== null) {
       setWorkflowStep("draft");
-    }
-  }
-
-  async function handleSelectApplication(application: ApplicationItem) {
-    const requestRevision = startWorkspaceRequest();
-    setErrorMessage(null);
-    setActiveApplicationId(application.id);
-    try {
-      const detail = await fetchApplicationDetail(application.id);
-      if (!isCurrentWorkspaceRequest(requestRevision)) {
-        return;
-      }
-
-      setJobSourceType(detail.source_type);
-      setJobUrl(detail.job_url ?? "");
-      setJobText(detail.source_type === "pasted_text" ? detail.reviewed_job_text : "");
-      setJobPreview(jobPreviewFromApplication(detail));
-      setReviewedJobProfile(detail.reviewed_job_profile);
-
-      if (detail.resume_id) {
-        const profile = await fetchResumeProfile(detail.resume_id);
-        if (!isCurrentWorkspaceRequest(requestRevision)) {
-          return;
-        }
-        setResume({
-          candidate_name: profile.candidate.name,
-          resume_id: profile.resume_id,
-          status: "parsed",
-          warnings: profile.warnings
-        });
-        setResumeProfile(profile);
-      } else {
-        setResume(null);
-        setResumeProfile(null);
-      }
-
-      if (detail.report_id && detail.analysis_id && detail.resume_id) {
-        setAnalysis({
-          analysis_id: detail.analysis_id,
-          match_score: detail.match_score ?? 0,
-          report_id: detail.report_id,
-          scoring_version: detail.scoring_version ?? undefined,
-          score_status: detail.score_status ?? undefined,
-          status: "completed"
-        });
-        setReport(null);
-        setWorkflowTrace(null);
-        setWorkflowStep("draft");
-        await loadReport(detail.report_id, requestRevision);
-      } else {
-        clearCurrentAnalysis();
-        setWorkflowStep(detail.resume_id ? "ai" : "resume");
-      }
-    } catch (error) {
-      if (isCurrentWorkspaceRequest(requestRevision)) {
-        setErrorMessage(error instanceof Error ? error.message : "Application load failed");
-      }
     }
   }
 
@@ -1297,280 +1521,512 @@ export function DashboardShell({ initialAuthSession }: DashboardShellProps) {
     }
   }
 
+  const isWorkspaceBusy =
+    isAnalyzing ||
+    isSubmittingApproval ||
+    hasActiveAnalysisOperation ||
+    isExportingReport !== null ||
+    isExportingTailoredResume !== null ||
+    isLoadingTailoredResume ||
+    isUpdatingTailoredResume ||
+    isUploading;
+  const activeApplication = applications.find(
+    (application) => application.id === activeApplicationId
+  );
+  const activeRole =
+    activeApplication?.role ?? reviewedJobProfile?.role_title ?? "Application workspace";
+  const activeCompany =
+    activeApplication?.company ?? reviewedJobProfile?.company ?? "Company not captured";
+  const workspaceSession = authSession?.isAuthenticated ? authSession : initialAuthSession;
+
+  function openReportFromWorkspace() {
+    if (
+      activeApplicationId &&
+      (view === "application" || view === "applicationResume")
+    ) {
+      router.push(`/app/applications/${activeApplicationId}/report`);
+      return;
+    }
+    handleViewReportFromSummary();
+  }
+
+  function openDraftFromWorkspace() {
+    if (
+      activeApplicationId &&
+      (view === "application" || view === "applicationReport")
+    ) {
+      router.push(`/app/applications/${activeApplicationId}/resume`);
+      return;
+    }
+    handleViewDraftFromSummary();
+  }
+
   return (
-    <main className="min-h-dvh overflow-x-clip">
-      <div className="rp-frosted sticky top-0 z-40 border-b border-border">
-        <div className="mx-auto flex h-16 max-w-[90rem] items-center justify-between px-4 sm:px-6 lg:px-8">
-          <ProductMark />
-          <div className="flex items-center gap-2">
-            <Badge className="hidden sm:inline-flex" tone="neutral">
-              private workspace
-            </Badge>
-            <Button
-              className="h-9 px-3"
-              icon={<RefreshCcw className="h-4 w-4" aria-hidden="true" />}
-              onClick={() => void loadStatus()}
-              variant="ghost"
-            >
-              <span className="hidden sm:inline">Refresh status</span>
-              <span className="sm:hidden">Refresh</span>
-            </Button>
-            <ThemeToggle />
-          </div>
-        </div>
-      </div>
+    <WorkspaceAppShell
+      isRefreshing={isLoadingStatus}
+      onRefresh={() => void handleWorkspaceRefresh()}
+      session={workspaceSession}
+    >
+      {errorMessage &&
+      ["applications", "overview", "reports", "settings"].includes(view) ? (
+        <WorkspaceError message={errorMessage} />
+      ) : null}
 
-      <div className="mx-auto flex max-w-[90rem] flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-        <header className="grid gap-8 border-b border-border-strong pb-7 lg:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.75fr)] lg:items-end">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="primary">evidence-first</Badge>
-              <span className="font-mono text-[0.68rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                application workspace / 01
-              </span>
-            </div>
-            <h1 className="mt-5 max-w-3xl text-3xl font-extrabold leading-[1.05] tracking-[-0.055em] text-foreground sm:text-5xl">
-              Guided application workflow
-            </h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
-              Capture the role, verify what ResumePilot extracted, then connect every recommendation
-              to resume evidence before you approve an export.
-            </p>
-          </div>
+      {view === "overview" ? (
+        <>
+          <WorkspacePageHeader
+            action={
+              <Link
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:hidden"
+                href="/app/applications/new"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                New application
+              </Link>
+            }
+            description="See what needs attention, continue recent case files, and keep every report tied to source evidence."
+            eyebrow="Workspace overview"
+            title="Application command center"
+          />
+          <WorkspaceOverview
+            activeOperation={activeOperation}
+            applications={applications}
+            isLoading={isLoadingApplications || isLoadingHistory}
+            reports={reportHistory}
+            usage={usage}
+          />
+        </>
+      ) : null}
 
-          <dl
-            aria-label="Evidence protocol status"
-            className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3"
-          >
-            <div className="bg-surface-raised p-4">
-              <dt className="flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.13em] text-muted-foreground">
-                <ScanSearch className="h-3.5 w-3.5" aria-hidden="true" />
-                Source
-              </dt>
-              <dd className="mt-2 text-sm font-bold text-foreground">
-                {isJobSourceValid ? "Captured" : "Needed first"}
-              </dd>
-            </div>
-            <div className="bg-surface-raised p-4">
-              <dt className="flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.13em] text-muted-foreground">
-                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Evidence
-              </dt>
-              <dd className="mt-2 text-sm font-bold text-foreground">
-                {isJobEvidenceReady ? "Reviewed" : "Awaiting review"}
-              </dd>
-            </div>
-            <div className="bg-surface-raised p-4">
-              <dt className="flex items-center gap-2 font-mono text-[0.66rem] uppercase tracking-[0.13em] text-muted-foreground">
-                <FileCheck2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Export
-              </dt>
-              <dd className="mt-2 text-sm font-bold text-foreground">
-                {tailoredResumeDraft?.export_ready ? "Approved" : "Approval gated"}
-              </dd>
-            </div>
-          </dl>
-        </header>
+      {view === "applications" ? (
+        <>
+          <WorkspacePageHeader
+            action={
+              <Link
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                href="/app/applications/new"
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                New application
+              </Link>
+            }
+            description="Track each role as a case file—from reviewed source to report, export, and application status."
+            eyebrow="Application portfolio"
+            title="Applications"
+          />
+          <ApplicationPipelineCard
+            activeApplicationId={activeApplicationId}
+            applications={applications}
+            isBusy={isWorkspaceBusy}
+            isLoading={isLoadingApplications}
+            onSelectApplication={(application) =>
+              router.push(`/app/applications/${application.id}`)
+            }
+            onUpdateStatus={(application, status) =>
+              void handleUpdateApplicationStatus(application, status)
+            }
+            variant="page"
+          />
+        </>
+      ) : null}
 
-        <WorkflowProgress steps={workflowSteps} />
+      {view === "reports" ? (
+        <>
+          <WorkspacePageHeader
+            action={
+              <Link
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border-strong bg-surface-raised px-4 text-sm font-bold text-foreground hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                href="/app/applications"
+              >
+                <FileText className="h-4 w-4" aria-hidden="true" />
+                View applications
+              </Link>
+            }
+            description="Open saved evidence-fit reports without mixing them into intake, account, or integration settings."
+            eyebrow="Evidence ledger"
+            title="Reports"
+          />
+          <ReportHistoryCard
+            isBusy={isWorkspaceBusy}
+            isLoading={isLoadingHistory}
+            items={reportHistory}
+            onSelectReport={(item) => router.push(`/app/reports/${item.report_id}`)}
+            selectedReportId={analysis?.report_id ?? null}
+            variant="page"
+          />
+        </>
+      ) : null}
 
-        {errorMessage && (
-          <div
-            aria-live="assertive"
-            className="rounded-xl border border-destructive/35 bg-destructive/10 p-4 text-sm font-medium text-destructive shadow-sm"
-            role="alert"
-          >
-            {errorMessage}
-          </div>
-        )}
+      {view === "settings" ? (
+        <>
+          <WorkspacePageHeader
+            description="Review account scope, plan usage, runtime health, and local OpenClaw integration away from application work."
+            eyebrow="Workspace controls"
+            title="Settings and integrations"
+          />
+          <WorkspaceSettingsView
+            health={health}
+            isLoading={isLoadingStatus}
+            openclaw={openclaw}
+            session={authSession}
+            usage={usage}
+          />
+        </>
+      ) : null}
 
-        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(20rem,0.7fr)]">
-          <section
-            aria-label="Active workflow step"
-            className="min-w-0 space-y-5 [&>section]:border-border-strong"
-          >
-            {workflowStep === "job" ? (
-              <JobListingCard
-                isJobInputValid={isJobSourceValid}
-                isPreviewing={isPreviewingJob}
-                jobSourceType={jobSourceType}
-                jobText={jobText}
-                jobUrl={jobUrl}
-                onJobSourceTypeChange={handleJobSourceTypeChange}
-                onJobTextChange={handleJobTextChange}
-                onJobUrlChange={handleJobUrlChange}
-                onSubmit={handleJobContinue}
-              />
-            ) : null}
-
-            {workflowStep === "jobReview" && jobPreview ? (
-              <JobEvidenceReviewCard
-                key={`${jobPreview.job_url}:${jobPreview.raw_text_char_count}`}
-                preview={jobPreview}
-                onBack={() => {
-                  setErrorMessage(null);
-                  setWorkflowStep("job");
-                }}
-                onContinue={handleConfirmJobEvidence}
-                onUsePastedText={() => handleJobSourceTypeChange("pasted_text")}
-              />
-            ) : null}
-
-            {workflowStep === "resume" ? (
-              <ResumeUploadCard
-                fileName={file?.name ?? ""}
-                isUploading={isUploading}
-                onFileChange={handleFileChange}
-                onSubmit={handleUpload}
-                resume={resume}
-              />
-            ) : null}
-
-            {workflowStep === "ai" ? (
-              <AiWorkflowCard
-                allowLiveAiProcessing={allowLiveAiProcessing}
-                canAnalyze={canAnalyze}
-                isAnalyzing={isAnalyzing}
-                isSubmittingApproval={isSubmittingApproval}
-                operation={activeOperation}
-                onAllowLiveAiProcessingChange={setAllowLiveAiProcessing}
-                onApprovalDecision={(decision) =>
-                  void handleWorkflowApprovalDecision(decision)
-                }
+      {view === "workflow" || view === "application" ? (
+        <>
+          <WorkspacePageHeader
+            action={
+              <Link
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border-strong bg-surface-raised px-4 text-sm font-bold text-foreground hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                href="/app/applications"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                Applications
+              </Link>
+            }
+            description={
+              view === "workflow"
+                ? "Capture one role, verify the extracted requirements, add resume evidence, and run a controlled analysis."
+                : `${activeCompany} · Continue the next evidence-backed step for this case file.`
+            }
+            eyebrow={view === "workflow" ? "New case file" : "Application case file"}
+            title={view === "workflow" ? "Guided application workflow" : activeRole}
+          />
+          {view === "workflow" && activeOperation?.application_id === null ? (
+            <div className="space-y-6">
+              {workspaceErrorMessage ? <WorkspaceError message={workspaceErrorMessage} /> : null}
+              <UnlinkedOperationRecovery
+                isBusy={isAnalyzing}
                 onCancel={() => void handleCancelAnalysis()}
                 onResume={() => void handleResumeAnalysisStatus()}
-                onSubmit={handleAnalyze}
-                usage={usage}
+                operation={activeOperation}
               />
-            ) : null}
+            </div>
+          ) : (
+            <div className="space-y-6">
+            <WorkflowProgress steps={workflowSteps} />
 
-            {workflowStep === "report" ? (
-              <ReportViewer
-                analysis={analysis}
-                canOpenTailoredResume={activeApplicationId !== null}
-                isExporting={isExportingReport}
-                onExport={handleReportExport}
-                onOpenTailoredResume={handleViewDraftFromSummary}
-                report={report}
-                resumeProfile={resumeProfile}
-                workflowTrace={workflowTrace}
-              />
-            ) : null}
+            {workspaceErrorMessage ? <WorkspaceError message={workspaceErrorMessage} /> : null}
 
-            {workflowStep === "draft" ? (
-              <TailoredResumeWorkspaceCard
-                applicationId={activeApplicationId}
-                draft={tailoredResumeDraft}
-                isExporting={isExportingTailoredResume}
-                isLoading={isLoadingTailoredResume}
-                isUpdating={isUpdatingTailoredResume}
-                onExport={handleTailoredResumeExport}
-                onRefresh={() => void handleRefreshTailoredResumeDraft()}
-                onUpdateItem={handleUpdateTailoredResumeItem}
-                onViewReport={handleViewReportFromSummary}
-              />
-            ) : null}
-          </section>
+            {isLoadingRouteSelection ? (
+              <WorkspaceLoadingState label="Loading application case file…" />
+            ) : !isRouteContextReady ? (
+              <WorkspaceUnavailableState label="Application controls remain locked until the case file is verified." />
+            ) : (
+              <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(19rem,0.65fr)]">
+                <section aria-label="Active workflow step" className="min-w-0 space-y-5">
+                  {workflowStep === "job" ? (
+                    <JobListingCard
+                      isJobInputValid={isJobSourceValid}
+                      isPreviewing={isPreviewingJob}
+                      jobSourceType={jobSourceType}
+                      jobText={jobText}
+                      jobUrl={jobUrl}
+                      onJobSourceTypeChange={handleJobSourceTypeChange}
+                      onJobTextChange={handleJobTextChange}
+                      onJobUrlChange={handleJobUrlChange}
+                      onSubmit={handleJobContinue}
+                    />
+                  ) : null}
 
-          <aside aria-label="Application context" className="min-w-0 space-y-5">
-            <ApplicationPipelineCard
-              activeApplicationId={activeApplicationId}
-              applications={applications}
-              isBusy={
-                isAnalyzing ||
-                isSubmittingApproval ||
-                hasActiveAnalysisOperation ||
-                isExportingReport !== null ||
-                isExportingTailoredResume !== null ||
-                isLoadingTailoredResume ||
-                isUpdatingTailoredResume ||
-                isUploading
-              }
-              isLoading={isLoadingApplications}
-              onSelectApplication={(application) => void handleSelectApplication(application)}
-              onUpdateStatus={(application, status) =>
-                void handleUpdateApplicationStatus(application, status)
-              }
-            />
-            <WorkflowSummaryCard
-              activeOperation={activeOperation}
+                  {workflowStep === "jobReview" && jobPreview ? (
+                    <JobEvidenceReviewCard
+                      key={`${jobPreview.job_url}:${jobPreview.raw_text_char_count}`}
+                      preview={jobPreview}
+                      onBack={() => {
+                        setErrorMessage(null);
+                        setWorkflowStep("job");
+                      }}
+                      onContinue={handleConfirmJobEvidence}
+                      onUsePastedText={() => handleJobSourceTypeChange("pasted_text")}
+                    />
+                  ) : null}
+
+                  {workflowStep === "resume" ? (
+                    <ResumeUploadCard
+                      fileName={file?.name ?? ""}
+                      isUploading={isUploading}
+                      onFileChange={handleFileChange}
+                      onSubmit={handleUpload}
+                      resume={resume}
+                    />
+                  ) : null}
+
+                  {workflowStep === "ai" ? (
+                    <AiWorkflowCard
+                      allowLiveAiProcessing={allowLiveAiProcessing}
+                      canAnalyze={canAnalyze}
+                      isAnalyzing={isAnalyzing}
+                      isSubmittingApproval={isSubmittingApproval}
+                      operation={activeOperation}
+                      onAllowLiveAiProcessingChange={setAllowLiveAiProcessing}
+                      onApprovalDecision={(decision) =>
+                        void handleWorkflowApprovalDecision(decision)
+                      }
+                      onCancel={() => void handleCancelAnalysis()}
+                      onResume={() => void handleResumeAnalysisStatus()}
+                      onSubmit={handleAnalyze}
+                      usage={usage}
+                    />
+                  ) : null}
+
+                  {workflowStep === "report" ? (
+                    <ReportViewer
+                      analysis={analysis}
+                      canOpenTailoredResume={activeApplicationId !== null}
+                      isExporting={isExportingReport}
+                      onExport={handleReportExport}
+                      onOpenTailoredResume={openDraftFromWorkspace}
+                      report={report}
+                      resumeProfile={resumeProfile}
+                      workflowTrace={workflowTrace}
+                    />
+                  ) : null}
+
+                  {workflowStep === "draft" ? (
+                    <TailoredResumeWorkspaceCard
+                      applicationId={activeApplicationId}
+                      draft={tailoredResumeDraft}
+                      isExporting={isExportingTailoredResume}
+                      isLoading={isLoadingTailoredResume}
+                      isUpdating={isUpdatingTailoredResume}
+                      onExport={handleTailoredResumeExport}
+                      onRefresh={() => void handleRefreshTailoredResumeDraft()}
+                      onUpdateItem={handleUpdateTailoredResumeItem}
+                      onViewReport={openReportFromWorkspace}
+                    />
+                  ) : null}
+                </section>
+
+                <aside aria-label="Application context" className="min-w-0 space-y-5">
+                  <WorkflowSummaryCard
+                    activeOperation={activeOperation}
+                    analysis={analysis}
+                    isJobEvidenceReady={isJobEvidenceReady}
+                    isJobReady={isJobSourceValid}
+                    isResumeReady={isResumeReady}
+                    jobPreview={jobPreview}
+                    jobSourceType={jobSourceType}
+                    jobText={jobText}
+                    jobUrl={jobUrl}
+                    onEditJob={() => {
+                      setErrorMessage(null);
+                      setWorkflowStep("job");
+                    }}
+                    onReviewJob={handleOpenJobEvidenceReview}
+                    onEditResume={handleEditResume}
+                    onRunAi={handleRunAiFromSummary}
+                    onViewDraft={openDraftFromWorkspace}
+                    onViewReport={openReportFromWorkspace}
+                    resume={resume}
+                    tailoredResumeDraft={tailoredResumeDraft}
+                    workflowTrace={workflowTrace}
+                  />
+                </aside>
+              </div>
+            )}
+
+            {resumeProfile ? (
+              <details className="group rounded-xl border border-border bg-surface-raised">
+                <summary className="cursor-pointer list-none px-5 py-4 text-sm font-bold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+                  Review parsed resume evidence
+                </summary>
+                <div className="border-t border-border p-4 sm:p-5">
+                  <ResumeProfileReviewCard profile={resumeProfile} />
+                </div>
+              </details>
+            ) : null}
+            </div>
+          )}
+        </>
+      ) : null}
+
+      {view === "applicationReport" || view === "reportDetail" ? (
+        <>
+          <WorkspacePageHeader
+            action={
+              <Link
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border-strong bg-surface-raised px-4 text-sm font-bold text-foreground hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                href={
+                  view === "applicationReport" && activeApplicationId
+                    ? `/app/applications/${activeApplicationId}`
+                    : "/app/reports"
+                }
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                {view === "applicationReport" ? "Application" : "Reports"}
+              </Link>
+            }
+            description={
+              view === "applicationReport"
+                ? `${activeCompany} · Review fit, gaps, evidence, and the deterministic validation record.`
+                : "Read-only report view. Tailored resume exports remain available only from an application-linked draft."
+            }
+            eyebrow={view === "applicationReport" ? "Application report" : "Saved report"}
+            title={view === "applicationReport" ? `${activeRole} report` : "Evidence-backed report"}
+          />
+          {workspaceErrorMessage ? <WorkspaceError message={workspaceErrorMessage} /> : null}
+          {isLoadingRouteSelection ? (
+            <WorkspaceLoadingState label="Loading evidence report…" />
+          ) : !isRouteSelectionHydrated ? (
+            <WorkspaceUnavailableState label="Report controls remain locked until the saved evidence is verified." />
+          ) : (
+            <ReportViewer
               analysis={analysis}
-              isJobEvidenceReady={isJobEvidenceReady}
-              isJobReady={isJobSourceValid}
-              isResumeReady={isResumeReady}
-              jobPreview={jobPreview}
-              jobSourceType={jobSourceType}
-              jobText={jobText}
-              jobUrl={jobUrl}
-              onEditJob={() => {
-                setErrorMessage(null);
-                setWorkflowStep("job");
-              }}
-              onReviewJob={handleOpenJobEvidenceReview}
-              onEditResume={handleEditResume}
-              onRunAi={handleRunAiFromSummary}
-              onViewDraft={handleViewDraftFromSummary}
-              onViewReport={handleViewReportFromSummary}
-              resume={resume}
-              tailoredResumeDraft={tailoredResumeDraft}
+              canOpenTailoredResume={
+                view === "applicationReport" && activeApplicationId !== null
+              }
+              isExporting={isExportingReport}
+              onExport={handleReportExport}
+              onOpenTailoredResume={openDraftFromWorkspace}
+              report={report}
+              resumeProfile={resumeProfile}
               workflowTrace={workflowTrace}
             />
-          </aside>
+          )}
+        </>
+      ) : null}
+
+      {view === "applicationResume" ? (
+        <>
+          <WorkspacePageHeader
+            action={
+              <Link
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border-strong bg-surface-raised px-4 text-sm font-bold text-foreground hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                href={
+                  activeApplicationId
+                    ? `/app/applications/${activeApplicationId}/report`
+                    : "/app/applications"
+                }
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                Report
+              </Link>
+            }
+            description={`${activeCompany} · Review every proposed bullet against its source evidence before export.`}
+            eyebrow="Approval desk"
+            title={`${activeRole} tailored resume`}
+          />
+          {workspaceErrorMessage ? <WorkspaceError message={workspaceErrorMessage} /> : null}
+          {isLoadingRouteSelection ? (
+            <WorkspaceLoadingState label="Loading tailored resume…" />
+          ) : !isRouteSelectionHydrated ? (
+            <WorkspaceUnavailableState label="Resume controls remain locked until the application evidence is verified." />
+          ) : (
+            <TailoredResumeWorkspaceCard
+              applicationId={activeApplicationId}
+              draft={tailoredResumeDraft}
+              isExporting={isExportingTailoredResume}
+              isLoading={isLoadingTailoredResume}
+              isUpdating={isUpdatingTailoredResume}
+              onExport={handleTailoredResumeExport}
+              onRefresh={() => void handleRefreshTailoredResumeDraft()}
+              onUpdateItem={handleUpdateTailoredResumeItem}
+              onViewReport={openReportFromWorkspace}
+            />
+          )}
+        </>
+      ) : null}
+    </WorkspaceAppShell>
+  );
+}
+
+function WorkspaceError({ message }: { message: string }) {
+  return (
+    <div
+      aria-live="assertive"
+      className="mb-6 rounded-xl border border-destructive/35 bg-destructive/10 p-4 text-sm font-medium text-destructive"
+      role="alert"
+    >
+      {message}
+    </div>
+  );
+}
+
+function WorkspaceLoadingState({ label }: { label: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-surface-raised p-8 text-center text-sm text-muted-foreground">
+      {label}
+    </div>
+  );
+}
+
+function WorkspaceUnavailableState({ label }: { label: string }) {
+  return (
+    <section className="rounded-xl border border-border bg-surface-raised p-8 text-center">
+      <h2 className="text-base font-extrabold text-foreground">Workspace verification required</h2>
+      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+        {label} Use Refresh status to retry the protected workspace request.
+      </p>
+    </section>
+  );
+}
+
+function UnlinkedOperationRecovery({
+  isBusy,
+  onCancel,
+  onResume,
+  operation
+}: {
+  isBusy: boolean;
+  onCancel: () => void;
+  onResume: () => void;
+  operation: WorkflowOperation;
+}) {
+  return (
+    <section
+      aria-labelledby="unlinked-operation-title"
+      className="rounded-xl border border-warning/35 bg-surface-raised p-5 sm:p-7"
+    >
+      <p className="font-mono text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-warning">
+        Analysis recovery
+      </p>
+      <h2 className="mt-3 text-xl font-extrabold tracking-[-0.03em] text-foreground" id="unlinked-operation-title">
+        Finish the analysis already in progress
+      </h2>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+        ResumePilot found an active analysis whose application case file is still being finalized.
+        Starting another analysis is locked until this operation completes or is canceled.
+      </p>
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</p>
+          <p className="mt-2 text-sm font-bold text-foreground">
+            {operation.status.replaceAll("_", " ")}
+          </p>
         </div>
-
-        <details className="group overflow-hidden rounded-2xl border border-border bg-surface-raised shadow-[0_18px_55px_-42px_rgba(12,17,10,0.85)]">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 text-sm font-bold tracking-[-0.01em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary sm:px-6">
-            <span className="flex items-center gap-3">
-              <span className="font-mono text-[0.65rem] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                System
-              </span>
-              Workspace review and system status
-            </span>
-            <ChevronDown
-              className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180"
-              aria-hidden="true"
-            />
-          </summary>
-          <div className="grid min-w-0 gap-5 border-t border-border bg-surface p-4 [&>*]:min-w-0 sm:p-6 xl:grid-cols-2">
-            <Panel as="aside" eyebrow="Runtime" title="FastAPI status">
-              <HealthStrip health={health} isLoading={isLoadingStatus} />
-            </Panel>
-            <ReportHistoryCard
-              isBusy={
-                isAnalyzing ||
-                isSubmittingApproval ||
-                hasActiveAnalysisOperation ||
-                isExportingReport !== null ||
-                isExportingTailoredResume !== null ||
-                isLoadingTailoredResume ||
-                isUpdatingTailoredResume ||
-                isUploading
-              }
-              isLoading={isLoadingHistory}
-              items={reportHistory}
-              onSelectReport={(item) => void handleSelectReport(item)}
-              selectedReportId={analysis?.report_id ?? null}
-            />
-            <ResumeProfileReviewCard profile={resumeProfile} />
-            <AccountSessionCard session={authSession} />
-            <OpenClawStatusCard status={openclaw} />
-            <UsageStatusCard usage={usage} />
-            <Panel as="aside" eyebrow="Boundary" title="Validation gate">
-              <ul className="space-y-3 text-sm leading-6 text-muted-foreground">
-                <li>Unsupported work history is rejected before the report is shown.</li>
-                <li>Resume bullets retain evidence IDs for review.</li>
-                <li>OpenClaw commands call the same FastAPI report path.</li>
-              </ul>
-            </Panel>
-          </div>
-        </details>
-
-        <footer className="flex flex-col gap-2 border-t border-border py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>ResumePilot keeps source evidence visible from intake through export.</p>
-          <p className="font-mono">AI suggests / you approve</p>
-        </footer>
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stage</p>
+          <p className="mt-2 text-sm font-bold text-foreground">
+            {operation.stage.replaceAll("_", " ")}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</p>
+          <p className="mt-2 text-sm font-bold text-foreground">{operation.progress_percent}%</p>
+        </div>
       </div>
-    </main>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <button
+          className="inline-flex min-h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={isBusy}
+          onClick={onResume}
+          type="button"
+        >
+          {isBusy ? "Checking status…" : "Resume status"}
+        </button>
+        <button
+          className="inline-flex min-h-10 items-center justify-center rounded-lg border border-border-strong bg-surface px-4 text-sm font-bold text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={isBusy || !operation.cancelable}
+          onClick={onCancel}
+          type="button"
+        >
+          Cancel analysis
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1594,11 +2050,13 @@ class OperationFetchError extends Error {
 
 interface AnalysisOperationOutcome {
   analysis: JobAnalysisResponse;
+  applicationId: number | null;
   status: "succeeded" | "waiting_for_approval";
 }
 
 async function waitForAnalysisOperation(
   initial: WorkflowOperation,
+  expectedApplicationId: number | null,
   requestRevision: number,
   isCurrent: (revision: number) => boolean,
   onUpdate: (operation: WorkflowOperation) => void
@@ -1606,6 +2064,7 @@ async function waitForAnalysisOperation(
   let operation = initial;
   let consecutivePollFailures = 0;
   for (let pollCount = 0; pollCount < 73; pollCount += 1) {
+    requireOperationApplication(operation, expectedApplicationId);
     if (!isCurrent(requestRevision)) {
       return null;
     }
@@ -1624,6 +2083,7 @@ async function waitForAnalysisOperation(
         }
         return {
           analysis: operation.result,
+          applicationId: operation.application_id,
           status: "waiting_for_approval"
         };
       }
@@ -1634,6 +2094,7 @@ async function waitForAnalysisOperation(
       }
       return {
         analysis: operation.result,
+        applicationId: operation.application_id,
         status: "succeeded"
       };
     }
@@ -1697,6 +2158,20 @@ function isActiveAnalysisOperation(operation: WorkflowOperation): boolean {
   );
 }
 
+function requireOperationApplication(
+  operation: WorkflowOperation,
+  expectedApplicationId: number | null
+): void {
+  if (
+    expectedApplicationId !== null &&
+    operation.application_id !== expectedApplicationId
+  ) {
+    throw new TerminalOperationError(
+      "This analysis operation belongs to a different application. Refresh the correct case file."
+    );
+  }
+}
+
 function operationPollDelay(pollCount: number): number {
   if (pollCount < 5) {
     return 1_000;
@@ -1731,6 +2206,12 @@ function requireWorkflowOperation(value: unknown): WorkflowOperation {
   const candidate = value as Partial<WorkflowOperation>;
   if (
     typeof candidate.id !== "string" ||
+    !(
+      candidate.application_id === null ||
+      (typeof candidate.application_id === "number" &&
+        Number.isSafeInteger(candidate.application_id) &&
+        candidate.application_id > 0)
+    ) ||
     typeof candidate.status !== "string" ||
     typeof candidate.stage !== "string" ||
     typeof candidate.progress_percent !== "number"

@@ -71,6 +71,7 @@ REQUIRED_INDEXES = {
         "ix_workflow_jobs_claim",
         "ix_workflow_jobs_stale_lease",
         "ix_workflow_jobs_user_created_id",
+        "uq_workflow_jobs_active_analysis_application",
     },
 }
 SEQUENCE_TABLES = (
@@ -114,6 +115,7 @@ def main() -> None:
     _setup_langgraph(fresh_url)
     _run_alembic(fresh_url, "check")
     _verify_head_schema(fresh_url, expect_seed=False)
+    _verify_active_analysis_uniqueness(fresh_url)
     _verify_postgres_job_claiming(fresh_url)
     _verify_incompatible_worker_fence(fresh_url)
     _verify_analysis_finalization_concurrency(fresh_url)
@@ -151,7 +153,7 @@ def main() -> None:
     print(
         "PostgreSQL migration gate passed: fresh upgrade, prior-release upgrade, "
         "score-version backfill, provenance-preserving rollback, schema drift check, "
-        "concurrent analysis finalization, "
+        "atomic active-analysis uniqueness, concurrent analysis finalization, "
         "durable LangGraph interrupt/resume, seed preservation, sequence advancement, and "
         "downgrade round trip."
     )
@@ -536,6 +538,19 @@ def _assert_history_indexes(inspector: Inspector) -> None:
 
 
 def _assert_workflow_schema(inspector: Inspector) -> None:
+    workflow_columns = {column["name"] for column in inspector.get_columns("workflow_jobs")}
+    if "application_id" not in workflow_columns:
+        raise AssertionError("Workflow job application provenance column is missing")
+
+    workflow_indexes = {index["name"]: index for index in inspector.get_indexes("workflow_jobs")}
+    active_analysis_index = workflow_indexes.get("uq_workflow_jobs_active_analysis_application")
+    if (
+        active_analysis_index is None
+        or not active_analysis_index.get("unique")
+        or active_analysis_index.get("column_names") != ["user_id", "application_id"]
+    ):
+        raise AssertionError("Active analysis/application uniqueness is missing")
+
     workflow_foreign_keys = inspector.get_foreign_keys("workflow_jobs")
     expected_workflow_foreign_keys = {
         (("user_id",), "users"),
@@ -1055,6 +1070,147 @@ def _verify_score_version_upgrade(database_url: str) -> None:
             )
         if deleted_analysis_count:
             raise AssertionError("Re-upgrade resurrected deleted tenant score metadata")
+    finally:
+        engine.dispose()
+
+
+def _verify_active_analysis_uniqueness(database_url: str) -> None:
+    engine = sa.create_engine(database_url)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    operation_ids = (
+        "00000000-0000-4000-8000-000000009301",
+        "00000000-0000-4000-8000-000000009302",
+    )
+    replacement_operation_id = "00000000-0000-4000-8000-000000009303"
+    application_id = 9303
+    try:
+        with session_factory() as db:
+            user = UserRecord(
+                external_id=f"active-analysis-gate-{uuid4()}",
+                display_name="Active analysis gate",
+                plan="premium",
+                subscription_status="active",
+            )
+            db.add(user)
+            db.flush()
+            user_id = user.id
+            usages = [
+                UsageEventRecord(
+                    user_id=user_id,
+                    event_type="analysis_created",
+                    state="reserved",
+                    reservation_key=operation_id,
+                    reserved_at=datetime.now(UTC),
+                    metadata_json={"status": "reserved"},
+                )
+                for operation_id in operation_ids
+            ]
+            db.add_all(usages)
+            db.commit()
+            usage_ids = [usage.id for usage in usages]
+
+        barrier = Barrier(2)
+
+        def insert_active_operation(operation_id: str, usage_id: int) -> str:
+            with session_factory() as db:
+                now = datetime.now(UTC)
+                db.add(
+                    WorkflowJobRecord(
+                        id=operation_id,
+                        user_id=user_id,
+                        kind="analysis",
+                        status="queued",
+                        idempotency_key_hash=hashlib.sha256(operation_id.encode()).hexdigest(),
+                        request_fingerprint=hashlib.sha256(
+                            f"request:{operation_id}".encode()
+                        ).hexdigest(),
+                        payload_json={"application_id": application_id},
+                        scoring_version="evidence_v2",
+                        stage="queued",
+                        progress_percent=0,
+                        attempt_count=0,
+                        max_attempts=3,
+                        priority=0,
+                        available_at=now,
+                        usage_event_id=usage_id,
+                        application_id=application_id,
+                        result_json={},
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                barrier.wait(timeout=10)
+                try:
+                    db.commit()
+                except sa.exc.IntegrityError:
+                    db.rollback()
+                    return "conflict"
+                return "created"
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(insert_active_operation, operation_id, usage_id)
+                for operation_id, usage_id in zip(operation_ids, usage_ids, strict=True)
+            ]
+            results = sorted(future.result(timeout=20) for future in futures)
+        if results != ["conflict", "created"]:
+            raise AssertionError(f"Expected one active-analysis conflict, found {results}")
+
+        with session_factory() as db:
+            active = list(
+                db.scalars(
+                    sa.select(WorkflowJobRecord).where(
+                        WorkflowJobRecord.user_id == user_id,
+                        WorkflowJobRecord.application_id == application_id,
+                        WorkflowJobRecord.status == "queued",
+                    )
+                )
+            )
+            if len(active) != 1:
+                raise AssertionError("Active-analysis index did not preserve exactly one winner")
+            active[0].status = "succeeded"
+            active[0].stage = "completed"
+            active[0].finished_at = datetime.now(UTC)
+            replacement_usage = UsageEventRecord(
+                user_id=user_id,
+                event_type="analysis_created",
+                state="reserved",
+                reservation_key=replacement_operation_id,
+                reserved_at=datetime.now(UTC),
+                metadata_json={"status": "reserved"},
+            )
+            db.add(replacement_usage)
+            db.flush()
+            now = datetime.now(UTC)
+            db.add(
+                WorkflowJobRecord(
+                    id=replacement_operation_id,
+                    user_id=user_id,
+                    kind="analysis",
+                    status="queued",
+                    idempotency_key_hash="9" * 64,
+                    request_fingerprint="8" * 64,
+                    payload_json={"application_id": application_id},
+                    scoring_version="evidence_v2",
+                    stage="queued",
+                    progress_percent=0,
+                    attempt_count=0,
+                    max_attempts=3,
+                    priority=0,
+                    available_at=now,
+                    usage_event_id=replacement_usage.id,
+                    application_id=application_id,
+                    result_json={},
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            db.commit()
+
+            db.execute(sa.delete(WorkflowJobRecord).where(WorkflowJobRecord.user_id == user_id))
+            db.execute(sa.delete(UsageEventRecord).where(UsageEventRecord.user_id == user_id))
+            db.execute(sa.delete(UserRecord).where(UserRecord.id == user_id))
+            db.commit()
     finally:
         engine.dispose()
 

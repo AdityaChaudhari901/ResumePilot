@@ -4,7 +4,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import WorkflowJobRecord
-from app.schemas.operation import WorkflowJobStatus
+from app.schemas.operation import ACTIVE_WORKFLOW_JOB_STATUSES, WorkflowJobStatus
 
 SCORE_V2_WORKER_PREFIX = "score-v2:"
 
@@ -65,6 +65,30 @@ class WorkflowJobRepository:
                 .where(WorkflowJobRecord.user_id == user_id)
                 .order_by(WorkflowJobRecord.created_at.desc(), WorkflowJobRecord.id.desc())
                 .limit(limit)
+            )
+        )
+
+    def list_active(
+        self,
+        *,
+        user_id: int,
+        kind: str,
+        application_id: int | None = None,
+        limit: int = 1,
+    ) -> list[WorkflowJobRecord]:
+        statement = select(WorkflowJobRecord).where(
+            WorkflowJobRecord.user_id == user_id,
+            WorkflowJobRecord.kind == kind,
+            WorkflowJobRecord.status.in_({status.value for status in ACTIVE_WORKFLOW_JOB_STATUSES}),
+        )
+        if application_id is not None:
+            statement = statement.where(WorkflowJobRecord.application_id == application_id)
+        return list(
+            self.db.scalars(
+                statement.order_by(
+                    WorkflowJobRecord.created_at.desc(),
+                    WorkflowJobRecord.id.desc(),
+                ).limit(limit)
             )
         )
 

@@ -101,12 +101,12 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    linear-gradient(var(--rp-border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--rp-border) 1px, transparent 1px),
-    radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--rp-primary) 18%, transparent), transparent 34rem),
+    radial-gradient(
+      circle at 72% -18%,
+      color-mix(in srgb, var(--rp-primary) 9%, transparent),
+      transparent 30rem
+    ),
     var(--color-background);
-  background-attachment: fixed;
-  background-size: 32px 32px, 32px 32px, auto, auto;
   color: var(--color-foreground);
   font-family: var(--font-sans);
   text-rendering: optimizeLegibility;

@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.schemas.auth import CurrentUser
 from app.schemas.operation import (
     WorkflowApprovalDecisionRequest,
+    WorkflowJobKind,
     WorkflowJobListResponse,
     WorkflowJobResponse,
 )
@@ -16,6 +17,7 @@ from app.services.workflow_job_service import (
     cancel_workflow_job,
     get_workflow_job,
     get_workflow_job_artifact,
+    list_active_workflow_jobs,
     list_workflow_jobs,
     submit_workflow_approval,
     workflow_job_response,
@@ -31,6 +33,21 @@ def read_operations(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> WorkflowJobListResponse:
     return list_workflow_jobs(db, current_user, limit=limit)
+
+
+@router.get("/active", response_model=WorkflowJobListResponse)
+def read_active_operations(
+    application_id: Annotated[int | None, Query(ge=1)] = None,
+    kind: WorkflowJobKind = WorkflowJobKind.analysis,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> WorkflowJobListResponse:
+    return list_active_workflow_jobs(
+        db,
+        current_user,
+        kind=kind,
+        application_id=application_id,
+    )
 
 
 @router.get("/{operation_id}", response_model=WorkflowJobResponse)

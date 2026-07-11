@@ -11,10 +11,13 @@ const SAMPLE_JOB_POSTING_PATH = "/sample-job-posting.html";
 const BACKEND_PLATFORM_JOB_PATH = "/backend-platform-job.html";
 const DATA_API_JOB_PATH = "/data-api-job.html";
 const UNCLEAR_JOB_POSTING_PATH = "/unclear-job-posting.html";
+const DASHBOARD_PATH = "/app/dashboard";
+const WORKFLOW_PATH = "/app/applications/new";
 
 function pendingApprovalOperation() {
   return {
     id: "00000000-0000-4000-8000-000000000777",
+    application_id: null,
     kind: "analysis",
     status: "waiting_for_approval",
     stage: "approval_required",
@@ -77,7 +80,9 @@ test("dashboard enforces browser security headers and an accessibility baseline"
     "camera=(), geolocation=(), microphone=()"
   );
 
-  await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
+  await expect(page).toHaveURL(DASHBOARD_PATH);
+  await expect(page.getByRole("heading", { name: "Application command center" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Workspace navigation" })).toBeVisible();
   await page.waitForLoadState("networkidle");
 
   const accessibilityScan = await new AxeBuilder({ page })
@@ -93,12 +98,12 @@ test("dashboard enforces browser security headers and an accessibility baseline"
   expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
 });
 
-test("dashboard supports compact dark mode and reduced-motion preferences", async ({ page }) => {
+test("dashboard supports compact dark mode and reduced-motion preferences", async ({ page }, testInfo) => {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.setViewportSize({ width: 320, height: 900 });
-  await page.goto("/");
+  await page.goto(DASHBOARD_PATH);
 
-  await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Application command center" })).toBeVisible();
   const themeToggle = page.getByRole("button", { name: "Switch to light theme" });
   await expect(themeToggle).toBeVisible();
   expect(await page.locator("html").evaluate((element) => getComputedStyle(element).colorScheme)).toBe(
@@ -110,10 +115,16 @@ test("dashboard supports compact dark mode and reduced-motion preferences", asyn
     scrollWidth: document.documentElement.scrollWidth
   }));
   expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
-  const editJobBounds = await page.getByRole("button", { name: "Edit job listing" }).boundingBox();
-  expect(editJobBounds).not.toBeNull();
-  expect(editJobBounds?.x ?? -1).toBeGreaterThanOrEqual(0);
-  expect((editJobBounds?.x ?? 0) + (editJobBounds?.width ?? 0)).toBeLessThanOrEqual(320);
+  const newApplicationBounds = await page
+    .getByRole("link", { name: "New application" })
+    .last()
+    .boundingBox();
+  expect(newApplicationBounds).not.toBeNull();
+  expect(newApplicationBounds?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect(
+    (newApplicationBounds?.x ?? 0) + (newApplicationBounds?.width ?? 0)
+  ).toBeLessThanOrEqual(320);
+  await captureDashboardScreenshot(page, testInfo, "workspace-dashboard-mobile.png");
 
   await themeToggle.click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
@@ -122,6 +133,35 @@ test("dashboard supports compact dark mode and reduced-motion preferences", asyn
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.getByRole("button", { name: "Switch to dark theme" })).toBeVisible();
+});
+
+test("workspace navigation keeps applications, reports, and settings on focused pages", async ({
+  page
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(DASHBOARD_PATH);
+
+  const navigation = page.getByRole("navigation", { name: "Workspace navigation" });
+  await expect(page.getByRole("heading", { name: "Application command center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Job listing" })).toHaveCount(0);
+  await captureDashboardScreenshot(page, testInfo, "workspace-dashboard-desktop.png");
+
+  await navigation.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL("/app/settings");
+  await expect(page.getByRole("heading", { name: "Settings and integrations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Session" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Plan usage meter" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Job listing" })).toHaveCount(0);
+
+  await navigation.getByRole("link", { name: "Applications" }).click();
+  await expect(page).toHaveURL("/app/applications");
+  await expect(page.getByRole("heading", { name: "Applications", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All applications" })).toBeVisible();
+
+  await page.getByRole("link", { name: "New application" }).first().click();
+  await expect(page).toHaveURL(WORKFLOW_PATH);
+  await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Job listing" })).toBeVisible();
 });
 
 test("not-found routes provide an accessible recovery path", async ({ page }) => {
@@ -143,9 +183,11 @@ test("not-found routes provide an accessible recovery path", async ({ page }) =>
   ).toEqual([]);
 });
 
-test("dashboard restores a durable pending approval after refresh", async ({ page }) => {
+test("dashboard isolates an unlinked durable operation until its case file is ready", async ({
+  page
+}) => {
   const operation = pendingApprovalOperation();
-  await page.route("**/api/operations?limit=20", async (route) => {
+  await page.route("**/api/operations/active*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({ items: [operation], count: 1 }),
       contentType: "application/json",
@@ -153,15 +195,17 @@ test("dashboard restores a durable pending approval after refresh", async ({ pag
     });
   });
 
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Review the validated live draft" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Approve live draft" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Keep deterministic report" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await page.goto(WORKFLOW_PATH);
+  await expect(
+    page.getByRole("heading", { name: "Finish the analysis already in progress" })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel analysis" })).toBeVisible();
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Review the validated live draft" })).toBeVisible();
-  await expect(page.getByText("Evidence-safe live summary", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Finish the analysis already in progress" })
+  ).toBeVisible();
 });
 
 test("dashboard keeps recovery controls after a running operation is rehydrated", async ({
@@ -174,7 +218,7 @@ test("dashboard keeps recovery controls after a running operation is rehydrated"
     stage: "generating_report",
     status: "running"
   };
-  await page.route("**/api/operations?limit=20", async (route) => {
+  await page.route("**/api/operations/active*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({ items: [operation], count: 1 }),
       contentType: "application/json",
@@ -182,10 +226,326 @@ test("dashboard keeps recovery controls after a running operation is rehydrated"
     });
   });
 
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
   await expect(page.getByRole("button", { name: "Resume status" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel analysis" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run AI analysis" })).toHaveCount(0);
+});
+
+test("application routes bind approval controls only to matching operation provenance", async ({
+  page
+}) => {
+  const reviewedJobProfile = {
+    benefits: [],
+    company: "Role A Company",
+    employment_type: null,
+    experience_level: null,
+    job_id: 101,
+    keywords: ["Python"],
+    location: null,
+    preferred_skills: [],
+    required_skills: [
+      {
+        confidence: "high",
+        evidence_text: "Python is required for the role.",
+        id: "job_required_001",
+        importance: "required",
+        name: "Python"
+      }
+    ],
+    responsibilities: ["Build reliable application services."],
+    role_title: "Role A",
+    unclear_items: [],
+    warnings: []
+  };
+  const applicationA = {
+    analysis_id: null,
+    company: "Role A Company",
+    created_at: "2026-07-11T08:00:00Z",
+    id: 101,
+    job_id: 101,
+    job_url: null,
+    match_score: null,
+    report_id: null,
+    resume_id: 501,
+    reviewed_job_profile: reviewedJobProfile,
+    reviewed_job_text:
+      "Role A requires Python engineers to build reliable application services and tests.",
+    role: "Role A",
+    score_status: null,
+    scoring_version: null,
+    source_content_hash: "a".repeat(64),
+    source_type: "pasted_text",
+    status: "reviewed",
+    updated_at: "2026-07-11T08:01:00Z"
+  };
+  const applicationB = {
+    ...applicationA,
+    company: "Role B Company",
+    id: 202,
+    job_id: 202,
+    resume_id: 502,
+    role: "Role B",
+    source_content_hash: "b".repeat(64)
+  };
+  let operationApplicationId = applicationB.id;
+  let activeLookupFails = false;
+
+  await page.route("**/api/operations/active*", async (route) => {
+    if (activeLookupFails) {
+      await route.fulfill({ json: { detail: "Temporary status failure" }, status: 503 });
+      return;
+    }
+    const requestedApplicationId = new URL(route.request().url()).searchParams.get(
+      "application_id"
+    );
+    const operationMatchesFilter =
+      requestedApplicationId === null || Number(requestedApplicationId) === operationApplicationId;
+    await route.fulfill({
+      body: JSON.stringify({
+        items: operationMatchesFilter
+          ? [
+              {
+                ...pendingApprovalOperation(),
+                application_id: operationApplicationId
+              }
+            ]
+          : [],
+        count: operationMatchesFilter ? 1 : 0
+      }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+  await page.route("**/api/applications?limit=20", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ items: [applicationA, applicationB], count: 2 }),
+      contentType: "application/json",
+      status: 200
+    });
+  });
+  await page.route(/\/api\/applications\/101$/, async (route) => {
+    await route.fulfill({ json: applicationA, status: 200 });
+  });
+  await page.route(/\/api\/applications\/202$/, async (route) => {
+    await route.fulfill({ json: applicationB, status: 200 });
+  });
+  await page.route(/\/api\/resumes\/501$/, async (route) => {
+    await route.fulfill({
+      json: {
+        candidate: {
+          email: null,
+          links: [],
+          location: null,
+          name: "Candidate A",
+          phone: null
+        },
+        certifications: [],
+        education: [],
+        experience: [],
+        facts: [],
+        projects: [],
+        resume_id: 501,
+        skills: [],
+        warnings: []
+      },
+      status: 200
+    });
+  });
+  await page.route(/\/api\/resumes\/502$/, async (route) => {
+    await route.fulfill({
+      json: {
+        candidate: {
+          email: null,
+          links: [],
+          location: null,
+          name: "Candidate B",
+          phone: null
+        },
+        certifications: [],
+        education: [],
+        experience: [],
+        facts: [],
+        projects: [],
+        resume_id: 502,
+        skills: [],
+        warnings: []
+      },
+      status: 200
+    });
+  });
+
+  await page.goto(WORKFLOW_PATH);
+  await expect(page).toHaveURL("/app/applications/202");
+  await expect(page.getByRole("heading", { name: "Role B", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toBeVisible();
+
+  await page.goto("/app/applications/101");
+  await expect(page.getByRole("heading", { name: "Role A", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Run AI analysis" })).toBeEnabled();
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Run AI analysis" })).toBeEnabled();
+
+  activeLookupFails = true;
+  await page.reload();
+  await expect(page.getByText(/Active analyses could not be verified/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Run AI analysis" })).toBeDisabled();
+
+  activeLookupFails = false;
+  operationApplicationId = applicationA.id;
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Review the validated live draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toBeVisible();
+
+  let approvalOperationId: string | null = null;
+  await page.route("**/api/operations/*/approval", async (route) => {
+    approvalOperationId = route.request().url().match(/operations\/([^/]+)\/approval/)?.[1] ?? null;
+    await route.fulfill({
+      json: { detail: "Approval fixture stopped after verifying operation ownership." },
+      status: 503
+    });
+  });
+  await page.getByRole("button", { name: "Approve live draft" }).click();
+  await expect.poll(() => approvalOperationId).toBe(pendingApprovalOperation().id);
+});
+
+test("application controls stay locked until every protected route dependency hydrates", async ({
+  page
+}) => {
+  const applicationId = 303;
+  const resumeId = 503;
+  const reportId = 703;
+  const reviewedJobProfile = {
+    benefits: [],
+    company: "Hydration Labs",
+    employment_type: null,
+    experience_level: null,
+    job_id: 303,
+    keywords: ["Python"],
+    location: null,
+    preferred_skills: [],
+    required_skills: [],
+    responsibilities: ["Keep protected workflows reliable."],
+    role_title: "Platform Engineer",
+    unclear_items: [],
+    warnings: []
+  };
+  const application = {
+    analysis_id: reportId,
+    company: "Hydration Labs",
+    created_at: "2026-07-11T08:00:00Z",
+    id: applicationId,
+    job_id: 303,
+    job_url: null,
+    match_score: 82,
+    report_id: reportId,
+    resume_id: resumeId,
+    reviewed_job_profile: reviewedJobProfile,
+    reviewed_job_text:
+      "Hydration Labs needs a Python platform engineer to keep protected workflows reliable.",
+    role: "Platform Engineer",
+    score_status: "scored",
+    scoring_version: "evidence_v2",
+    source_content_hash: "c".repeat(64),
+    source_type: "pasted_text",
+    status: "analyzed",
+    updated_at: "2026-07-11T08:01:00Z"
+  };
+  const report = {
+    analysis_id: reportId,
+    ats_keywords: [],
+    cover_letter: "Evidence-backed cover letter.",
+    executive_summary: "Evidence-backed report.",
+    interview_questions: [],
+    job_id: 303,
+    match_score: 82,
+    matched_skills: [],
+    missing_skills: [],
+    next_actions: [],
+    resume_id: resumeId,
+    score_status: "scored",
+    scoring_version: "evidence_v2",
+    tailored_bullets: [],
+    validation_warnings: [],
+    weak_skills: []
+  };
+  let failingDependency: "detail" | "report" | "resume" | null = "detail";
+
+  await page.route("**/api/operations/active*", async (route) => {
+    await route.fulfill({
+      json: {
+        count: 1,
+        items: [{ ...pendingApprovalOperation(), application_id: applicationId }]
+      },
+      status: 200
+    });
+  });
+  await page.route("**/api/applications?limit=20", async (route) => {
+    await route.fulfill({ json: { count: 1, items: [application] }, status: 200 });
+  });
+  await page.route(new RegExp(`/api/applications/${applicationId}$`), async (route) => {
+    if (failingDependency === "detail") {
+      await route.fulfill({ json: { detail: "Application detail is unavailable." }, status: 503 });
+      return;
+    }
+    await route.fulfill({ json: application, status: 200 });
+  });
+  await page.route(new RegExp(`/api/resumes/${resumeId}$`), async (route) => {
+    if (failingDependency === "resume") {
+      await route.fulfill({ json: { detail: "Resume evidence is unavailable." }, status: 503 });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        candidate: {
+          email: null,
+          links: [],
+          location: null,
+          name: "Hydration Candidate",
+          phone: null
+        },
+        certifications: [],
+        education: [],
+        experience: [],
+        facts: [],
+        projects: [],
+        resume_id: resumeId,
+        skills: [],
+        warnings: []
+      },
+      status: 200
+    });
+  });
+  await page.route(new RegExp(`/api/reports/${reportId}$`), async (route) => {
+    if (failingDependency === "report") {
+      await route.fulfill({ json: { detail: "Report evidence is unavailable." }, status: 503 });
+      return;
+    }
+    await route.fulfill({ json: report, status: 200 });
+  });
+  await page.route(new RegExp(`/api/reports/${reportId}/workflow$`), async (route) => {
+    await route.fulfill({ json: { trace: null }, status: 200 });
+  });
+
+  await page.goto(`/app/applications/${applicationId}`);
+  await expect(page.getByRole("heading", { name: "Workspace verification required" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toHaveCount(0);
+
+  for (const dependency of ["resume", "report"] as const) {
+    failingDependency = dependency;
+    await page.getByRole("button", { name: "Refresh workspace status" }).click();
+    await expect(page.getByRole("heading", { name: "Workspace verification required" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Approve live draft" })).toHaveCount(0);
+  }
+
+  failingDependency = null;
+  await page.getByRole("button", { name: "Refresh workspace status" }).click();
+  await expect(page.getByRole("heading", { name: "Review the validated live draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve live draft" })).toBeVisible();
 });
 
 test("dashboard demo flow renders report and validates exports", async ({ page }, testInfo) => {
@@ -235,7 +595,8 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   ).toBe(true);
   await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-320-score.png");
 
-  await page.getByRole("button", { name: "Open tailored resume draft" }).click();
+  await page.getByRole("button", { name: "Review tailored resume" }).click();
+  await expect(page).toHaveURL(/\/app\/applications\/\d+\/resume$/);
   await expect(page.getByRole("button", { name: "Download DOCX" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download LaTeX" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
@@ -248,7 +609,7 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
 
 test("dashboard sends a job posting URL analysis request", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
 
   const jobUrl = "https://example.com/jobs/backend-engineer";
   await page.route("**/api/jobs/preview", async (route) => {
@@ -402,7 +763,7 @@ test("pasted job evidence persists and reopens before analysis", async ({ page }
     });
   });
 
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
   await page.getByRole("radio", { name: /Paste description/ }).check();
   await page.getByRole("textbox", { name: "Job description" }).fill(jobText);
   await expect(page.getByText(`${jobText.length.toLocaleString()} / 50,000`)).toBeVisible();
@@ -411,13 +772,14 @@ test("pasted job evidence persists and reopens before analysis", async ({ page }
   await expect(page.getByRole("heading", { name: "Resume upload" })).toBeVisible();
   expect(previewPayloads[0]).toEqual({ job_text: jobText });
 
-  await page.reload();
+  await page.goto("/app/applications");
   const savedApplication = page
     .getByRole("article")
     .filter({ hasText: "Pasted Recovery Engineer" })
     .first();
   await expect(savedApplication).toBeVisible();
   await savedApplication.getByRole("button", { name: "Open" }).click();
+  await expect(page).toHaveURL(/\/app\/applications\/\d+$/);
   await expect(page.getByRole("heading", { name: "Resume upload" })).toBeVisible();
   await expect(page.getByText("Text added", { exact: true })).toBeVisible();
 
@@ -480,7 +842,7 @@ test("blocked job URLs require pasted source text", async ({ page }) => {
     });
   });
 
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
   await page.getByRole("textbox", { name: "Job listing URL" }).fill(blockedUrl);
   await page.getByRole("button", { name: "Review job evidence" }).click();
   await expect(page.getByText("Job listing could not be reviewed")).toBeVisible();
@@ -492,7 +854,7 @@ test("blocked job URLs require pasted source text", async ({ page }) => {
 test("dashboard flags unclear job requirement extraction", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   await mockFixtureJobPreviews(page);
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
 
   await page.getByRole("textbox", { name: "Job listing URL" }).fill(
     jobPostingUrl(page, UNCLEAR_JOB_POSTING_PATH)
@@ -519,7 +881,7 @@ test("dashboard labels and preserves a legacy report without a score breakdown",
   page
 }) => {
   await mockFixtureJobPreviews(page);
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
   await enterJobListing(page, { url: jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH) });
   await uploadResume(page);
   await page.route(/\/api\/reports\/\d+$/, async (route) => {
@@ -546,7 +908,7 @@ test("dashboard labels and preserves a legacy report without a score breakdown",
 
 test("tailored resume explains blocked unsupported edits inline", async ({ page }) => {
   await mockFixtureJobPreviews(page);
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
   await enterJobListing(page, { url: jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH) });
   await uploadResume(page);
   await page.getByRole("button", { name: "Run AI analysis" }).click();
@@ -599,20 +961,9 @@ test("tailored resume explains blocked unsupported edits inline", async ({ page 
   ).toBeVisible();
 });
 
-test("report disables tailoring when its application link is unavailable", async ({ page }) => {
+test("standalone report disables tailoring without an application route", async ({ page }) => {
   await mockFixtureJobPreviews(page);
-  await page.route("**/api/applications?limit=20", async (route) => {
-    if (route.request().method() !== "GET") {
-      await route.fallback();
-      return;
-    }
-    await route.fulfill({
-      body: JSON.stringify({ count: 0, items: [] }),
-      contentType: "application/json",
-      status: 200
-    });
-  });
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
 
   await enterJobListing(page, { url: jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH) });
   await uploadResume(page);
@@ -621,6 +972,13 @@ test("report disables tailoring when its application link is unavailable", async
   await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible({
     timeout: 30_000
   });
+  const reportLabel = await page.getByText(/^Report \d+$/).first().textContent();
+  const reportId = reportLabel?.match(/\d+/)?.[0];
+  if (!reportId) {
+    throw new Error(`Could not parse the report id from: ${reportLabel ?? "missing label"}`);
+  }
+  await page.goto(`/app/reports/${reportId}`);
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Review tailored resume" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Review tailored resume" })).toHaveAttribute(
     "title",
@@ -631,7 +989,7 @@ test("report disables tailoring when its application link is unavailable", async
 test("report ledger reopens the selected saved report accurately", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   await mockFixtureJobPreviews(page);
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
 
   await enterJobListing(page, {
     url: jobPostingUrl(page, BACKEND_PLATFORM_JOB_PATH)
@@ -664,6 +1022,7 @@ test("report ledger reopens the selected saved report accurately", async ({ page
     await route.fulfill({ json: payload, response });
   });
 
+  await page.goto(WORKFLOW_PATH);
   const secondReportId = await analyzeJob(page, {
     url: jobPostingUrl(page, DATA_API_JOB_PATH)
   });
@@ -679,19 +1038,13 @@ test("report ledger reopens the selected saved report accurately", async ({ page
     await route.fulfill({ json: payload, response });
   });
 
-  await page.getByText("Workspace review and system status").click();
-  await expect(page.getByRole("button", { name: /Data API Engineer/ })).toHaveAttribute(
-    "aria-current",
-    "true"
-  );
-
+  await page.goto("/app/reports");
+  await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Data API Engineer/ })).toBeVisible();
   await page.getByRole("button", { name: /Backend Platform Engineer/ }).click();
-  await expect(page.getByRole("button", { name: /Backend Platform Engineer/ })).toHaveAttribute(
-    "aria-current",
-    "true"
-  );
+  await expect(page).toHaveURL(`/app/reports/${firstReportId}`);
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible();
   await expect(page.getByText("Deterministic v1 score", { exact: true })).toBeVisible();
-  await expect(page.getByText("Deterministic v1", { exact: true })).toHaveCount(3);
   await expect(page.getByText("Historical score", { exact: true }).first()).toBeVisible();
   const exportResponsePromise = page.waitForResponse(
     (response) =>
@@ -714,16 +1067,10 @@ interface RunAiAnalysisResult {
 
 async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboardFlow> {
   await mockFixtureJobPreviews(page);
-  await page.goto("/");
+  await page.goto(WORKFLOW_PATH);
   await expect(page.getByRole("heading", { name: "Guided application workflow" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Application workflow" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Application workflow" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Job listing" })).toBeVisible();
-
-  await page.getByText("Workspace review and system status").click();
-  await expect(page.getByRole("heading", { name: "Session" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Application pipeline" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Report ledger" })).toBeVisible();
-  await expect(page.getByText("authenticated", { exact: true })).toBeVisible();
 
   await page.getByRole("textbox", { name: "Job listing URL" }).fill(
     jobPostingUrl(page, SAMPLE_JOB_POSTING_PATH)
@@ -741,9 +1088,6 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
   );
   await page.getByRole("button", { name: "Save and continue" }).click();
   await expect(page.getByRole("heading", { name: "Resume upload" })).toBeVisible();
-  await expect(page.getByRole("article").filter({ hasText: "Backend Engineer" }).first()).toContainText(
-    "Reviewed"
-  );
 
   await page.getByLabel("Resume file").setInputFiles(RESUME_FIXTURE);
   await expect(page.getByText("backend_fresher.md")).toBeVisible();
@@ -752,9 +1096,11 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
   await expect(page.getByRole("heading", { name: "AI services" })).toBeVisible();
   await expect(page.getByText("Parse job evidence")).toBeVisible();
 
+  await page.getByText("Review parsed resume evidence", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Resume extraction" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Parsed skills" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Evidence ledger" })).toBeVisible();
+  await page.getByText("Review parsed resume evidence", { exact: true }).click();
 
   const result = await runAiAnalysis(page, { acceptFirstDraft: true });
 
@@ -787,9 +1133,6 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
   await expect(page.getByText(/Report \d+/).first()).toBeVisible();
   await expect(page.getByText("Deterministic fallback", { exact: true })).toBeVisible();
   await expect(page.getByText(/\d+(?:\.\d)? (?:ms|s) total/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Plan usage meter" })).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Analysis runs usage" })).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Exports usage" })).toBeVisible();
   const reportAccessibilityScan = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();
@@ -797,21 +1140,31 @@ async function completeDashboardDemoFlow(page: Page): Promise<CompletedDashboard
     reportAccessibilityScan.violations.map((violation) => violation.id),
     JSON.stringify(reportAccessibilityScan.violations, null, 2)
   ).toEqual([]);
-  await expect(page.getByRole("article").filter({ hasText: "Backend Engineer" }).first()).toContainText(
-    "Report ready"
-  );
-  await page.getByRole("button", { name: "Applied" }).first().click();
-  await expect(page.getByRole("article").filter({ hasText: "Backend Engineer" }).first()).toContainText(
-    "Applied"
-  );
-
-  const pageText = await page.locator("body").innerText();
-  expect(pageText).not.toMatch(/(?:summary|skills)_\d{3} ·/);
-  expect(pageText).toMatch(/(?:Project evidence|Work evidence|Resume summary|Skills section) #\d+/);
 
   if (!result.applicationId) {
     throw new Error("Accepted draft flow did not expose an application export action.");
   }
+
+  await page.goto("/app/settings");
+  await expect(page.getByRole("heading", { name: "Plan usage meter" })).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Analysis runs usage" })).toBeVisible();
+  await expect(page.getByRole("progressbar", { name: "Exports usage" })).toBeVisible();
+
+  await page.goto("/app/applications");
+  const applicationRow = page
+    .getByRole("article")
+    .filter({ hasText: "Backend Engineer" })
+    .first();
+  await expect(applicationRow).toContainText("Report ready");
+  await applicationRow.getByRole("button", { name: "Applied" }).click();
+  await expect(applicationRow).toContainText("Applied");
+
+  await page.goto(`/app/applications/${result.applicationId}/report`);
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible();
+  const pageText = await page.locator("body").innerText();
+  expect(pageText).not.toMatch(/(?:summary|skills)_\d{3} ·/);
+  expect(pageText).toMatch(/(?:Project evidence|Work evidence|Resume summary|Skills section) #\d+/);
+
   return {
     applicationId: result.applicationId,
     reportId: result.reportId
@@ -824,6 +1177,7 @@ interface AnalyzeJobInput {
 
 async function analyzeJob(page: Page, input: AnalyzeJobInput): Promise<string> {
   await enterJobListing(page, input);
+  await uploadResume(page);
   return (await runAiAnalysis(page)).reportId;
 }
 
@@ -989,11 +1343,7 @@ async function runAiAnalysis(
   await expect(page.getByRole("heading", { name: "Tailored resume workspace" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Review tailored resume" })).toBeVisible();
 
-  const reportLabel = await page
-    .locator('section[aria-label="Active workflow step"]')
-    .getByText(/^Report \d+$/)
-    .first()
-    .textContent();
+  const reportLabel = await page.getByText(/^Report \d+$/).first().textContent();
   const reportId = reportLabel?.match(/\d+/)?.[0];
   if (!reportId) {
     throw new Error(`Could not parse the active report id from: ${reportLabel ?? "missing label"}`);

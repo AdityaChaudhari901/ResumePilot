@@ -121,6 +121,7 @@ export interface WorkflowApproval {
 
 export interface WorkflowOperation {
   id: string;
+  application_id: number | null;
   kind: "analysis" | "pdf_export";
   status: WorkflowOperationStatus;
   stage: string;

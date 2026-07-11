@@ -14,27 +14,41 @@ import type {
   ApplicationStatus
 } from "@/features/dashboard/types";
 import { scoreMetricLabel } from "@/features/dashboard/utils/report";
+import { cn } from "@/lib/cn";
 
 interface ApplicationPipelineCardProps {
   activeApplicationId: number | null;
   applications: ApplicationItem[];
+  className?: string;
   isBusy: boolean;
   isLoading: boolean;
+  limit?: number;
   onSelectApplication: (application: ApplicationItem) => void;
   onUpdateStatus: (application: ApplicationItem, status: ApplicationStatus) => void;
+  variant?: "compact" | "page";
 }
 
 export function ApplicationPipelineCard({
   activeApplicationId,
   applications,
+  className,
   isBusy,
   isLoading,
+  limit,
   onSelectApplication,
-  onUpdateStatus
+  onUpdateStatus,
+  variant = "compact"
 }: ApplicationPipelineCardProps) {
+  const visibleApplications = limit ? applications.slice(0, limit) : applications;
+
   return (
-    <Panel as="aside" eyebrow="Workspace" title="Application pipeline">
-      <div className="space-y-3">
+    <Panel
+      as={variant === "page" ? "section" : "aside"}
+      className={className}
+      eyebrow={variant === "page" ? "Portfolio" : "Workspace"}
+      title={variant === "page" ? "All applications" : "Application pipeline"}
+    >
+      <div className={cn(variant === "compact" && "space-y-3")}>
         {isLoading ? (
           <div className="rounded-xl border border-border bg-surface p-4 text-sm text-muted-foreground">
             Loading applications...
@@ -47,7 +61,7 @@ export function ApplicationPipelineCard({
           </div>
         ) : null}
 
-        {applications.map((application) => (
+        {visibleApplications.map((application) => (
           <ApplicationPipelineRow
             application={application}
             isActive={application.id === activeApplicationId}
@@ -55,6 +69,7 @@ export function ApplicationPipelineCard({
             key={application.id}
             onSelect={() => onSelectApplication(application)}
             onUpdateStatus={(status) => onUpdateStatus(application, status)}
+            variant={variant}
           />
         ))}
       </div>
@@ -68,6 +83,7 @@ interface ApplicationPipelineRowProps {
   isBusy: boolean;
   onSelect: () => void;
   onUpdateStatus: (status: ApplicationStatus) => void;
+  variant: "compact" | "page";
 }
 
 function ApplicationPipelineRow({
@@ -75,7 +91,8 @@ function ApplicationPipelineRow({
   isActive,
   isBusy,
   onSelect,
-  onUpdateStatus
+  onUpdateStatus,
+  variant
 }: ApplicationPipelineRowProps) {
   const title = application.role ?? "Untitled role";
   const company = application.company ?? "Unknown company";
@@ -83,10 +100,15 @@ function ApplicationPipelineRow({
 
   return (
     <article
-      className="rounded-xl border border-border bg-surface p-4 transition-colors aria-current:border-primary/60 aria-current:bg-primary/5"
+      className={cn(
+        "transition-colors aria-current:border-primary/60 aria-current:bg-primary/5",
+        variant === "compact"
+          ? "rounded-xl border border-border bg-surface p-4"
+          : "grid gap-4 border-b border-border py-5 first:pt-0 last:border-b-0 last:pb-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(15rem,0.7fr)_auto] lg:items-center"
+      )}
       aria-current={isActive ? "true" : undefined}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <BriefcaseBusiness className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -97,7 +119,7 @@ function ApplicationPipelineRow({
         <Badge tone={statusTone(application.status)}>{statusLabel(application.status)}</Badge>
       </div>
 
-      <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+      <dl className={cn("grid grid-cols-2 gap-2 text-xs", variant === "compact" && "mt-3")}>
         <div>
           <dt className="text-muted-foreground">
             {application.scoring_version === "evidence_v2" ? "Evidence fit" : "Historical score"}
@@ -119,7 +141,7 @@ function ApplicationPipelineRow({
         </div>
       </dl>
 
-      <div className="mt-3 flex flex-wrap justify-end gap-2">
+      <div className={cn("flex flex-wrap justify-end gap-2", variant === "compact" && "mt-3")}>
         <Button
           className="h-8 px-3 text-xs"
           disabled={isBusy}
@@ -154,7 +176,7 @@ function ApplicationPipelineRow({
         </Button>
       </div>
 
-      {isActive ? (
+      {isActive && variant === "compact" ? (
         <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 text-xs text-muted-foreground">
           <CheckCircle2 className="h-3.5 w-3.5 text-validation" aria-hidden="true" />
           Active workspace item

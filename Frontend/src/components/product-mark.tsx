@@ -4,10 +4,11 @@ import { cn } from "@/lib/cn";
 
 interface ProductMarkProps {
   className?: string;
+  href?: string;
   showWordmark?: boolean;
 }
 
-export function ProductMark({ className, showWordmark = true }: ProductMarkProps) {
+export function ProductMark({ className, href = "/", showWordmark = true }: ProductMarkProps) {
   return (
     <Link
       aria-label="ResumePilot home"
@@ -15,7 +16,7 @@ export function ProductMark({ className, showWordmark = true }: ProductMarkProps
         "inline-flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         className
       )}
-      href="/"
+      href={href}
     >
       <span
         aria-hidden="true"

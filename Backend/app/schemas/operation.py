@@ -89,6 +89,7 @@ class WorkflowApprovalDecisionRequest(StrictBaseModel):
 
 class WorkflowJobResponse(StrictBaseModel):
     id: str = Field(min_length=36, max_length=36)
+    application_id: int | None = Field(default=None, ge=1)
     kind: WorkflowJobKind
     status: WorkflowJobStatus
     stage: str = Field(min_length=1, max_length=64)

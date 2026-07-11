@@ -1,8 +1,21 @@
 # ResumePilot Context
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 ## Active Implementation Checkpoint
+
+Professional routed workspace completed and browser-verified (2026-07-11):
+
+- Replaced the single expanding dashboard with a server-gated `/app` workspace: focused Dashboard, Applications, New Application, Reports, application report, tailored-resume approval, and Settings routes now own distinct user tasks.
+- Added persistent desktop navigation, compact mobile navigation, skip-to-content support, route-specific page headers, explicit current-page semantics, focused empty/loading/error states, and application/report deep links. Auth remains server-side in the `/app` layout and each route wrapper.
+- Kept job source capture, evidence review, resume upload, analysis, and approval in one mounted wizard because its edited preview, browser file, request fencing, and idempotency state are intentionally local until durable application milestones exist.
+- Removed the full-canvas grid and the long mixed system-status section from application work. Runtime, account, usage, OpenClaw, and export-boundary diagnostics now live only on Settings; saved applications and reports have dedicated portfolio pages.
+- Preserved durable operation recovery, approval focus, deterministic score authority, evidence identifiers, Markdown report export, and accepted-draft-only DOCX/LaTeX/PDF boundaries. OpenClaw and the LangGraph/LangChain runtime boundary are unchanged.
+- Added migration `20260711_0011` and a dedicated workflow-job `application_id` provenance field. Existing saved-application jobs set it at enqueue; raw URL/text jobs set it atomically when analysis finalization creates the case file; privacy tombstones clear it; legacy rows backfill from request or finalized analysis links without mutating executable retry payloads.
+- Application routes now query a tenant/application/status-filtered `/operations/active` boundary instead of scanning the latest 20 operations. Lookup failures and ambiguous unfiltered recovery fail closed, new-workflow recovery redirects to the owning case, unlinked in-flight jobs get an isolated recovery surface, and approval, cancellation, and polling use the route application ID as authoritative provenance before state-changing requests.
+- A partial unique database index now permits only one active analysis per tenant/application, with an authoritative `409 analysis_already_active` response for a losing request and an atomic rollback of its quota reservation. Migration preflight detects legacy duplicates before DDL so a blocked SQLite upgrade remains cleanly retryable.
+- Saved application, report, and resume controls remain locked until every protected route dependency hydrates. Refresh retries status and route hydration together; detail, resume, and report failure regressions prove that an operation cannot expose approval controls without verified case evidence.
+- Release evidence is green on the routed tree: 223 backend tests, frontend audit/lint/type/auth/build gates, SQLite failure/remediation/retry and upgrade/downgrade/backfill coverage, the PostgreSQL migration/two-transaction concurrency gate, and 18/18 Chromium tests pass. Browser coverage includes filtered lookup failure, canonical recovery, two-application approval isolation, dependency hydration failure, route separation, desktop/mobile navigation, WCAG A/AA, deep links, and exports.
 
 Production interface system completed and verified (2026-07-10):
 
@@ -91,6 +104,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
   - `Backend/migrations/versions/20260710_0008_reconcile_postgres_schema.py`
   - `Backend/migrations/versions/20260710_0009_add_durable_workflow_jobs.py`
   - `Backend/migrations/versions/20260710_0010_version_match_scores.py`
+  - `Backend/migrations/versions/20260711_0011_add_workflow_application_provenance.py`
   - `Backend/tests/*.py`
   - `Backend/tests/test_agent_workflow.py`
   - `Backend/tests/test_audit_privacy_api.py`
@@ -170,7 +184,7 @@ ResumePilot originated from the CrewAI Job Application Copilot MVP documentation
 - Project dependencies are declared in `Backend/pyproject.toml`.
 - Backend development constraints are pinned in `Backend/requirements/py312-dev.constraints.txt`; the production image installs `Backend/requirements/py312-production.lock.txt` with hashes.
 - Local API server verified on `http://127.0.0.1:8002`.
-- Rebuilt production-like Compose stack is currently running on `http://127.0.0.1:3050` with FastAPI on `http://127.0.0.1:8050`, PostgreSQL at Alembic head `20260710_0010`, and a separate active workflow worker.
+- Production-like Compose stack runs on `http://127.0.0.1:3050` with FastAPI on `http://127.0.0.1:8050`, PostgreSQL at Alembic head `20260711_0011`, and a separate active workflow worker.
 - Local runtime data for the dev server is stored under `Backend/.local/data`.
 - OpenClaw installed locally as `OpenClaw 2026.6.11` using Node.js `v24.16.0`.
 - OpenClaw local config exists at `~/.openclaw/openclaw.json`; the included Google plugin is enabled.
@@ -587,18 +601,18 @@ Next implementation scope:
 
 ## Verification Evidence
 
-Latest verification run: 2026-07-10
+Latest verification run: 2026-07-11
 
 | Check | Command | Result |
 |---|---|---|
-| Backend full release gate | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check . && .venv/bin/pytest --cov=app --cov-report=term-missing --cov-fail-under=80 && .venv/bin/python -m compileall -q app tests scripts && .venv/bin/python scripts/run_golden_evals.py && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 129 files formatted, lint/compile clean, 220 tests, 88.90% application coverage, 20 golden pairs, 38 labeled score cases, 14 pairwise score expectations, 100% schema pass, 0 evidence/unsupported/routing/score-benchmark failures, 8.67 ms average and 10.15 ms p95; one upstream Starlette/httpx deprecation warning |
-| SQLite migration/drift gate | Fresh temporary SQLite upgrade/check plus downgrade to `20260710_0009` and re-upgrade | Passed through `20260710_0010`; no drift; score provenance columns remained present after the round trip |
-| PostgreSQL 16 migration/checkpoint/finalization gate | Isolated PostgreSQL 16 plus `Backend/scripts/run_postgres_migration_gate.py` | Passed: fresh and seeded `0007` upgrades, score-version backfill from `0009`, downgrade/re-upgrade, Alembic drift/ownership checks, concurrent finalization, durable LangGraph interrupt/resume, orphan reconciliation, indexes, seeds, sequences, exclusive `SKIP LOCKED` claims, and stale-lease recovery |
+| Backend full release gate | `cd Backend && .venv/bin/ruff format app tests scripts migrations --check && .venv/bin/ruff check . && .venv/bin/pytest --cov=app --cov-report=term-missing --cov-fail-under=80 && .venv/bin/python -m compileall -q app tests scripts && .venv/bin/python scripts/run_golden_evals.py && .venv/bin/python scripts/run_backend_quality_gate.py` | Passed: 131 files formatted, lint/compile clean, 223 tests, 88.96% application coverage, 20 golden pairs, 38 labeled score cases, 14 pairwise score expectations, 100% schema pass, 0 evidence/unsupported/routing/score-benchmark failures, 7.80 ms average and 9.23 ms p95; one upstream Starlette/httpx deprecation warning |
+| SQLite migration/drift gate | Fresh temporary SQLite upgrade/check, `0011`→`0010`→head round trip, seeded legacy workflow backfill, and duplicate-active preflight retry | Passed through `20260711_0011`; no drift; `application_id` was restored from an existing immutable payload without altering it; a blocked duplicate upgrade left revision `0010` and no partial column, then succeeded after remediation |
+| PostgreSQL 16 migration/checkpoint/finalization gate | Isolated PostgreSQL 16 plus `Backend/scripts/run_postgres_migration_gate.py` | Passed at `20260711_0011`: fresh and seeded `0007` upgrades, score/provenance backfills, guarded downgrade/re-upgrade, Alembic drift/ownership checks, atomic two-transaction active-analysis uniqueness, terminal slot release, concurrent finalization, durable LangGraph interrupt/resume, orphan reconciliation, indexes, seeds, sequences, exclusive `SKIP LOCKED` claims, and stale-lease recovery |
 | Frontend static/security/build gate | `npm run security:audit && npm run lint && npm run typecheck && npm run test:auth-runtime && npm run build` | Passed on Next.js 16.2.10; npm reported 0 vulnerabilities; auth runtime checks and the production build passed |
-| Dashboard browser/accessibility gate | `npm run test:e2e` | Passed: production build and 15/15 Chromium tests covering WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, approval refresh recovery, validation, evidence-fit breakdown/disclaimer, legacy/v1 report and ledger/application labels, accepted exports, 320/390 px initial/report/draft overflow, dark/reduced-motion theme persistence, branded 404 recovery, and report reopen |
+| Dashboard browser/accessibility gate | `npm run test:e2e` (two consecutive runs) | Passed twice: production build and 18/18 Chromium tests in 32.0 s and 28.9 s covering the authenticated `/app` route map, root redirect, focused Dashboard/Applications/Reports/Settings pages, WCAG A/AA, security headers, URL/pasted snapshots, blocked URL recovery, durable analysis, application-scoped operation provenance, dependency-hydration fail-closed recovery, validation, evidence-fit breakdown/disclaimer, application/report/draft deep links, accepted exports, 320/390 px overflow, dark/reduced-motion theme persistence, branded 404 recovery, and saved report reopen |
 | Production dependency/security audit | Isolated `pip-audit --disable-pip -r Backend/requirements/py312-production.lock.txt`; `npm audit --audit-level=low` | Passed with 0 known Python or npm vulnerabilities |
 | Live LangGraph/LangChain/Vertex approval smoke | Real `gemini-3.5-flash` structured calls through the three LangGraph generation nodes, in-memory checkpoint inspection, then `Command(resume=...)` rejection | Passed: 3 successful provider requests, 11,796 total tokens, durable approval pause, rejection resumed without another provider call, stable proposal revision, and no raw resume/JD/contact values in checkpoint history |
-| Live production Compose stack | `docker compose --env-file .env.production up -d --build migrate backend worker frontend` plus health/readiness/image/runtime checks | Passed on local arm64: clean hash-locked images built; migration exited 0; PostgreSQL/API/frontend healthy; worker and checkpoint reconciler running; `/health`, `/ready`, frontend, and same-origin upload→worker→report smoke passed; `pip check` clean; CrewAI/ChromaDB absent; LangGraph 1.2.9 and PostgreSQL saver 3.1.0 installed. Stack remains on 8050/3050 |
+| Live production Compose stack | Drained image build, `docker compose --env-file .env.production run --rm migrate`, backend/worker/frontend recreation, then health/readiness/image/runtime checks | Passed on local arm64: hash-locked images built with clean `pip check`; migration advanced PostgreSQL to `20260711_0011`; the active-analysis partial unique index and predicate are present; container image IDs match the fresh images; API/frontend/database are healthy; worker and checkpoint reconciler are running; `/health`, `/ready`, all `/app` routes, `/theme-init.js`, and `/api/operations/active` returned 200. Stack remains on 8050/3050 |
 | Redesigned frontend Compose render | Rebuild/restart `frontend`, HTTP probes for `/` and `/theme-init.js`, then Playwright against `http://127.0.0.1:3050` at 320 px dark/reduced-motion | Passed: frontend healthy; both routes returned 200; ready API reported database, Alembic head, and LangGraph checkpoint schema ready; rendered the expected workflow with Manrope, effective dark color scheme, zero horizontal overflow, and no actionable network/HTTP failures |
 | OpenClaw regression | `cd 'Ai services/openclaw' && ../../Backend/.venv/bin/python -m pytest -q tests` plus script compile | Passed: 7 tests; OpenClaw remains unchanged as the thin channel interface |
 | First GitHub-hosted production gate | GitHub Actions run `29074378258` for commit `26fbd21` | Backend, frontend, and browser/accessibility jobs passed; the deployment job failed a fresh Linux/amd64 image because Tectonic's Graphite2 runtime was not declared |
@@ -738,6 +752,16 @@ Latest verification run: 2026-07-10
 | Live CrewAI API smoke | FastAPI on `127.0.0.1:8012` with upload/analyze/report/markdown HTTP flow | Passed: health 200, upload 201, analyze 200, report 200, markdown 200, no fallback warning, three Vertex `generateContent` calls returned HTTP 200 |
 
 ## Change Log
+
+### 2026-07-11
+
+- Replaced the single expanding authenticated page with a professional `/app` information architecture: Dashboard, Applications, combined New Application wizard, application detail/report/resume routes, Reports, and Settings.
+- Added a persistent same-surface sidebar, compact mobile navigation, route-aware page headers and links, a focused portfolio overview, expanded application/report lists, and application-scoped report and tailored-resume deep links.
+- Removed the full-page drafting grid and relocated runtime, account, usage, OpenClaw, and product-boundary diagnostics to Settings so application work contains only the current task and relevant evidence context.
+- Added migration `20260711_0011` for durable workflow/application provenance, a filtered active-operation endpoint, fail-closed lookup state, canonical case-file recovery, and an isolated unlinked-operation screen; raw-input LangGraph approval and two-application reload/click regressions verify the boundary.
+- Enforced one active analysis per tenant/application with a partial unique index, typed `409` recovery, quota rollback, ambiguous-operation rejection, a pre-DDL duplicate migration guard, and SQLite/PostgreSQL concurrency regressions.
+- Locked saved-route approval and export controls until application detail, resume evidence, and report evidence hydrate successfully; Refresh now retries protected route hydration, and browser coverage proves each failure remains fail-closed.
+- Preserved the combined pre-analysis workflow and all durable operation, human approval, evidence, validation, and export boundaries; verified the routed interface with backend quality gates, frontend audit/lint/type/auth/build, visual review, and two consecutive 18/18 Chromium runs.
 
 ### 2026-07-10
 

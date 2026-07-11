@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -265,6 +266,22 @@ class WorkflowJobRecord(Base):
         ),
         Index("ix_workflow_jobs_stale_lease", "status", "lease_expires_at"),
         Index("ix_workflow_jobs_user_created_id", "user_id", "created_at", "id"),
+        Index(
+            "uq_workflow_jobs_active_analysis_application",
+            "user_id",
+            "application_id",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'analysis' AND application_id IS NOT NULL AND status IN "
+                "('queued', 'running', 'retry_scheduled', 'cancel_requested', "
+                "'waiting_for_approval')"
+            ),
+            sqlite_where=text(
+                "kind = 'analysis' AND application_id IS NOT NULL AND status IN "
+                "('queued', 'running', 'retry_scheduled', 'cancel_requested', "
+                "'waiting_for_approval')"
+            ),
+        ),
         CheckConstraint(
             "kind <> 'analysis' OR scoring_version IS NULL OR "
             "scoring_version <> 'evidence_v2' OR status <> 'running' OR "
@@ -293,6 +310,7 @@ class WorkflowJobRecord(Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(nullable=True)
     usage_event_id: Mapped[int] = mapped_column(ForeignKey("usage_events.id"))
     analysis_id: Mapped[int | None] = mapped_column(nullable=True, index=True)
+    application_id: Mapped[int | None] = mapped_column(nullable=True)
     result_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)

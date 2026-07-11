@@ -51,6 +51,7 @@ def test_live_analysis_waits_for_approval_and_releases_worker_lease(
     )
 
     assert operation["status"] == "waiting_for_approval"
+    assert isinstance(operation["application_id"], int)
     assert operation["stage"] == "approval_required"
     assert operation["progress_percent"] == 90
     assert operation["cancelable"] is True
@@ -61,6 +62,17 @@ def test_live_analysis_waits_for_approval_and_releases_worker_lease(
     assert operation["result"]["score_status"] == "scored"
     assert "_approval" not in (operation["result"] or {})
     assert calls == {"start": 1, "resume": 0}
+
+    application_id = operation["application_id"]
+    applications = client.get("/applications").json()["items"]
+    assert [application["id"] for application in applications] == [application_id]
+    active = client.get(
+        "/operations/active",
+        params={"kind": "analysis", "application_id": application_id},
+    )
+    assert active.status_code == 200
+    assert [item["id"] for item in active.json()["items"]] == [operation["id"]]
+    assert client.get(f"/operations/{operation['id']}").json()["application_id"] == application_id
 
     with client.app.state.session_factory() as db:
         record = db.get(WorkflowJobRecord, operation["id"])

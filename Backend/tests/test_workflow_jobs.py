@@ -95,6 +95,109 @@ def test_queued_analysis_can_be_canceled_without_consuming_quota(
     assert client.get("/usage/summary").json()["limits"][0]["used"] == 0
 
 
+def test_application_rejects_a_second_active_analysis_without_consuming_quota(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    application_id = _create_application(
+        client,
+        resume_id=resume_id,
+        job_text=sample_job_text,
+    )
+    payload = {"resume_id": resume_id, "application_id": application_id}
+
+    first_response, first = submit_analysis(
+        client,
+        payload,
+        idempotency_key="analysis-active-application-first",
+    )
+    conflict_response, conflict = submit_analysis(
+        client,
+        payload,
+        idempotency_key="analysis-active-application-second",
+    )
+
+    assert first_response.status_code == 202
+    assert first is not None
+    assert conflict_response.status_code == 409
+    assert conflict is not None
+    assert conflict["detail"] == {
+        "code": "analysis_already_active",
+        "message": "An analysis is already active for this application.",
+        "operation_id": first["id"],
+        "application_id": application_id,
+    }
+    active_response = client.get(
+        "/operations/active",
+        params={"kind": "analysis", "application_id": application_id},
+    )
+    assert active_response.status_code == 200
+    assert [item["id"] for item in active_response.json()["items"]] == [first["id"]]
+    with client.app.state.session_factory() as db:
+        reservations = list(
+            db.scalars(
+                select(UsageEventRecord).where(UsageEventRecord.event_type == "analysis_created")
+            )
+        )
+    assert len(reservations) == 1
+    assert reservations[0].state == "reserved"
+
+
+def test_unfiltered_active_analysis_recovery_rejects_ambiguous_operations(
+    client,
+    settings,
+    sample_resume_text,
+    sample_job_text,
+):
+    settings.workflow_inline_execution = False
+    resume_id = _upload_resume(client, sample_resume_text)
+    first_application_id = _create_application(
+        client,
+        resume_id=resume_id,
+        job_text=sample_job_text,
+    )
+    second_application_id = _create_application(
+        client,
+        resume_id=resume_id,
+        job_text=f"{sample_job_text}\nTeam: Platform Foundations.",
+    )
+
+    operations = []
+    for index, application_id in enumerate(
+        (first_application_id, second_application_id),
+        start=1,
+    ):
+        response, operation = submit_analysis(
+            client,
+            {"resume_id": resume_id, "application_id": application_id},
+            idempotency_key=f"analysis-ambiguous-recovery-{index}",
+        )
+        assert response.status_code == 202
+        assert operation is not None
+        operations.append(operation)
+
+    active_response = client.get("/operations/active", params={"kind": "analysis"})
+
+    assert active_response.status_code == 409
+    detail = active_response.json()["detail"]
+    assert detail["code"] == "multiple_active_operations"
+    assert set(detail["operation_ids"]) == {operation["id"] for operation in operations}
+    for operation in operations:
+        filtered_response = client.get(
+            "/operations/active",
+            params={
+                "kind": "analysis",
+                "application_id": operation["application_id"],
+            },
+        )
+        assert filtered_response.status_code == 200
+        assert [item["id"] for item in filtered_response.json()["items"]] == [operation["id"]]
+
+
 def test_old_active_reservations_still_enforce_analysis_limit(
     client,
     settings,
@@ -578,6 +681,13 @@ def test_older_completed_replay_preserves_newer_application_analysis_and_draft(
     )
     assert first_response.status_code == 202
     assert first_queued is not None
+    assert first_queued["application_id"] == application_id
+    listed_operation = next(
+        operation
+        for operation in client.get("/operations").json()["items"]
+        if operation["id"] == first_queued["id"]
+    )
+    assert listed_operation["application_id"] == application_id
     with client.app.state.session_factory() as db:
         first = execute_workflow_job(
             db,
@@ -594,6 +704,7 @@ def test_older_completed_replay_preserves_newer_application_analysis_and_draft(
     )
     assert second_response.status_code == 202
     assert second_queued is not None
+    assert second_queued["application_id"] == application_id
     with client.app.state.session_factory() as db:
         second = execute_workflow_job(
             db,
@@ -880,6 +991,23 @@ def _upload_resume(client, resume_text: str) -> int:
     )
     assert response.status_code == 201
     return response.json()["resume_id"]
+
+
+def _create_application(client, *, resume_id: int, job_text: str) -> int:
+    preview = client.post("/jobs/preview", json={"job_text": job_text})
+    assert preview.status_code == 200
+    response = client.post(
+        "/applications",
+        json={
+            "source_type": "pasted_text",
+            "job_text": job_text,
+            "reviewed_job_text": job_text,
+            "reviewed_job_profile": preview.json()["profile"],
+            "resume_id": resume_id,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
 
 
 def _assert_complete_analysis_finalization(client, *, operation_id: str) -> None:
