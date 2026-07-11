@@ -548,6 +548,139 @@ test("application controls stay locked until every protected route dependency hy
   await expect(page.getByRole("button", { name: "Approve live draft" })).toBeVisible();
 });
 
+test("completed case overview fails closed for unverified draft and historical provenance", async ({
+  page
+}) => {
+  const applicationId = 404;
+  const reportId = 804;
+  const analysisId = 904;
+  const resumeId = 604;
+  let releaseDraftLookup!: () => void;
+  const draftLookupGate = new Promise<void>((resolve) => {
+    releaseDraftLookup = resolve;
+  });
+  const application = {
+    analysis_id: analysisId,
+    company: "Archive Labs",
+    created_at: "2026-07-01T08:00:00Z",
+    id: applicationId,
+    job_id: 404,
+    job_url: null,
+    match_score: 91,
+    report_id: reportId,
+    resume_id: resumeId,
+    reviewed_job_profile: {
+      benefits: [],
+      company: "Archive Labs",
+      employment_type: null,
+      experience_level: null,
+      job_id: 404,
+      keywords: ["Python"],
+      location: null,
+      preferred_skills: [],
+      required_skills: [],
+      responsibilities: ["Maintain a verified archive."],
+      role_title: "Archive Engineer",
+      unclear_items: [],
+      warnings: []
+    },
+    reviewed_job_text: "Archive Labs needs an engineer to maintain a verified archive.",
+    role: "Archive Engineer",
+    score_status: "provisional",
+    scoring_version: "legacy_unversioned",
+    source_content_hash: "d".repeat(64),
+    source_type: "pasted_text",
+    status: "analyzed",
+    updated_at: "2026-07-01T08:01:00Z"
+  };
+  const report = {
+    analysis_id: analysisId,
+    ats_keywords: [],
+    cover_letter: "Historical evidence-backed cover letter.",
+    executive_summary: "A historical report whose approval data must be verified separately.",
+    interview_questions: [],
+    job_id: 404,
+    match_score: 91,
+    matched_skills: [],
+    missing_skills: [],
+    next_actions: [],
+    resume_id: resumeId,
+    score_status: "provisional",
+    scoring_version: "legacy_unversioned",
+    tailored_bullets: [{ bullet: "Historical suggestion", evidence_ids: [], jd_keywords_used: [], unsupported_claims: [] }],
+    validation_status: "block",
+    validation_warnings: [
+      {
+        code: "historical_claim_blocked",
+        evidence_ids: [],
+        message: "Historical claim needs review.",
+        severity: "block"
+      }
+    ],
+    weak_skills: []
+  };
+
+  await page.route("**/api/operations/active*", async (route) => {
+    await route.fulfill({ json: { count: 0, items: [] }, status: 200 });
+  });
+  await page.route("**/api/applications?limit=20", async (route) => {
+    await route.fulfill({ json: { count: 0, items: [] }, status: 200 });
+  });
+  await page.route(new RegExp(`/api/applications/${applicationId}$`), async (route) => {
+    await route.fulfill({ json: application, status: 200 });
+  });
+  await page.route(new RegExp(`/api/resumes/${resumeId}$`), async (route) => {
+    await route.fulfill({
+      json: {
+        candidate: {
+          email: null,
+          links: [],
+          location: null,
+          name: "Archive Candidate",
+          phone: null
+        },
+        certifications: [],
+        education: [],
+        experience: [],
+        facts: [],
+        projects: [],
+        resume_id: resumeId,
+        skills: [],
+        warnings: []
+      },
+      status: 200
+    });
+  });
+  await page.route(new RegExp(`/api/reports/${reportId}$`), async (route) => {
+    await route.fulfill({ json: report, status: 200 });
+  });
+  await page.route(new RegExp(`/api/reports/${reportId}/workflow$`), async (route) => {
+    await route.fulfill({ json: { trace: null }, status: 200 });
+  });
+  await page.route(
+    new RegExp(`/api/applications/${applicationId}/tailored-resume$`),
+    async (route) => {
+      await draftLookupGate;
+      await route.fulfill({ json: { detail: "Draft ownership could not be verified." }, status: 503 });
+    }
+  );
+
+  await page.goto(`/app/applications/${applicationId}`);
+  await expect(page.getByRole("region", { name: "Application case overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Provisional legacy score" })).toBeVisible();
+  await expect(
+    page.getByTestId("case-score").getByText("Validation blocked", { exact: true })
+  ).toBeVisible();
+  await expect(page.getByText("Reviewed description", { exact: true })).toBeVisible();
+  await expect(page.getByText("Verifying the application draft", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Review tailored resume" })).toHaveCount(0);
+
+  releaseDraftLookup();
+  await expect(page.getByText("Draft approval is unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Review tailored resume" })).toHaveCount(0);
+});
+
 test("dashboard demo flow renders report and validates exports", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   const { applicationId, reportId } = await completeDashboardDemoFlow(page);
@@ -574,11 +707,35 @@ test("dashboard demo flow renders report and validates exports", async ({ page }
   });
 
   await captureDashboardScreenshot(page, testInfo, "dashboard-desktop.png");
+
+  await page.goto(`/app/applications/${applicationId}`);
+  await expectApplicationCaseOverview(page);
+  const nextActionBounds = await page.getByTestId("case-next-action").boundingBox();
+  const scoreBounds = await page.getByTestId("case-score").boundingBox();
+  expect(nextActionBounds).not.toBeNull();
+  expect(scoreBounds).not.toBeNull();
+  expect(Math.abs((nextActionBounds?.y ?? 0) - (scoreBounds?.y ?? 0))).toBeLessThan(4);
+  expect((nextActionBounds?.x ?? 0) + (nextActionBounds?.width ?? 0)).toBeLessThanOrEqual(
+    scoreBounds?.x ?? 0
+  );
+
+  const caseAccessibilityScan = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    caseAccessibilityScan.violations.map((violation) => violation.id),
+    JSON.stringify(caseAccessibilityScan.violations, null, 2)
+  ).toEqual([]);
+  await captureDashboardScreenshot(page, testInfo, "application-case-bento-desktop.png");
+
+  await page.getByRole("link", { name: "Open full evidence report" }).click();
+  await expect(page).toHaveURL(`/app/applications/${applicationId}/report`);
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toBeVisible();
 });
 
 test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 1200 });
-  await completeDashboardDemoFlow(page);
+  const { applicationId } = await completeDashboardDemoFlow(page);
 
   await expect(page.getByRole("button", { name: "Download Markdown" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download DOCX" })).toHaveCount(0);
@@ -595,7 +752,21 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   ).toBe(true);
   await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-320-score.png");
 
-  await page.getByRole("button", { name: "Review tailored resume" }).click();
+  await page.goto(`/app/applications/${applicationId}`);
+  await expectApplicationCaseOverview(page);
+  const mobileNextActionBounds = await page.getByTestId("case-next-action").boundingBox();
+  const mobileScoreBounds = await page.getByTestId("case-score").boundingBox();
+  expect(mobileNextActionBounds).not.toBeNull();
+  expect(mobileScoreBounds).not.toBeNull();
+  expect(mobileScoreBounds?.y ?? 0).toBeGreaterThan(
+    (mobileNextActionBounds?.y ?? 0) + (mobileNextActionBounds?.height ?? 0)
+  );
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true);
+  await captureDashboardScreenshot(page, testInfo, "application-case-bento-mobile-320.png");
+
+  await page.getByRole("link", { name: "Review tailored resume" }).click();
   await expect(page).toHaveURL(/\/app\/applications\/\d+\/resume$/);
   await expect(page.getByRole("button", { name: "Download DOCX" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Download LaTeX" })).toBeVisible();
@@ -606,6 +777,20 @@ test("dashboard demo flow remains usable on mobile", async ({ page }, testInfo) 
   ).toBe(true);
   await captureDashboardScreenshot(page, testInfo, "dashboard-mobile-320-draft.png");
 });
+
+async function expectApplicationCaseOverview(page: Page): Promise<void> {
+  await expect(page.getByRole("region", { name: "Application case overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Evidence-fit score" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Evidence snapshot" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Every gate stays visible" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fit report" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tailored resume" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open full evidence report" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Review tailored resume" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Evidence-backed fit" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Cover letter draft" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Interview preparation" })).toHaveCount(0);
+}
 
 test("dashboard sends a job posting URL analysis request", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });

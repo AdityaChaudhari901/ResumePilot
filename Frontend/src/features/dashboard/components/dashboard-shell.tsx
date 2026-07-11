@@ -7,6 +7,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AiWorkflowCard } from "@/features/dashboard/components/ai-workflow-card";
+import { ApplicationCaseOverview } from "@/features/dashboard/components/application-case-overview";
 import { ApplicationPipelineCard } from "@/features/dashboard/components/application-pipeline-card";
 import { JobEvidenceReviewCard } from "@/features/dashboard/components/job-evidence-review-card";
 import {
@@ -1538,6 +1539,24 @@ export function DashboardShell({
   const activeCompany =
     activeApplication?.company ?? reviewedJobProfile?.company ?? "Company not captured";
   const workspaceSession = authSession?.isAuthenticated ? authSession : initialAuthSession;
+  const completedApplicationCase =
+    view === "application" &&
+    workflowStep === "report" &&
+    activeApplicationId !== null &&
+    analysis &&
+    report
+      ? {
+          analysis,
+          applicationId: activeApplicationId,
+          report,
+          tailoredResumeState: isLoadingTailoredResume
+            ? ("loading" as const)
+            : tailoredResumeDraft?.application_id === activeApplicationId &&
+                tailoredResumeDraft.report_id === report.analysis_id
+              ? ("ready" as const)
+              : ("unavailable" as const)
+        }
+      : null;
 
   function openReportFromWorkspace() {
     if (
@@ -1706,7 +1725,7 @@ export function DashboardShell({
             </div>
           ) : (
             <div className="space-y-6">
-            <WorkflowProgress steps={workflowSteps} />
+            {completedApplicationCase ? null : <WorkflowProgress steps={workflowSteps} />}
 
             {workspaceErrorMessage ? <WorkspaceError message={workspaceErrorMessage} /> : null}
 
@@ -1714,6 +1733,19 @@ export function DashboardShell({
               <WorkspaceLoadingState label="Loading application case file…" />
             ) : !isRouteContextReady ? (
               <WorkspaceUnavailableState label="Application controls remain locked until the case file is verified." />
+            ) : completedApplicationCase ? (
+              <ApplicationCaseOverview
+                analysis={completedApplicationCase.analysis}
+                application={activeApplication ?? null}
+                applicationId={completedApplicationCase.applicationId}
+                jobSourceType={jobSourceType}
+                report={completedApplicationCase.report}
+                resumeProfile={resumeProfile}
+                tailoredResumeDraft={tailoredResumeDraft}
+                tailoredResumeState={completedApplicationCase.tailoredResumeState}
+                workflowSteps={workflowSteps}
+                workflowTrace={workflowTrace}
+              />
             ) : (
               <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(19rem,0.65fr)]">
                 <section aria-label="Active workflow step" className="min-w-0 space-y-5">

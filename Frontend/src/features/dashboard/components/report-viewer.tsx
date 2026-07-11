@@ -35,7 +35,7 @@ import type {
   ValidationStatus,
   ValidationWarning
 } from "@/features/dashboard/types";
-import { formatScore, scoreLabel, scoreTone } from "@/features/dashboard/utils/report";
+import { formatScore, reportScorePresentation } from "@/features/dashboard/utils/report";
 
 interface ReportViewerProps {
   analysis: JobAnalysisResponse | null;
@@ -74,44 +74,14 @@ export function ReportViewer({
     );
   }
 
-  const matchTone = scoreTone(report.match_score);
   const hasUnclearJobRequirements = report.validation_warnings.some(
     (warning) => warning.code === "required_skills_unclear"
   );
-  const hasProvisionalScore =
-    hasUnclearJobRequirements || report.score_status === "provisional";
-  const usesEvidenceV2 =
-    report.scoring_version === "evidence_v2" ||
-    report.score_breakdown?.scoring_version === "evidence_v2";
-  const displayedScoringVersion =
-    report.score_breakdown?.scoring_version ?? report.scoring_version;
-  const scoreHeading = usesEvidenceV2
-    ? hasProvisionalScore
-      ? "Provisional evidence-fit score"
-      : "Evidence-fit score"
-    : displayedScoringVersion === "deterministic_v1"
-      ? hasProvisionalScore
-        ? "Provisional deterministic v1 score"
-        : "Deterministic v1 score"
-      : hasProvisionalScore
-        ? "Provisional legacy score"
-        : "Legacy unversioned score";
-  const scoreBadgeTone = hasUnclearJobRequirements
-    ? "danger"
-    : hasProvisionalScore
-      ? "warning"
-      : usesEvidenceV2
-        ? matchTone
-        : "neutral";
-  const scoreBadgeLabel = hasUnclearJobRequirements
-    ? "Needs job details"
-    : hasProvisionalScore
-      ? usesEvidenceV2
-        ? "Provisional, evidence incomplete"
-        : "Historical score, provisional"
-      : usesEvidenceV2
-        ? scoreLabel(report.match_score)
-        : "Historical score";
+  const {
+    badgeLabel: scoreBadgeLabel,
+    badgeTone: scoreBadgeTone,
+    heading: scoreHeading
+  } = reportScorePresentation(report);
   const topKeywords = report.ats_keywords.slice(0, 10);
   const validationStatus = reportValidationStatus(report);
   const coverLetterWarnings = report.validation_warnings.filter((warning) =>

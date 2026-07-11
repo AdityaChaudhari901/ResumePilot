@@ -1,5 +1,167 @@
 # ResumePilot Operational Errors
 
+## [ERR-20260711-015] case-overview-authority-edge-states
+
+**Logged**: 2026-07-11T08:42:28Z
+**Priority**: high
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The first case-overview pass treated score, draft, and source summary data as happy-path display
+values instead of preserving their independent verification and provenance states.
+
+### Error
+
+```text
+Code review: provisional or historical scores could receive current evidence labels; an unresolved
+draft could show fabricated counts; an older deep link absent from the 20-item list could default
+to URL provenance.
+```
+
+### Context
+
+- The full report already had version-aware score authority, but the compact overview duplicated only the numeric-band logic.
+- Tailored-resume ownership is verified by a separate protected request after report hydration.
+- Route-hydrated application detail remains authoritative even when portfolio list data is absent.
+
+### Suggested Fix
+
+Centralize report score presentation, model draft lookup as loading/ready/unavailable, expose no
+counts or resume route until IDs match, and use route-hydrated job source type.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/utils/report.ts, Frontend/src/features/dashboard/components/report-viewer.tsx, Frontend/src/features/dashboard/components/application-case-overview.tsx, Frontend/src/features/dashboard/components/dashboard-shell.tsx, Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T08:42:28Z
+- **Notes**: Implemented all three fail-closed authority fixes and added a historical, missing-list, delayed-draft regression; the full 19-test browser suite passes.
+
+---
+
+## [ERR-20260711-014] case-bento-accessibility-contracts
+
+**Logged**: 2026-07-11T08:27:04Z
+**Priority**: medium
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The first browser pass found low contrast on the inverse-card validation badge and draft metrics
+whose description-list items were not directly owned by a `<dl>`.
+
+### Error
+
+```text
+axe: color-contrast, dlitem
+```
+
+### Context
+
+- Semantic success colors were tuned for raised surfaces, not the graphite inverse decision card.
+- The reusable metric emitted `dt`/`dd`; one caller used a generic grid container instead of a description list.
+
+### Suggested Fix
+
+Give inverse-card status text a high-contrast background/foreground pair and require every metric
+group using `CaseMetric` to render as a `<dl>`.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/application-case-overview.tsx, Frontend/e2e/dashboard.spec.ts
+
+### Resolution
+
+- **Resolved**: 2026-07-11T08:27:04Z
+- **Notes**: Applied the inverse contrast override and corrected the draft metric container before rerunning Axe.
+
+---
+
+## [ERR-20260711-013] react-dynamic-milestone-icon
+
+**Logged**: 2026-07-11T08:24:35Z
+**Priority**: low
+**Status**: resolved
+**Area**: frontend
+
+### Summary
+
+The first bento milestone implementation selected a Lucide component inside render, which React's
+static-component lint rule rejects because the component identity is recreated for each render.
+
+### Error
+
+```text
+react-hooks/static-components: Cannot create components during render
+```
+
+### Context
+
+- The milestone status helper returned a component type and the row rendered it through a local variable.
+- TypeScript passed, but the React 19 lint gate correctly rejected the render pattern.
+
+### Suggested Fix
+
+Render each status branch from a statically declared `MilestoneStatusIcon` component.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/application-case-overview.tsx
+
+### Resolution
+
+- **Resolved**: 2026-07-11T08:24:35Z
+- **Notes**: Replaced render-time component selection with a static status component; lint and typecheck pass.
+
+---
+
+## [ERR-20260711-012] frontend-workdir-prefixed-root-path
+
+**Logged**: 2026-07-11T08:22:57Z
+**Priority**: medium
+**Status**: resolved
+**Area**: developer tooling
+
+### Summary
+
+A verification command entered `Frontend/` and then addressed a source file through a second
+`Frontend/` prefix, so the inspection step stopped before typechecking.
+
+### Error
+
+```text
+sed: Frontend/src/features/dashboard/components/dashboard-shell.tsx: No such file or directory
+```
+
+### Context
+
+- The command combined source inspection and `npm run typecheck` from the frontend working directory.
+- No source file or application state was changed by the failed read.
+
+### Suggested Fix
+
+Keep repository-relative source inspection in the repository root, then run package commands in a
+separate call with `Frontend/` as the working directory.
+
+### Metadata
+
+- Reproducible: yes
+- Related Files: Frontend/src/features/dashboard/components/dashboard-shell.tsx, Frontend/package.json
+
+### Resolution
+
+- **Resolved**: 2026-07-11T08:22:57Z
+- **Notes**: Split repository inspection from frontend package verification and resumed from the correct working directories. The same prefix error recurred during the live Compose smoke, so stack commands now run only from the repository root and package commands run separately from `Frontend/`.
+
+---
+
 ## [ERR-20260711-011] zsh-live-probe-used-reserved-variable-names
 
 **Logged**: 2026-07-11T05:17:26Z
